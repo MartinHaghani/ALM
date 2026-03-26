@@ -12,6 +12,11 @@ topics:
     timeout : 0.5
     priority: 10
   -
+    name    : teleop
+    topic   : joy_vel
+    timeout : 0.5
+    priority: 90
+  -
     name    : logic
     topic   : logic_vel
     timeout : 0.5
