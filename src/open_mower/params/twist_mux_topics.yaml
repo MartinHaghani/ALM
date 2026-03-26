@@ -26,3 +26,5 @@ topics:
     topic   : override_vel
     timeout : 0.5
     priority: 100
+
+locks: []
