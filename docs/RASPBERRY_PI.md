@@ -12,7 +12,7 @@ This guide targets:
 - manual `git pull` plus rebuild and restart
 - the repo’s legacy-style container startup path, because a plain Pi does not provide the OSv2 web and MQTT services expected by `docker/Dockerfile`
 
-In the current Pi-dev workflow, the container provides its own `nginx`, `mosquitto`, and `rosbridge` services so the rover can expose the checked-in web bundle directly from the Pi.
+In the current Pi-dev workflow, the main container provides `nginx` and `rosbridge`, and the startup script launches a host-networked `eclipse-mosquitto` sidecar so the rover can expose the checked-in web bundle directly from the Pi.
 
 This guide does not assume OpenMower OS v2 is already installed on the Pi.
 
@@ -114,6 +114,10 @@ These scripts support the same environment variables:
 - `OPEN_MOWER_IMAGE`
   - default: `open_mower_ros:pi-dev`
   - override this only if you intentionally want a different runtime image
+- `OPEN_MOWER_MQTT_IMAGE`
+  - default: `eclipse-mosquitto:latest`
+- `OPEN_MOWER_MQTT_CONFIG`
+  - default: `$OPEN_MOWER_REPO_DIR/docker/assets/mosquitto.conf`
 - `OPEN_MOWER_REPO_DIR`
   - default: repo root derived from the script location
 - `OPEN_MOWER_CONFIG_FILE`
@@ -122,6 +126,8 @@ These scripts support the same environment variables:
   - default: `$HOME/.ros`
 - `OPEN_MOWER_CONTAINER_NAME`
   - default: `open_mower_local`
+- `OPEN_MOWER_MQTT_CONTAINER_NAME`
+  - default: `open_mower_mosquitto`
 
 They also intentionally:
 
@@ -132,7 +138,7 @@ They also intentionally:
 - start the local-checkout runtime through `docker/openmower_entrypoint.pi.sh` from the mounted repo
 - let `docker/openmower_entrypoint.pi.sh` install small missing runtime libraries before delegating to `docker/openmower_entrypoint.legacy.sh`
 - serve the checked-in `web/` bundle through nginx on port `8080`
-- expose MQTT on port `1883` and MQTT-over-WebSockets on port `9001`
+- start an `eclipse-mosquitto` sidecar with host networking so MQTT is available on port `1883` and MQTT-over-WebSockets is available on port `9001`
 - start `rosbridge` by default through `open_mower.launch` unless `OM_NO_ROSBRIDGE=True`
 - generate a local `version_info.env` in the repo root when the bind-mounted checkout does not already have one
 

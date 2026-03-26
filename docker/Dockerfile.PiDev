@@ -7,7 +7,6 @@ RUN apt-get update && \
       build-essential \
       ca-certificates \
       git \
-      mosquitto \
       nginx \
       pkg-config \
       python3-venv \
@@ -28,6 +27,5 @@ RUN rosdep install --from-paths src --ignore-src --simulate | \
 RUN mkdir -p /config
 COPY docker/assets/rosconsole.config /config/rosconsole.config
 COPY docker/assets/nginx.conf /etc/nginx/conf.d/default.conf
-COPY docker/assets/mosquitto.conf /etc/mosquitto/mosquitto.conf
 
 RUN rm -rf /var/www /etc/nginx/sites-enabled/*

@@ -12,6 +12,7 @@ open_mower_require_env
 open_mower_ensure_image
 
 docker rm -f "$OPEN_MOWER_CONTAINER_NAME" >/dev/null 2>&1 || true
+open_mower_start_mqtt_sidecar
 
 open_mower_docker_run \
   --name "$OPEN_MOWER_CONTAINER_NAME" \

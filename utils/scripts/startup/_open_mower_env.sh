@@ -10,10 +10,13 @@ open_mower_resolve_env() {
   repo_default="$(cd "$script_dir/../../.." && pwd)"
 
   export OPEN_MOWER_IMAGE="${OPEN_MOWER_IMAGE:-$(open_mower_default_image)}"
+  export OPEN_MOWER_MQTT_IMAGE="${OPEN_MOWER_MQTT_IMAGE:-eclipse-mosquitto:latest}"
   export OPEN_MOWER_REPO_DIR="${OPEN_MOWER_REPO_DIR:-$repo_default}"
   export OPEN_MOWER_CONFIG_FILE="${OPEN_MOWER_CONFIG_FILE:-$HOME/mower_config.sh}"
   export OPEN_MOWER_ROS_HOME="${OPEN_MOWER_ROS_HOME:-$HOME/.ros}"
   export OPEN_MOWER_CONTAINER_NAME="${OPEN_MOWER_CONTAINER_NAME:-open_mower_local}"
+  export OPEN_MOWER_MQTT_CONTAINER_NAME="${OPEN_MOWER_MQTT_CONTAINER_NAME:-open_mower_mosquitto}"
+  export OPEN_MOWER_MQTT_CONFIG="${OPEN_MOWER_MQTT_CONFIG:-$OPEN_MOWER_REPO_DIR/docker/assets/mosquitto.conf}"
   export OPEN_MOWER_ROSCONSOLE_CONFIG="${OPEN_MOWER_ROSCONSOLE_CONFIG:-$OPEN_MOWER_REPO_DIR/docker/assets/rosconsole.config}"
 }
 
@@ -31,6 +34,11 @@ open_mower_require_env() {
 
   if [ ! -f "$OPEN_MOWER_ROSCONSOLE_CONFIG" ]; then
     echo "OPEN_MOWER_ROSCONSOLE_CONFIG does not exist: $OPEN_MOWER_ROSCONSOLE_CONFIG" >&2
+    exit 1
+  fi
+
+  if [ ! -f "$OPEN_MOWER_MQTT_CONFIG" ]; then
+    echo "OPEN_MOWER_MQTT_CONFIG does not exist: $OPEN_MOWER_MQTT_CONFIG" >&2
     exit 1
   fi
 
@@ -90,4 +98,18 @@ open_mower_docker_run() {
       --network host \
       "$@"
   fi
+}
+
+open_mower_start_mqtt_sidecar() {
+  docker rm -f "$OPEN_MOWER_MQTT_CONTAINER_NAME" >/dev/null 2>&1 || true
+  docker run \
+    -d \
+    --name "$OPEN_MOWER_MQTT_CONTAINER_NAME" \
+    --network host \
+    -v "$OPEN_MOWER_MQTT_CONFIG:/mosquitto/config/mosquitto.conf:ro" \
+    "$OPEN_MOWER_MQTT_IMAGE" >/dev/null
+}
+
+open_mower_stop_mqtt_sidecar() {
+  docker rm -f "$OPEN_MOWER_MQTT_CONTAINER_NAME" >/dev/null 2>&1 || true
 }

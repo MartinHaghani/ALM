@@ -75,8 +75,9 @@ Observed behavior:
 
 - intended for the plain-Pi local-checkout workflow under `utils/scripts/startup/`
 - installs small missing runtime packages when the pulled image lags behind the checked-out workspace
-- copies the runtime nginx and mosquitto configs from `docker/assets/`
-- starts nginx and mosquitto inside the Pi-dev container before launching ROS
+- copies the runtime nginx config from `docker/assets/`
+- starts nginx inside the Pi-dev container before launching ROS
+- relies on the Pi startup scripts to launch an `eclipse-mosquitto` sidecar with `docker/assets/mosquitto.conf`
 - then delegates to `docker/openmower_entrypoint.legacy.sh`
 
 ## Build workflow evidence
@@ -116,10 +117,11 @@ This file looks like a companion integration setup for development or testing, n
 
 Observed from `docker/Dockerfile.PiDev` and `docker/openmower_entrypoint.pi.sh`:
 
-- The Pi-dev image now installs `nginx` and `mosquitto` directly.
-- The Pi-dev entrypoint starts those services before launching `open_mower`.
+- The Pi-dev image installs `nginx` directly.
+- The Pi-dev entrypoint starts nginx before launching `open_mower`.
+- `utils/scripts/startup/start_open_mower_local.sh` also starts an `eclipse-mosquitto:latest` sidecar using `docker/assets/mosquitto.conf`.
 - The checked-in `web/` bundle is therefore reachable from the Pi-dev runtime through nginx on port `8080`.
-- MQTT is available on port `1883`, and MQTT-over-WebSockets is available on port `9001`.
+- MQTT is available from the sidecar on port `1883`, and MQTT-over-WebSockets is available from the sidecar on port `9001`.
 - `open_mower.launch` also conditionally includes `rosbridge` unless `OM_NO_ROSBRIDGE=True`.
 
 ## Cautions when editing

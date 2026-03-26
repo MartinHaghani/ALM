@@ -18,7 +18,7 @@ install_runtime_packages() {
   local missing_packages package file
   missing_packages=""
 
-  for package in libcrypto++6 mosquitto nginx; do
+  for package in libcrypto++6 nginx; do
     if ! dpkg -s "$package" >/dev/null 2>&1; then
       missing_packages="$missing_packages $package"
     fi
@@ -45,15 +45,13 @@ install_runtime_packages() {
 install_runtime_packages
 
 configure_web_services() {
-  mkdir -p /var/lib/nginx /run/nginx /var/log/nginx /var/log/mosquitto
+  mkdir -p /var/lib/nginx /run/nginx /var/log/nginx
   rm -rf /etc/nginx/sites-enabled/*
   cp /opt/open_mower_ros/docker/assets/nginx.conf /etc/nginx/conf.d/default.conf
-  cp /opt/open_mower_ros/docker/assets/mosquitto.conf /etc/mosquitto/mosquitto.conf
 }
 
 start_web_services() {
   service nginx start
-  service mosquitto start
 }
 
 configure_web_services

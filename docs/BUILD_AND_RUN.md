@@ -124,9 +124,10 @@ The supported Pi scripts are:
 Observed plain-Pi detail:
 
 - `build_open_mower_pi_image.sh` builds the local `open_mower_ros:pi-dev` image from `docker/Dockerfile.PiDev`.
-- `docker/Dockerfile.PiDev` derives from `ros:noetic-ros-base-focal`, installs this repo's apt-level ROS dependencies, and includes `nginx` plus `mosquitto` for the plain-Pi workflow.
+- `docker/Dockerfile.PiDev` derives from `ros:noetic-ros-base-focal`, installs this repo's apt-level ROS dependencies, and includes `nginx` for the plain-Pi workflow.
 - `start_open_mower_local.sh` launches through the repo's `docker/openmower_entrypoint.pi.sh` inside the bind-mounted checkout.
-- `docker/openmower_entrypoint.pi.sh` installs small missing runtime libraries when needed, starts `nginx` and `mosquitto`, then delegates to `docker/openmower_entrypoint.legacy.sh` so legacy `mower_config.sh` values become the `MOWER`, `ESC_TYPE`, and related runtime environment expected by `open_mower.launch`.
+- `docker/openmower_entrypoint.pi.sh` installs small missing runtime libraries when needed, starts `nginx`, then delegates to `docker/openmower_entrypoint.legacy.sh` so legacy `mower_config.sh` values become the `MOWER`, `ESC_TYPE`, and related runtime environment expected by `open_mower.launch`.
+- `start_open_mower_local.sh` also starts an `eclipse-mosquitto:latest` sidecar with host networking and `docker/assets/mosquitto.conf`.
 - `open_mower.launch` now includes `rosbridge` by default in this workflow unless `OM_NO_ROSBRIDGE=True`.
 
 ## Development companion services under `docker/`
