@@ -75,6 +75,8 @@ Observed behavior:
 
 - intended for the plain-Pi local-checkout workflow under `utils/scripts/startup/`
 - installs small missing runtime packages when the pulled image lags behind the checked-out workspace
+- copies the runtime nginx and mosquitto configs from `docker/assets/`
+- starts nginx and mosquitto inside the Pi-dev container before launching ROS
 - then delegates to `docker/openmower_entrypoint.legacy.sh`
 
 ## Build workflow evidence
@@ -109,6 +111,16 @@ Observed services:
 - `etherbridge`
 
 This file looks like a companion integration setup for development or testing, not the main runtime image definition.
+
+## Pi-dev image notes
+
+Observed from `docker/Dockerfile.PiDev` and `docker/openmower_entrypoint.pi.sh`:
+
+- The Pi-dev image now installs `nginx` and `mosquitto` directly.
+- The Pi-dev entrypoint starts those services before launching `open_mower`.
+- The checked-in `web/` bundle is therefore reachable from the Pi-dev runtime through nginx on port `8080`.
+- MQTT is available on port `1883`, and MQTT-over-WebSockets is available on port `9001`.
+- `open_mower.launch` also conditionally includes `rosbridge` unless `OM_NO_ROSBRIDGE=True`.
 
 ## Cautions when editing
 

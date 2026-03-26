@@ -12,6 +12,8 @@ This guide targets:
 - manual `git pull` plus rebuild and restart
 - the repo’s legacy-style container startup path, because a plain Pi does not provide the OSv2 web and MQTT services expected by `docker/Dockerfile`
 
+In the current Pi-dev workflow, the container provides its own `nginx`, `mosquitto`, and `rosbridge` services so the rover can expose the checked-in web bundle directly from the Pi.
+
 This guide does not assume OpenMower OS v2 is already installed on the Pi.
 
 ## Recommended layout on the Pi
@@ -129,6 +131,9 @@ They also intentionally:
 - mount the legacy config file into `/config/mower_config.sh`
 - start the local-checkout runtime through `docker/openmower_entrypoint.pi.sh` from the mounted repo
 - let `docker/openmower_entrypoint.pi.sh` install small missing runtime libraries before delegating to `docker/openmower_entrypoint.legacy.sh`
+- serve the checked-in `web/` bundle through nginx on port `8080`
+- expose MQTT on port `1883` and MQTT-over-WebSockets on port `9001`
+- start `rosbridge` by default through `open_mower.launch` unless `OM_NO_ROSBRIDGE=True`
 - generate a local `version_info.env` in the repo root when the bind-mounted checkout does not already have one
 
 ## First run on the Pi
@@ -152,6 +157,14 @@ If you want logs from an already running container:
 ```bash
 ~/open_mower_ros/utils/scripts/startup/logs_open_mower_local.sh
 ```
+
+Expected service endpoints after startup:
+
+- `http://rpi4.local:8080/` for the checked-in web bundle
+- `ws://rpi4.local:9090/` for rosbridge
+- `ws://rpi4.local:9002/` for `xbot_remote`
+- `mqtt://rpi4.local:1883` for MQTT
+- `ws://rpi4.local:9001/` for MQTT-over-WebSockets
 
 To stop the runtime container:
 
