@@ -45,6 +45,11 @@
 #include "std_msgs/Bool.h"
 #include "std_msgs/Empty.h"
 
+namespace {
+constexpr const char* kLogicReconfigureService = "/mower_logic/set_parameters";
+constexpr const char* kPowerReconfigureService = "/ll/services/power/set_parameters";
+}
+
 ros::Publisher status_pub;
 ros::Publisher power_pub;
 ros::Publisher emergency_pub;
@@ -600,8 +605,12 @@ void handleLowLevelConfig(const uint8_t* buffer, const size_t size) {
   mower_logic_config.shutdown_esc_max_pitch = getNewSetChanged<int>(mower_logic_config.shutdown_esc_max_pitch, llhl_config.shutdown_esc_max_pitch, logic_config_dirty);
   // clang-format on
 
-  if (logic_config_dirty) reconfigClient->setConfiguration(mower_logic_config);
-  if (power_config_dirty) powerReconfigClient->setConfiguration(power_config);
+  if (logic_config_dirty && ros::service::exists(kLogicReconfigureService, false)) {
+    reconfigClient->setConfiguration(mower_logic_config);
+  }
+  if (power_config_dirty && powerReconfigClient != nullptr && ros::service::exists(kPowerReconfigureService, false)) {
+    powerReconfigClient->setConfiguration(power_config);
+  }
 }
 
 void handleLowLevelStatus(struct ll_status* status) {
@@ -720,7 +729,11 @@ int main(int argc, char** argv) {
 
   power_config = ll::PowerConfig::__getDefault__();
   power_config.__fromServer__(powerParamNh);
-  powerReconfigClient = new dynamic_reconfigure::Client<ll::PowerConfig>("/ll/services/power", powerReconfigCB);
+  if (ros::service::exists(kPowerReconfigureService, false)) {
+    powerReconfigClient = new dynamic_reconfigure::Client<ll::PowerConfig>("/ll/services/power", powerReconfigCB);
+  } else {
+    powerReconfigClient = nullptr;
+  }
 
   std::string ll_serial_port_name;
   if (!paramNh.getParam("ll_serial_port", ll_serial_port_name)) {

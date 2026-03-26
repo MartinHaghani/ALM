@@ -27,7 +27,7 @@ export OM_DATUM_LAT=48.CHANGEME
 export OM_DATUM_LONG=11.CHANGEME
 
 # NTRIP Settings
-# Set to False if using external radio plugged into the Ardusimple board.
+# Set to False if using external radio plugged into the Ardusimple board or OM_USE_RTCM_TCP=True below.
 export OM_USE_NTRIP=True
 export OM_NTRIP_HOSTNAME=192.168.178.55
 export OM_NTRIP_PORT=2101
@@ -36,6 +36,12 @@ export OM_NTRIP_PASSWORD=gps
 export OM_NTRIP_ENDPOINT=BASE1
 export OM_NTRIP_RECONNECT_WAIT_SECONDS=5
 export OM_NTRIP_RECONNECT_MAX=99999
+
+# Raw RTCM over TCP Settings
+# Use this instead of NTRIP if your correction source exposes RTCM 3 on a plain TCP socket.
+# export OM_USE_RTCM_TCP=False
+# export OM_RTCM_TCP_HOSTNAME="rp3s.local"
+# export OM_RTCM_TCP_PORT=5016
 
 ################################
 ## Hardware Specific Settings ##

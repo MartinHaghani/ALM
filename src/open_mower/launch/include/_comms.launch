@@ -14,13 +14,13 @@
         <node pkg="xbot_driver_gps" type="driver_gps_node" name="gps"
                 ns="ll/services"
                 output="screen"
-                respawn="true"
+                respawn="$(eval optenv('OM_GPS_RESPAWN', 'True').lower() == 'true')"
                 respawn_delay="5"
                 unless="$(optenv OM_NO_GPS False)">
-            <remap from="/ll/services/rtcm" to="/ll/position/gps/rtcm"/>
-            <remap from="/nmea" to="/ll/position/gps/nmea"/>
-            <remap from="~xb_pose" to="/ll/position/gps"/>
-            <remap from="~wheel_ticks" to="/mower/wheel_ticks"/>
+            <param name="rtcm_topic" value="/ll/position/gps/rtcm"/>
+            <param name="nmea_topic" value="/ll/position/gps/nmea"/>
+            <param name="xb_pose_topic" value="/ll/position/gps"/>
+            <param name="wheel_ticks_topic" value="/mower/wheel_ticks"/>
         </node>
 
     </group>
@@ -34,8 +34,20 @@
         </group>
     </group>
     <group unless="$(optenv OM_NO_GPS False)">
-    <!-- NTRIP for both: v1 and v2 -->
-        <include if="$(optenv OM_USE_NTRIP True)" file="$(find open_mower)/launch/include/_ntrip_client.launch"/>
+    <!-- Correction input for both: v1 and v2 -->
+        <include if="$(eval optenv('OM_USE_NTRIP', 'True').lower() == 'true' and optenv('OM_USE_RTCM_TCP', 'False').lower() != 'true')"
+                 file="$(find open_mower)/launch/include/_ntrip_client.launch"/>
+        <node if="$(eval optenv('OM_USE_RTCM_TCP', 'False').lower() == 'true')"
+              pkg="open_mower"
+              type="rtcm_tcp_bridge.py"
+              name="rtcm_tcp_bridge"
+              output="screen"
+              respawn="true"
+              respawn_delay="10">
+            <param name="host" value="$(optenv OM_RTCM_TCP_HOSTNAME 127.0.0.1)"/>
+            <param name="port" value="$(optenv OM_RTCM_TCP_PORT 5016)"/>
+            <remap from="rtcm" to="/ll/position/gps/rtcm"/>
+        </node>
     </group>
 
 </launch>

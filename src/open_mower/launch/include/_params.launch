@@ -37,6 +37,7 @@
         <rosparam unless="$(eval env('MOWER')=='CUSTOM')"
                   ns="ll"
                   file="$(find open_mower)/params/hardware_specific/$(env MOWER)/comms_general_params.yaml"/>
+        <param if="$(eval optenv('OM_LL_SERIAL_PORT')!='')" name="ll/ll_serial_port" value="$(optenv OM_LL_SERIAL_PORT)"/>
         <rosparam unless="$(eval env('MOWER')=='CUSTOM')"
                   ns="ll/services/diff_drive"
                   file="$(find open_mower)/params/hardware_specific/$(env MOWER)/comms_$(env ESC_TYPE)_params.yaml"/>
@@ -70,6 +71,8 @@
                value="$(optenv OM_GPS_TCP_HOSTNAME 127.0.0.1)"/>
         <param if="$(eval optenv('OM_GPS_DEVICE_TYPE')=='tcp')" name="ll/services/gps/tcp_port"
                value="$(optenv OM_GPS_TCP_PORT 2102)" type="string"/>
+        <param if="$(eval optenv('OM_GPS_DEVICE_TYPE')=='file')" name="ll/services/gps/filename"
+               value="$(optenv OM_GPS_FILENAME /dev/null)"/>
         <param name="ll/services/gps/mode" value="absolute" unless="$(env OM_USE_RELATIVE_POSITION)"/>
         <param name="ll/services/gps/mode" value="relative" if="$(env OM_USE_RELATIVE_POSITION)"/>
         <param name="ll/services/gps/protocol" value="$(optenv OM_GPS_PROTOCOL UBX)"/>
@@ -87,11 +90,11 @@
         <param name="xbot_positioning/debug" value="false"/>
 
         <!-- ntrip_client -->
-        <param name="ntrip_client/host" value="$(env OM_NTRIP_HOSTNAME)"/>
-        <param name="ntrip_client/port" value="$(env OM_NTRIP_PORT)"/>
-        <param name="ntrip_client/mountpoint" value="$(env OM_NTRIP_ENDPOINT)"/>
-        <param name="ntrip_client/username" value="$(env OM_NTRIP_USER)"/>
-        <param name="ntrip_client/password" value="$(env OM_NTRIP_PASSWORD)"/>
+        <param name="ntrip_client/host" value="$(optenv OM_NTRIP_HOSTNAME)"/>
+        <param name="ntrip_client/port" value="$(optenv OM_NTRIP_PORT)"/>
+        <param name="ntrip_client/mountpoint" value="$(optenv OM_NTRIP_ENDPOINT)"/>
+        <param name="ntrip_client/username" value="$(optenv OM_NTRIP_USER)"/>
+        <param name="ntrip_client/password" value="$(optenv OM_NTRIP_PASSWORD)"/>
         <param name="ntrip_client/reconnect_attempt_wait_seconds" value="$(optenv OM_NTRIP_RECONNECT_WAIT_SECONDS 5)"/>
         <param name="ntrip_client/reconnect_attempt_max" value="$(optenv OM_NTRIP_RECONNECT_MAX 99999)"/>
 

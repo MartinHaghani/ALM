@@ -1,16 +1,17 @@
 #!/bin/bash
+set -euo pipefail
 
-# Opens a shell inside the docker container
+# Open a shell inside the Pi runtime image with the local checkout mounted in.
 
-docker run \
-	-v $HOME/mower_config.sh:/config/mower_config.sh \
-	-v $HOME/open_mower_ros:/opt/open_mower_ros\
-	--device /dev/ttyAMA0:/dev/ttyAMA0\
-        --device /dev/ttyAMA1:/dev/ttyAMA1\
-        --device /dev/ttyAMA2:/dev/ttyAMA2\
-        --device /dev/ttyAMA3:/dev/ttyAMA3\
-        --device /dev/ttyAMA4:/dev/ttyAMA4\
-	--network="host"\
-	-it\
-	ghcr.io/clemenselflein/open_mower_ros:releases-testing\
-	/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/_open_mower_env.sh"
+
+open_mower_resolve_env
+open_mower_require_env
+open_mower_ensure_image
+
+open_mower_docker_run \
+  --rm \
+  --entrypoint /bin/bash \
+  "$OPEN_MOWER_IMAGE"

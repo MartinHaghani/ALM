@@ -25,6 +25,16 @@ If your robot runs an old version of OpenMower OS v1 (Legacy): use the legacy im
 The OS doesn't provide web and MQTT services, so the image contains nginx and mosquitto to provide these services inside the container.
 The Docker images have a `-legacy` suffix or `releases-` prefix: (e.g. `releases-edge`, `v1.2.3-legacy`).
 
+## Documentation
+
+For repo-specific, maintained contributor and agent docs, start with:
+
+- [docs/README.md](docs/README.md)
+- [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md)
+- [docs/RASPBERRY_PI.md](docs/RASPBERRY_PI.md)
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+
 ## Getting started
 
 ### Running on your machine

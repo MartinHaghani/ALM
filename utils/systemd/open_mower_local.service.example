@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenMower local checkout runtime
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=<user>
+WorkingDirectory=/home/<user>/open_mower_ros
+Environment=OPEN_MOWER_REPO_DIR=/home/<user>/open_mower_ros
+Environment=OPEN_MOWER_CONFIG_FILE=/home/<user>/mower_config.sh
+Environment=OPEN_MOWER_ROS_HOME=/home/<user>/.ros
+ExecStart=/home/<user>/open_mower_ros/utils/scripts/startup/start_open_mower_local.sh
+ExecStop=/home/<user>/open_mower_ros/utils/scripts/startup/stop_open_mower_local.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

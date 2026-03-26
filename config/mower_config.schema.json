@@ -94,7 +94,7 @@
           }
         },
         "NTRIP": {
-          "title": "NTRIP Settings",
+          "title": "Correction Settings",
           "type": "object",
           "properties": {
             "OM_USE_NTRIP": {
@@ -103,6 +103,13 @@
               "title": "Use Ntrip for receiving corrections",
               "description": "Set to False if using an external radio.",
               "x-environment-variable": "OM_USE_NTRIP"
+            },
+            "OM_USE_RTCM_TCP": {
+              "type": "boolean",
+              "default": false,
+              "title": "Use raw RTCM over TCP",
+              "description": "Set to True to read RTCM 3 corrections from a plain TCP socket instead of the built-in NTRIP client.",
+              "x-environment-variable": "OM_USE_RTCM_TCP"
             }
           },
           "allOf": [
@@ -164,6 +171,33 @@
                     "default": "99999",
                     "description": "The maximum number of times the NTRIP client retries",
                     "x-environment-variable": "OM_NTRIP_RECONNECT_MAX"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "OM_USE_RTCM_TCP": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "OM_RTCM_TCP_HOSTNAME": {
+                    "type": "string",
+                    "title": "RTCM TCP Hostname",
+                    "description": "Hostname or IP of the raw RTCM 3 TCP stream.",
+                    "default": "your-rtcm-host",
+                    "x-environment-variable": "OM_RTCM_TCP_HOSTNAME"
+                  },
+                  "OM_RTCM_TCP_PORT": {
+                    "type": "number",
+                    "title": "RTCM TCP Port",
+                    "default": 5016,
+                    "description": "Port of the raw RTCM 3 TCP stream.",
+                    "x-environment-variable": "OM_RTCM_TCP_PORT"
                   }
                 }
               }

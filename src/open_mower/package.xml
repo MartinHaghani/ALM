@@ -22,6 +22,8 @@
 
   <exec_depend>mower_msgs</exec_depend>
   <exec_depend>mower_simulation</exec_depend>
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
   <exec_depend>joy</exec_depend>
   <exec_depend>joy_teleop</exec_depend>
   <exec_depend>teleop_twist_joy</exec_depend>
@@ -32,6 +34,7 @@
   <exec_depend>ublox</exec_depend>
   <exec_depend>imu_tools</exec_depend>
   <exec_depend>imu_filter_madgwick</exec_depend>
+  <exec_depend>ntrip_client</exec_depend>
   <exec_depend>twist_mux</exec_depend>
   <exec_depend>rtcm_msgs</exec_depend>
   <exec_depend>rosbag_snapshot</exec_depend>
