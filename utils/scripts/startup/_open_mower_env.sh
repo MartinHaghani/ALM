@@ -63,9 +63,6 @@ open_mower_ensure_version_info() {
   local version_info_file version
 
   version_info_file="$OPEN_MOWER_REPO_DIR/version_info.env"
-  if [ -f "$version_info_file" ]; then
-    return
-  fi
 
   version="v0.0.0"
   if command -v git >/dev/null 2>&1 && git -C "$OPEN_MOWER_REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
