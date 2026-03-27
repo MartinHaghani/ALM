@@ -34,6 +34,7 @@ For a fast orientation pass, read in this order:
 - [ARCHITECTURE.md](ARCHITECTURE.md): launch-composed runtime and package roles.
 - [BUILD_AND_RUN.md](BUILD_AND_RUN.md): local build, launch, development containers, and runtime images.
 - [RASPBERRY_PI.md](RASPBERRY_PI.md): plain Raspberry Pi OS bring-up and manual update loop.
+- [MOWRATOR_MIGRATION.md](MOWRATOR_MIGRATION.md): staged Flipsky-based hardware migration for the custom `Mowrator` profile.
 - [CONFIGURATION.md](CONFIGURATION.md): config schema, deprecated shell example, YAML and env loading.
 - [PACKAGES.md](PACKAGES.md): package inventory for `src/` and important `src/lib/` packages.
 - [DOCKER.md](DOCKER.md): runtime versus development container behavior.

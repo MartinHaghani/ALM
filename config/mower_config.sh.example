@@ -49,6 +49,7 @@ export OM_NTRIP_RECONNECT_MAX=99999
 
 # The type of mower you're using, used to get some hardware parameters automatically
 # Currently supported:
+# Mowrator (stage-1 Flipsky migration profile)
 # YardForce500
 # YardForceSA650
 # CUSTOM (put your configs in ~/mower_params/)

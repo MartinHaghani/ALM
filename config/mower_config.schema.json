@@ -25,6 +25,7 @@
           "type": "string",
           "title": "Mower Model",
           "enum": [
+            "Mowrator",
             "YardForce500",
             "YardForceSA650",
             "CUSTOM"
