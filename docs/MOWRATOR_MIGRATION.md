@@ -17,6 +17,7 @@ Current stage-1 assumptions:
 - left and right drive motors: 14 poles, configured as `motor_pole_pairs: 7`
 - mower blade remains wired in the profile, but stage 1 keeps `OM_ENABLE_MOWER=false`
 - geometry, wheel calibration, and GPS antenna offsets remain at the current `YardForce500` values for now
+- the current repo VESC UART path uses `115200` baud, so the Flipsky drive ESC UART settings must match that existing driver expectation
 
 Recommended stage-1 config:
 
@@ -36,6 +37,7 @@ Bench-test expectations:
 - verify the mower ESC may be visible on `/dev/ttyAMA4`, but the blade does not spin because mowing is disabled
 - if a drive wheel spins backward, correct direction in VESC Tool or wiring before changing code
 - if a drive ESC does not connect, validate UART and VESC Tool setup before changing the ROS driver path
+- if the drive Flipskys stay disconnected while the mower ESC connects, validate that the drive ESCs are powered, not held off by dock or charging state, and configured for normal VESC UART behavior at `115200`
 
 ## Stage 2: full behavior migration
 
