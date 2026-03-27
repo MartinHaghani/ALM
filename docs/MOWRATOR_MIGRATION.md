@@ -15,6 +15,7 @@ Current stage-1 assumptions:
 - right drive ESC: `/dev/ttyAMA3`
 - mower ESC: `/dev/ttyAMA4`
 - left and right drive motors: 14 poles, configured as `motor_pole_pairs: 7`
+- stage 1 overrides the inherited YardForce right-drive inversion, so both drive ESCs use `invert_direction: false`
 - mower blade remains wired in the profile, but stage 1 keeps `OM_ENABLE_MOWER=false`
 - geometry, wheel calibration, and GPS antenna offsets remain at the current `YardForce500` values for now
 - the current repo VESC UART path uses `115200` baud, so the Flipsky drive ESC UART settings must match that existing driver expectation
@@ -38,6 +39,7 @@ Bench-test expectations:
 - if a drive wheel spins backward, correct direction in VESC Tool or wiring before changing code
 - if a drive ESC does not connect, validate UART and VESC Tool setup before changing the ROS driver path
 - if the drive Flipskys stay disconnected while the mower ESC connects, validate that the drive ESCs are powered, not held off by dock or charging state, and configured for normal VESC UART behavior at `115200`
+- if a drive wheel direction is wrong, change the `invert_direction` flag in the `Mowrator` profile before touching the shared VESC transport code
 
 ## Stage 2: full behavior migration
 

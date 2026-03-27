@@ -79,6 +79,8 @@ float speed_l = 0, speed_r = 0, speed_mow = 0, target_speed_mow = 0;
 // Ticks / m and wheel distance for this robot
 double wheel_ticks_per_m = 0.0;
 double wheel_distance_m = 0.0;
+bool left_xesc_invert_direction = false;
+bool right_xesc_invert_direction = true;
 
 // LL/HL configuration
 struct ll_high_level_config llhl_config;
@@ -141,10 +143,8 @@ void publishActuators() {
   if (mow_xesc_interface) {
     mow_xesc_interface->setDutyCycle(speed_mow);
   }
-  // We need to invert the speed, because the ESC has the same config as the left one, so the motor is running in the
-  // "wrong" direction
-  left_xesc_interface->setDutyCycle(speed_l);
-  right_xesc_interface->setDutyCycle(-speed_r);
+  left_xesc_interface->setDutyCycle(left_xesc_invert_direction ? -speed_l : speed_l);
+  right_xesc_interface->setDutyCycle(right_xesc_invert_direction ? -speed_r : speed_r);
 
   struct ll_heartbeat heartbeat = {.type = PACKET_ID_LL_HEARTBEAT,
                                    // If high level has emergency and LL does not know yet, we set it
@@ -288,8 +288,10 @@ void publishStatus() {
     last_ticks_r = right_status.state.tacho_absolute;
     has_ticks = true;
   } else {
-    bool wheel_direction_l = left_status.state.direction && abs(left_status.state.duty_cycle) > 0;
-    bool wheel_direction_r = !right_status.state.direction && abs(right_status.state.duty_cycle) > 0;
+    bool wheel_direction_l =
+        (left_status.state.direction != left_xesc_invert_direction) && abs(left_status.state.duty_cycle) > 0;
+    bool wheel_direction_r =
+        (right_status.state.direction != right_xesc_invert_direction) && abs(right_status.state.duty_cycle) > 0;
 
     double dt = (status_msg.stamp - last_ticks_stamp).toSec();
 
@@ -743,9 +745,13 @@ int main(int argc, char** argv) {
 
   paramNh.getParam("services/diff_drive/ticks_per_m", wheel_ticks_per_m);
   paramNh.getParam("services/diff_drive/wheel_distance_m", wheel_distance_m);
+  leftParamNh.param("invert_direction", left_xesc_invert_direction, false);
+  rightParamNh.param("invert_direction", right_xesc_invert_direction, true);
 
   ROS_INFO_STREAM("Wheel ticks [1/m]: " << wheel_ticks_per_m);
   ROS_INFO_STREAM("Wheel distance [m]: " << wheel_distance_m);
+  ROS_INFO_STREAM("Left drive ESC invert direction: " << (left_xesc_invert_direction ? "true" : "false"));
+  ROS_INFO_STREAM("Right drive ESC invert direction: " << (right_xesc_invert_direction ? "true" : "false"));
 
   speed_l = speed_r = speed_mow = target_speed_mow = 0;
 
