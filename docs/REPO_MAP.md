@@ -48,7 +48,7 @@ Purpose: explain the directory tree, ownership boundaries, and which areas are s
 
 - `src/open_mower/launch/open_mower.launch`: primary runtime composition entrypoint.
 - `src/open_mower/launch/include/_params.launch`: key source for how YAML and environment configuration are loaded.
-- `src/open_mower/params/hardware_specific/`: mower presets and defaults. Includes an observed `Sabo/` preset in addition to `YardForce500`, `YardForceSA650`, and `CUSTOM`.
+- `src/open_mower/params/hardware_specific/`: mower presets and defaults. Includes `Mowrator/`, `YardForce500/`, `YardForceSA650/`, and `CUSTOM/`, plus an observed `Sabo/` preset that is still not exposed in the root config schema.
 - `src/open_mower/config/mower_config.sh.example`: redirect stub pointing contributors to `config/`.
 
 ## Generated, external, and deprecated areas

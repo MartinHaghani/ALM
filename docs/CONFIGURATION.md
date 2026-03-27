@@ -149,7 +149,7 @@ Document this mismatch rather than hiding it. If you change one side, update all
 ### `Sabo` hardware preset drift
 
 - `src/open_mower/params/hardware_specific/Sabo/` exists and includes `default_environment.sh` plus `params_v2.yaml`.
-- `OM_MOWER` in both `config/mower_config.schema.json` and `config/mower_config.sh.example` only lists `YardForce500`, `YardForceSA650`, and `CUSTOM`.
+- `OM_MOWER` in both `config/mower_config.schema.json` and `config/mower_config.sh.example` now lists `Mowrator`, `YardForce500`, `YardForceSA650`, and `CUSTOM`, but still does not expose `Sabo`.
 
 Treat this as observed fork-specific or repo-internal drift until the artifacts are brought back into alignment.
 
