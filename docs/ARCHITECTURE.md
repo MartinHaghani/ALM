@@ -23,6 +23,7 @@ This summary is grounded in:
 - `_comms.launch`: selects `mower_comms_v1` for `HARDWARE_PLATFORM=1` or `mower_comms_v2` for `HARDWARE_PLATFORM=2`, then chooses either the built-in NTRIP client or the raw TCP RTCM bridge for correction input.
 - `_move_base.launch`: starts `mbf_costmap_nav` plus the legacy relay shim, loading costmap and planner YAML from `src/open_mower/params/`.
 - `_localization.launch`: starts `xbot_positioning`.
+- `_terrain.launch`: starts `imu_filter_madgwick` and the `terrain_observer` node that publishes slope, slip, terrain-memory, and controller-adaptation telemetry under `mower_logic/terrain_state`.
 - `_teleop.launch`: starts joystick input and teleop mapping based on the selected gamepad.
 - `_record.launch`: enables rosbag recording or snapshot buffering when the matching environment variables are set.
 
@@ -41,18 +42,19 @@ This summary is grounded in:
 1. Parameters are assembled first from launch-time YAML and environment inputs.
 2. The comms layer exposes low-level mower state and control topics under `/ll/...`.
 3. `xbot_positioning` consumes GPS, IMU, and measured twist data to produce the mower pose.
-4. `mower_map_service` provides map storage, occupancy-grid publication, docking and mowing-area services, and an RPC method named `map.replace`.
-5. `mower_logic` coordinates mower behaviors such as idle, mowing, docking, undocking, and area recording, using `mower_map`, `slic3r_coverage_planner`, MBF actions, and low-level services.
-6. Navigation runs through `mbf_costmap_nav` with configuration loaded from `src/open_mower/params/`.
-7. Operator and UI-facing pieces include teleop input, `xbot_monitoring`, `xbot_remote`, and optional heatmap generation.
+4. `imu_filter_madgwick` filters `/ll/imu/data_raw`, and `terrain_observer` combines filtered attitude, planner debug signals, measured twist, and fused pose to estimate path-relative slope, slip, terrain mode, and terrain-memory risk.
+5. `mower_map_service` provides map storage, occupancy-grid publication, docking and mowing-area services, and an RPC method named `map.replace`.
+6. `mower_logic` coordinates mower behaviors such as idle, mowing, docking, undocking, and area recording, using `mower_map`, `slic3r_coverage_planner`, MBF actions, low-level services, and learned terrain exclusions derived from `terrain_memory.json`.
+7. Navigation runs through `mbf_costmap_nav` with configuration loaded from `src/open_mower/params/`. `ftc_local_planner` now consumes `mower_logic/terrain_state` to adapt speed, lookahead, and recovery behavior on steep slopes.
+8. Operator and UI-facing pieces include teleop input, `xbot_monitoring`, `xbot_remote`, and optional heatmap generation. Monitoring now republishes terrain mode, slope, slip, and risk telemetry through `xbot_msgs/RobotState` and retained MQTT JSON.
 
 ## Package role split
 
-- `open_mower`: orchestration package. It provides launch, params, RViz assets, and a small Python RTCM bridge script for raw TCP correction sources.
-- `mower_logic`: high-level decision-making and mower state transitions.
+- `open_mower`: orchestration package. It provides launch, params, RViz assets, a terrain replay launch for rosbag validation, and a small Python RTCM bridge script for raw TCP correction sources.
+- `mower_logic`: high-level decision-making and mower state transitions, plus the terrain observer, terrain-memory helpers, and monitoring publisher that expose terrain-aware runtime state.
 - `mower_map`: map storage and retrieval plus occupancy-grid and marker publication.
 - `mower_comms_v1` and `mower_comms_v2`: ROS bridges to low-level mower hardware or services.
-- `mower_msgs`: shared ROS message and service definitions.
+- `mower_msgs`: shared ROS message and service definitions, including `TerrainState.msg` for terrain-aware controller telemetry.
 - `mower_simulation`: simulator-side low-level service implementation.
 - `mower_utils`: helper tools for testing and pose conversion.
 

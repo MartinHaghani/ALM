@@ -4,12 +4,12 @@ Purpose: inventory the workspace packages and clarify which ones are first-party
 
 ## Direct packages under `src/`
 
-- `src/open_mower`: orchestration package. It provides launch files, parameter YAML, hardware-specific presets, RViz configs, and the raw TCP RTCM bridge script used by the main comms launch flow.
+- `src/open_mower`: orchestration package. It provides launch files, parameter YAML, hardware-specific presets, RViz configs, the raw TCP RTCM bridge script used by the main comms launch flow, and a `terrain_replay.launch` harness for steep-slope bag playback.
 - `src/mower_comms_v1`: v1 low-level mower comms executable for `HARDWARE_PLATFORM=1`.
 - `src/mower_comms_v2`: v2 ROS bridge built on xBot service interfaces. It consumes the shared JSON definitions under `services/`.
-- `src/mower_logic`: high-level mower behavior package. It defines the `mower_logic` executable, dynamic reconfigure configs, and a separate `monitoring` executable.
+- `src/mower_logic`: high-level mower behavior package. It defines the `mower_logic` executable, dynamic reconfigure configs, a separate `monitoring` executable, the `terrain_observer` executable, and terrain-support utilities for slope projection and learned terrain memory.
 - `src/mower_map`: map service package. It defines messages and services, publishes map topics, persists map data, and exposes an RPC provider.
-- `src/mower_msgs`: shared mower-specific ROS messages and services such as `Status`, `Power`, `HighLevelStatus`, and `HighLevelControlSrv`.
+- `src/mower_msgs`: shared mower-specific ROS messages and services such as `Status`, `Power`, `HighLevelStatus`, `TerrainState`, and `HighLevelControlSrv`.
 - `src/mower_simulation`: simulator-side low-level service implementation. It defines `mower_simulation` and dynamic reconfigure for simulation.
 - `src/mower_utils`: helper package with `planner_test`, `xbot_pose_converter`, a planner test launch file, and RViz configs.
 
@@ -17,14 +17,14 @@ Purpose: inventory the workspace packages and clarify which ones are first-party
 
 ### Planning and navigation
 
-- `src/lib/ftc_local_planner`: follow-the-carrot local planner plugin with dynamic reconfigure, debug topics, and recovery behavior. Observed from its README and CMake targets.
+- `src/lib/ftc_local_planner`: follow-the-carrot local planner plugin with dynamic reconfigure, debug topics, recovery behavior, and the terrain-aware speed/gain/lookahead adaptation path driven by `mower_logic/terrain_state`.
 - `src/lib/slic3r_coverage_planner`: coverage-planning package used by `open_mower.launch` and planner-related tooling.
 
 ### Positioning, monitoring, and remote control
 
 - `src/lib/xbot_driver_gps`: External/Submodule. High-performance u-blox GPS driver with RTCM, IMU, and wheel-tick support, based on its README.
-- `src/lib/xbot_monitoring`: monitoring package providing `xbot_monitoring`, `heatmap_generator`, and an example sensor node.
-- `src/lib/xbot_msgs`: shared xBot message and service package.
+- `src/lib/xbot_monitoring`: monitoring package providing `xbot_monitoring`, `heatmap_generator`, and an example sensor node. In this fork it also republishes terrain telemetry into retained `robot_state/json`.
+- `src/lib/xbot_msgs`: shared xBot message and service package, including the extended `RobotState` message used to surface terrain mode, slope, slip, and terrain-memory risk in the UI path.
 - `src/lib/xbot_positioning`: localization package providing the `xbot_positioning` executable and pose-related services.
 - `src/lib/xbot_remote`: remote command-velocity bridge used by the main launch flow.
 - `src/lib/xbot_rpc`: RPC library plus ROS messages and services used by `mower_map`.

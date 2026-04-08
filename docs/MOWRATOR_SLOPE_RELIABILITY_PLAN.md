@@ -19,7 +19,7 @@ Purpose: track the staged implementation that makes the `Mowrator` mower terrain
 
 ### Pass 0: docs and branch bootstrap
 
-Status: planned
+Status: completed in branch (`f594612`)
 
 Deliverables:
 
@@ -33,7 +33,7 @@ Commit target:
 
 ### Pass 1: control foundation and terrain telemetry
 
-Status: planned
+Status: implemented in branch, awaiting runtime validation
 
 Deliverables:
 
@@ -49,13 +49,21 @@ Acceptance:
 - no control-loop starvation
 - enough evidence to identify where drift begins and in which direction
 
+Implemented notes:
+
+- raises MBF controller cadence to `12 Hz` and aligns local costmap update and publish rates
+- adds `_terrain.launch` with `imu_filter_madgwick` and `terrain_observer`
+- introduces `mower_msgs/TerrainState.msg`
+- extends `monitoring` and `xbot_monitoring` so terrain telemetry reaches `xbot_msgs/RobotState` and retained MQTT JSON
+- adds `terrain_replay.launch` plus unit tests for terrain math and controller modifiers
+
 Commit target:
 
 - `nav: add terrain observer and higher-rate control foundation`
 
 ### Pass 2: adaptive slope-aware controller and recovery
 
-Status: planned
+Status: implemented in branch, awaiting field validation
 
 Deliverables:
 
@@ -70,13 +78,20 @@ Acceptance:
 - no `Robot is far away from global plan` aborts on the validation edge
 - no blade-on stationary wait caused by terrain tracking loss
 
+Implemented notes:
+
+- `ftc_local_planner` now consumes `mower_logic/terrain_state`
+- speed, lookahead, heading bias, and lateral/angular authority are scheduled from terrain state instead of adding slope as a raw PID term
+- terrain recovery freezes control-point advance, reacquires from the nearest forward plan point, and returns a dedicated planner outcome (`110`) when recovery fails
+- docking planner terrain adaptation remains disabled
+
 Commit target:
 
 - `nav: add adaptive slope tracking and recovery`
 
 ### Pass 3: learned terrain intelligence and plan-time modifiers
 
-Status: planned
+Status: implemented in branch, awaiting repeated field validation
 
 Deliverables:
 
@@ -91,9 +106,28 @@ Acceptance:
 - previously troublesome segments stop needing reactive recovery
 - the test lawn can be completed without the mower drifting off the map
 
+Implemented notes:
+
+- `terrain_observer` persists learned evidence in `terrain_memory.json`
+- runtime state now exposes both current-cell and lookahead risk
+- `MowingBehavior::create_mowing_plan` loads learned high-risk cells and converts them into transient hole polygons before coverage planning
+- learned terrain exclusions remain derived from `terrain_memory.json`; `map.json` remains unchanged
+
 Commit target:
 
 - `nav: add learned terrain memory and plan modifiers`
+
+## Validation and current blockers
+
+- Static validation is complete enough for handoff:
+  - parameter and launch wiring updated
+  - terrain message, planner, observer, replay harness, and monitoring path all land in this branch
+  - unit tests were added for terrain math, terrain memory, and planner modifier behavior
+- Full ROS build and runtime validation are still blocked on this workstation as of April 7, 2026:
+  - `catkin_make` is not installed on the host
+  - `/opt/ros` is not present on the host
+  - Docker is installed but the daemon is not running, so the repo dev container could not be started for a containerized build
+- Field-validation acceptance criteria above are therefore still pending on real hardware or a ROS-capable dev environment.
 
 ## Validation log
 
