@@ -22,6 +22,7 @@
 #include <rosbag/view.h>
 
 #include "mower_logic/CheckPoint.h"
+#include "mower_logic/terrain/TerrainMemory.h"
 #include "mower_map/ClearNavPointSrv.h"
 #include "mower_map/GetMowingAreaSrv.h"
 #include "mower_map/SetNavPointSrv.h"
@@ -197,6 +198,26 @@ bool MowingBehavior::create_mowing_plan(int area_index) {
   pathSrv.request.outline_overlap_count = config.outline_overlap_count;
   pathSrv.request.outline = mapSrv.response.area.area;
   pathSrv.request.holes = mapSrv.response.area.obstacles;
+  {
+    const double cell_size = ros::param::param("/terrain_observer/terrain_memory_cell_size", 0.5);
+    const double exclusion_threshold = ros::param::param("/terrain_observer/terrain_memory_exclusion_threshold", 0.80);
+    const double exclusion_buffer = ros::param::param("/terrain_observer/terrain_memory_exclusion_buffer", 0.10);
+    const int max_exclusion_cells = ros::param::param("/terrain_observer/terrain_memory_max_exclusion_cells", 200);
+    const std::string terrain_memory_file =
+        ros::param::param<std::string>("/terrain_observer/terrain_memory_file", "terrain_memory.json");
+
+    mower_logic::terrain::TerrainMemory terrain_memory(cell_size);
+    if (terrain_memory.load(terrain_memory_file)) {
+      auto learned_holes = terrain_memory.buildExclusionPolygons(mapSrv.response.area.area, exclusion_threshold,
+                                                                 exclusion_buffer, max_exclusion_cells);
+      if (!learned_holes.empty()) {
+        ROS_INFO_STREAM("MowingBehavior: Applying " << learned_holes.size()
+                                                    << " learned terrain exclusion polygons from "
+                                                    << terrain_memory_file);
+        pathSrv.request.holes.insert(pathSrv.request.holes.end(), learned_holes.begin(), learned_holes.end());
+      }
+    }
+  }
   pathSrv.request.fill_type = slic3r_coverage_planner::PlanPathRequest::FILL_LINEAR;
   pathSrv.request.outer_offset = config.outline_offset;
   pathSrv.request.distance = config.tool_width;
@@ -536,6 +557,8 @@ bool MowingBehavior::execute_mowing_plan() {
           currentMowingPathIndex = 0;
           // continue with next segment
         } else {
+          auto result = mbfClientExePath->getResult();
+          const uint32_t planner_outcome = result ? result->outcome : 0;
           // we didnt drive all points in the mow path, so we go into pause mode
           // TODO: we should figure out the likely reason for our failure to complete the path
           // if GPS -> PAUSE
@@ -544,7 +567,12 @@ bool MowingBehavior::execute_mowing_plan() {
           // currentMowingPathIndex might be 0 if we never consumed one of the points, we advance at least 1 point
           if (currentMowingPathIndex == 0) currentMowingPathIndex++;
           if (!requested_pause_flag) {
-            ROS_INFO_STREAM("MowingBehavior: (MOW) PAUSED due to MBF Error at " << currentMowingPathIndex);
+            if (planner_outcome == 110) {
+              ROS_WARN_STREAM("MowingBehavior: (MOW) PAUSED after terrain recovery failure at "
+                              << currentMowingPathIndex);
+            } else {
+              ROS_INFO_STREAM("MowingBehavior: (MOW) PAUSED due to MBF Error at " << currentMowingPathIndex);
+            }
             paused = true;
             update_actions();
           }
