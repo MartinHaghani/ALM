@@ -5,12 +5,15 @@ find_package(catkin REQUIRED
         COMPONENTS
             costmap_2d
             dynamic_reconfigure
+            mbf_costmap_core
             nav_core
             nav_msgs
+            mower_msgs
             pluginlib
             roscpp
 		tf
 		tf2
+		tf2_eigen
 		tf2_geometry_msgs
 		tf2_ros
 		geometry_msgs
@@ -54,20 +57,27 @@ catkin_package(
     INCLUDE_DIRS include
     LIBRARIES ftc_local_planner
     CATKIN_DEPENDS
+        costmap_2d
         dynamic_reconfigure
+        geometry_msgs
+        mbf_costmap_core
+        message_runtime
+        mower_msgs
+        nav_core
+        nav_msgs
         pluginlib
         roscpp
+        std_msgs
 		tf
+		tf2
+		tf2_eigen
 		tf2_geometry_msgs
 		tf2_ros
 )
 
-catkin_package(
-		CATKIN_DEPENDS message_runtime
-)
-
 add_library(ftc_local_planner 
 	    src/ftc_planner.cpp
+        src/terrain_control.cpp
         src/oscillation_detector.cpp)
 target_link_libraries(ftc_local_planner ${catkin_LIBRARIES})
 add_dependencies(ftc_local_planner ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
@@ -90,4 +100,11 @@ install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
   PATTERN ".svn" EXCLUDE
 )
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_terrain_control test/test_terrain_control.cpp)
+  if(TARGET test_terrain_control)
+    target_link_libraries(test_terrain_control ftc_local_planner ${catkin_LIBRARIES})
+  endif()
+endif()
  

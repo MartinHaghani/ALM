@@ -22,6 +22,9 @@
 #include "tf2_eigen/tf2_eigen.h"
 #include <mbf_costmap_core/costmap_controller.h>
 #include <visualization_msgs/Marker.h>
+#include <mower_msgs/TerrainState.h>
+
+#include "ftc_local_planner/terrain_control.h"
 
 namespace ftc_local_planner
 {
@@ -57,8 +60,10 @@ namespace ftc_local_planner
         ros::Publisher global_plan_pub;
         ros::Publisher progress_pub;
         ros::Publisher obstacle_marker_pub;
+        ros::Subscriber terrain_state_sub_;
 
         FTCPlannerConfig config;
+        TerrainControlConfig terrain_config_;
 
         Eigen::Affine3d current_control_point;
 
@@ -85,6 +90,14 @@ namespace ftc_local_planner
         uint32_t current_index;
         double current_progress;
         Eigen::Affine3d local_control_point;
+        geometry_msgs::PoseStamped current_robot_pose_;
+        mower_msgs::TerrainState last_terrain_state_;
+        bool have_terrain_state_ = false;
+        TerrainCommandModifiers terrain_modifiers_;
+        bool terrain_recovery_active_ = false;
+        bool terrain_recovery_failure_ = false;
+        ros::Time terrain_recovery_started_;
+        uint32_t terrain_recovery_cycles_ = 0;
 
         /**
          * Private members
@@ -113,6 +126,11 @@ namespace ftc_local_planner
          * @return true if robot oscillates
          */
         bool checkOscillation(geometry_msgs::TwistStamped &cmd_vel);
+        void terrainStateCallback(const mower_msgs::TerrainState::ConstPtr &msg);
+        TerrainControlInput buildTerrainControlInput() const;
+        void refreshTerrainRecovery();
+        void selectRecoveryTarget();
+        void resetTerrainRecovery();
 
         /**
          * @brief publish obstacles on path as marker array.

@@ -1,6 +1,9 @@
 
 #include <ftc_local_planner/ftc_planner.h>
 
+#include <algorithm>
+#include <limits>
+
 #include <pluginlib/class_list_macros.h>
 #include "mbf_msgs/ExePathAction.h"
 
@@ -9,6 +12,7 @@ PLUGINLIB_EXPORT_CLASS(ftc_local_planner::FTCPlanner, mbf_costmap_core::CostmapC
 #define RET_SUCCESS 0
 #define RET_COLLISION 104
 #define RET_BLOCKED 109
+#define RET_TERRAIN_RECOVERY 110
 
 namespace ftc_local_planner
 {
@@ -20,6 +24,7 @@ namespace ftc_local_planner
     void FTCPlanner::initialize(std::string name, tf2_ros::Buffer *tf, costmap_2d::Costmap2DROS *costmap_ros)
     {
         ros::NodeHandle private_nh("~/" + name);
+        ros::NodeHandle nh;
 
         progress_server = private_nh.advertiseService(
             "planner_get_progress", &FTCPlanner::getProgress, this);
@@ -27,6 +32,7 @@ namespace ftc_local_planner
         global_point_pub = private_nh.advertise<geometry_msgs::PoseStamped>("global_point", 1);
         global_plan_pub = private_nh.advertise<nav_msgs::Path>("global_plan", 1, true);
         obstacle_marker_pub = private_nh.advertise<visualization_msgs::Marker>("costmap_marker", 10);
+        terrain_state_sub_ = nh.subscribe("mower_logic/terrain_state", 10, &FTCPlanner::terrainStateCallback, this);
 
         costmap = costmap_ros;
         costmap_map_ = costmap->getCostmap();
@@ -60,6 +66,17 @@ namespace ftc_local_planner
             c.restore_defaults = false;
         }
         config = c;
+        terrain_config_.speed_scale_min = c.terrain_speed_scale_min;
+        terrain_config_.speed_scale_max = c.terrain_speed_scale_max;
+        terrain_config_.heading_bias_scale = c.terrain_heading_bias_scale;
+        terrain_config_.heading_bias_max_rad = c.terrain_heading_bias_max_deg * (M_PI / 180.0);
+        terrain_config_.lat_gain_scale = c.terrain_lat_gain_scale;
+        terrain_config_.ang_gain_scale = c.terrain_ang_gain_scale;
+        terrain_config_.lookahead_scale_min = c.terrain_lookahead_scale_min;
+        terrain_config_.risk_speed_penalty = c.terrain_risk_speed_penalty;
+        terrain_config_.progress_freeze_slip_threshold = c.terrain_progress_freeze_slip_threshold;
+        terrain_config_.recovery_release_slip_threshold = c.terrain_recovery_release_slip_threshold;
+        terrain_config_.recovery_release_lat_error = c.terrain_recovery_release_lat_error;
 
         // just to be sure
         current_movement_speed = config.speed_slow;
@@ -77,6 +94,7 @@ namespace ftc_local_planner
         global_plan = plan;
         current_index = 0;
         current_progress = 0.0;
+        resetTerrainRecovery();
 
         last_time = ros::Time::now();
         current_movement_speed = config.speed_slow;
@@ -160,12 +178,16 @@ namespace ftc_local_planner
         ros::Time now = ros::Time::now();
         double dt = now.toSec() - last_time.toSec();
         last_time = now;
+        current_robot_pose_ = pose;
+        terrain_modifiers_ = computeTerrainCommandModifiers(buildTerrainControlInput(), terrain_config_);
+        refreshTerrainRecovery();
 
         if (is_crashed)
         {
             cmd_vel.twist.linear.x = 0;
             cmd_vel.twist.angular.z = 0;
-            return RET_COLLISION;
+            message = terrain_recovery_failure_ ? "terrain recovery failed" : "planner collision";
+            return terrain_recovery_failure_ ? RET_TERRAIN_RECOVERY : RET_COLLISION;
         }
 
         if (current_state == FINISHED)
@@ -192,6 +214,7 @@ namespace ftc_local_planner
             cmd_vel.twist.linear.x = 0;
             cmd_vel.twist.angular.z = 0;
             is_crashed = true;
+            message = "costmap collision predicted";
             return RET_BLOCKED;
         }
 
@@ -202,7 +225,8 @@ namespace ftc_local_planner
         {
             cmd_vel.twist.linear.x = 0;
             cmd_vel.twist.angular.z = 0;
-            return RET_COLLISION;
+            message = terrain_recovery_failure_ ? "terrain recovery failed" : "planner collision";
+            return terrain_recovery_failure_ ? RET_TERRAIN_RECOVERY : RET_COLLISION;
         }
 
         return RET_SUCCESS;
@@ -244,8 +268,11 @@ namespace ftc_local_planner
         case FOLLOWING:
         {
             double distance = local_control_point.translation().norm();
+            const double allowed_follow_distance = terrain_recovery_active_
+                                                       ? std::max(config.max_follow_distance * 2.0, 0.8)
+                                                       : config.max_follow_distance;
             // check for crash
-            if (distance > config.max_follow_distance)
+            if (distance > allowed_follow_distance)
             {
                 ROS_ERROR_STREAM("FTCLocalPlannerROS: Robot is far away from global plan. distance (" << distance << ") > config.max_follow_distance (" << config.max_follow_distance << ") It probably has crashed.");
                 is_crashed = true;
@@ -320,6 +347,8 @@ namespace ftc_local_planner
             {
                 speed = config.speed_slow;
             }
+            speed *= terrain_modifiers_.speed_scale;
+            speed = clamp_value(speed, 0.0, config.terrain_speed_scale_max * config.speed_fast);
 
             if (speed > current_movement_speed)
             {
@@ -338,6 +367,13 @@ namespace ftc_local_planner
 
             double distance_to_move = dt * current_movement_speed;
             double angle_to_move = dt * config.speed_angular * (M_PI / 180.0);
+            distance_to_move *= terrain_modifiers_.lookahead_scale;
+            angle_to_move *= terrain_modifiers_.lookahead_scale;
+            if (terrain_modifiers_.freeze_progress)
+            {
+                distance_to_move = 0.0;
+                angle_to_move = 0.0;
+            }
 
             Eigen::Affine3d nextPose, currentPose;
             while (angle_to_move > 0 && distance_to_move > 0 && current_index < global_plan.size() - 2)
@@ -501,6 +537,11 @@ namespace ftc_local_planner
                     lat_error *= -1.0;
                 }
             }
+            lin_speed *= terrain_modifiers_.speed_scale;
+            if (terrain_recovery_active_ && terrain_modifiers_.hold_position)
+            {
+                lin_speed = 0.0;
+            }
             cmd_vel.twist.linear.x = lin_speed;
         }
         else
@@ -510,9 +551,16 @@ namespace ftc_local_planner
 
         if (current_state == FOLLOWING)
         {
+            const double kp_ang = config.kp_ang * terrain_modifiers_.ang_gain_scale;
+            const double ki_ang = config.ki_ang * terrain_modifiers_.ang_gain_scale;
+            const double kd_ang = config.kd_ang * terrain_modifiers_.ang_gain_scale;
+            const double kp_lat = config.kp_lat * terrain_modifiers_.lat_gain_scale;
+            const double ki_lat = config.ki_lat * terrain_modifiers_.lat_gain_scale;
+            const double kd_lat = config.kd_lat * terrain_modifiers_.lat_gain_scale;
 
-            double ang_speed = angle_error * config.kp_ang + i_angle_error * config.ki_ang + d_angle * config.kd_ang +
-                               lat_error * config.kp_lat + i_lat_error * config.ki_lat + d_lat * config.kd_lat;
+            double ang_speed = angle_error * kp_ang + i_angle_error * ki_ang + d_angle * kd_ang +
+                               lat_error * kp_lat + i_lat_error * ki_lat + d_lat * kd_lat +
+                               terrain_modifiers_.heading_bias;
 
             if (ang_speed > config.max_cmd_vel_ang)
             {
@@ -739,6 +787,97 @@ namespace ftc_local_planner
         {
             obstacle_marker_pub.publish(obstacle_points);
             obstacle_points.points.clear();
+        }
+    }
+
+    void FTCPlanner::terrainStateCallback(const mower_msgs::TerrainState::ConstPtr &msg)
+    {
+        last_terrain_state_ = *msg;
+        have_terrain_state_ = true;
+    }
+
+    TerrainControlInput FTCPlanner::buildTerrainControlInput() const
+    {
+        TerrainControlInput input;
+        input.enabled = config.terrain_enable;
+        input.fresh = have_terrain_state_ &&
+                      (ros::Time::now() - last_terrain_state_.stamp).toSec() <= config.terrain_state_timeout;
+        input.mode = last_terrain_state_.mode;
+        input.slip_score = last_terrain_state_.slip_score;
+        input.speed_scale = last_terrain_state_.speed_scale;
+        input.heading_bias = last_terrain_state_.heading_bias;
+        input.risk_ahead = last_terrain_state_.risk_ahead;
+        input.cross_track_error = last_terrain_state_.cross_track_error;
+        return input;
+    }
+
+    void FTCPlanner::selectRecoveryTarget()
+    {
+        if (global_plan.empty()) {
+            return;
+        }
+
+        const auto &robot_position = current_robot_pose_.pose.position;
+        uint32_t best_index = current_index;
+        double best_distance = std::numeric_limits<double>::max();
+        for (uint32_t i = 0; i < global_plan.size(); ++i)
+        {
+            const auto &candidate = global_plan[i].pose.position;
+            const double dx = candidate.x - robot_position.x;
+            const double dy = candidate.y - robot_position.y;
+            const double dist = dx * dx + dy * dy;
+            if (dist < best_distance)
+            {
+                best_distance = dist;
+                best_index = i;
+            }
+        }
+
+        current_index = std::min<uint32_t>(best_index, global_plan.size() > 1 ? global_plan.size() - 2 : 0);
+        current_progress = 0.0;
+    }
+
+    void FTCPlanner::resetTerrainRecovery()
+    {
+        terrain_recovery_active_ = false;
+        terrain_recovery_failure_ = false;
+        terrain_recovery_started_ = ros::Time(0);
+        terrain_recovery_cycles_ = 0;
+    }
+
+    void FTCPlanner::refreshTerrainRecovery()
+    {
+        const auto input = buildTerrainControlInput();
+        terrain_modifiers_ = computeTerrainCommandModifiers(input, terrain_config_);
+
+        if (!config.terrain_enable || !input.fresh)
+        {
+            return;
+        }
+
+        if (terrain_recovery_active_)
+        {
+            if (shouldReleaseTerrainRecovery(input, terrain_config_))
+            {
+                terrain_recovery_active_ = false;
+                terrain_recovery_started_ = ros::Time(0);
+                return;
+            }
+            if ((ros::Time::now() - terrain_recovery_started_).toSec() > config.terrain_recovery_timeout ||
+                terrain_recovery_cycles_ > static_cast<uint32_t>(config.terrain_recovery_max_cycles))
+            {
+                terrain_recovery_failure_ = true;
+                is_crashed = true;
+            }
+            return;
+        }
+
+        if (terrain_modifiers_.recovery_requested)
+        {
+            terrain_recovery_active_ = true;
+            terrain_recovery_started_ = ros::Time::now();
+            terrain_recovery_cycles_++;
+            selectRecoveryTarget();
         }
     }
 }
