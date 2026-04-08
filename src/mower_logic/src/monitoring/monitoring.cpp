@@ -22,6 +22,7 @@
 #include "mower_logic/PowerConfig.h"
 #include "mower_msgs/HighLevelStatus.h"
 #include "mower_msgs/Status.h"
+#include "mower_msgs/TerrainState.h"
 #include "ros/ros.h"
 #include "xbot_msgs/AbsolutePose.h"
 #include "xbot_msgs/RobotState.h"
@@ -140,6 +141,20 @@ void pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg) {
   if (sc_it != std::end(sensor_configs)) {
     sc_it->second.data_pub.publish(sensor_data);
   }
+}
+
+void terrain_received(const mower_msgs::TerrainState::ConstPtr& msg) {
+  state.terrain_mode = msg->mode;
+  state.terrain_roll_deg = msg->roll_deg;
+  state.terrain_pitch_deg = msg->pitch_deg;
+  state.terrain_uphill_slope_deg = msg->uphill_slope_deg;
+  state.terrain_cross_slope_deg = msg->cross_slope_deg;
+  state.terrain_slip_score = msg->slip_score;
+  state.terrain_speed_scale = msg->speed_scale;
+  state.terrain_heading_bias = msg->heading_bias;
+  state.terrain_risk_ahead = msg->risk_ahead;
+  state.terrain_memory_risk = msg->terrain_memory_risk;
+  state.terrain_recovery_count = msg->recovery_count;
 }
 
 void power_received(const mower_msgs::Power::ConstPtr& msg) {
@@ -345,6 +360,7 @@ int main(int argc, char** argv) {
   ros::Subscriber right_esc_status_state_subscriber =
       n->subscribe("/ll/diff_drive/right_esc_status", 10, right_esc_status_received);
   ros::Subscriber pose_state_subscriber = n->subscribe("/xbot_positioning/xb_pose", 10, pose_received);
+  ros::Subscriber terrain_state_subscriber = n->subscribe("mower_logic/terrain_state", 10, terrain_received);
 
   state_pub = n->advertise<xbot_msgs::RobotState>("xbot_monitoring/robot_state", 10);
 

@@ -1,0 +1,12 @@
+<launch>
+    <node pkg="imu_filter_madgwick" type="imu_filter_madgwick_node" name="imu_filter_madgwick" output="screen" respawn="true" respawn_delay="10">
+        <param name="use_mag" value="false"/>
+        <param name="publish_tf" value="false"/>
+        <param name="world_frame" value="enu"/>
+        <param name="gain" value="0.05"/>
+        <remap from="imu/data_raw" to="/ll/imu/data_raw"/>
+        <remap from="imu/data" to="/terrain/imu/data"/>
+    </node>
+
+    <node pkg="mower_logic" type="terrain_observer" name="terrain_observer" output="screen" respawn="true" respawn_delay="10"/>
+</launch>

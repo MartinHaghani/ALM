@@ -1,0 +1,25 @@
+uint8 MODE_NORMAL=0
+uint8 MODE_COMPENSATING=1
+uint8 MODE_RECOVERY=2
+uint8 MODE_HOLD=3
+
+time stamp
+uint8 mode
+float32 roll_deg
+float32 pitch_deg
+float32 uphill_slope_deg
+float32 cross_slope_deg
+float32 commanded_speed
+float32 measured_speed
+float32 speed_error
+float32 cross_track_error
+float32 cross_track_error_rate
+float32 slip_score
+float32 slip_direction
+float32 speed_scale
+float32 heading_bias
+float32 risk_ahead
+float32 terrain_memory_risk
+float32 slip_confidence
+uint16 recovery_count
+bool memory_active

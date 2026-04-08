@@ -1,6 +1,6 @@
 local_costmap:
-  update_frequency: 5.0
-  publish_frequency: 2.0
+  update_frequency: 12.0
+  publish_frequency: 10.0
   rolling_window: true
   width: 1.5
   height: 1.5

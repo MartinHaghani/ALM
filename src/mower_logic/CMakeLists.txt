@@ -10,12 +10,14 @@ project(mower_logic)
 find_package(catkin REQUIRED COMPONENTS
         dynamic_reconfigure
         ftc_local_planner
+        geometry_msgs
         mbf_msgs
         mower_map
         mower_msgs
         nav_msgs
         rosbag
         roscpp
+        std_srvs
         slic3r_coverage_planner
         tf2
         tf2_geometry_msgs
@@ -132,10 +134,18 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
+        include
         # include
         ${catkin_INCLUDE_DIRS}
         ${CRYPTOPP_INCLUDE_DIRS}
 )
+
+add_library(mower_logic_terrain_support
+        src/mower_logic/terrain/TerrainMath.cpp
+        src/mower_logic/terrain/TerrainMemory.cpp
+)
+add_dependencies(mower_logic_terrain_support ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
+target_link_libraries(mower_logic_terrain_support ${catkin_LIBRARIES})
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
@@ -184,11 +194,15 @@ add_executable(mower_logic
         src/mower_logic/behaviors/AreaRecordingBehavior.cpp
 )
 add_dependencies(mower_logic ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
-target_link_libraries(mower_logic ${catkin_LIBRARIES} ${CRYPTOPP_LIBRARIES})
+target_link_libraries(mower_logic mower_logic_terrain_support ${catkin_LIBRARIES} ${CRYPTOPP_LIBRARIES})
 
 add_executable(monitoring src/monitoring/monitoring.cpp)
 add_dependencies(monitoring ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(monitoring ${catkin_LIBRARIES})
+
+add_executable(terrain_observer src/mower_logic/terrain_observer.cpp)
+add_dependencies(terrain_observer ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
+target_link_libraries(terrain_observer mower_logic_terrain_support ${catkin_LIBRARIES})
 
 
 #############
@@ -238,10 +252,14 @@ target_link_libraries(monitoring ${catkin_LIBRARIES})
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_mower_logic.cpp)
-# if(TARGET ${PROJECT_NAME}-test)
-#   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
-# endif()
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_terrain_support
+          test/test_terrain_support.cpp
+  )
+  if(TARGET test_terrain_support)
+    target_link_libraries(test_terrain_support mower_logic_terrain_support ${catkin_LIBRARIES})
+  endif()
+endif()
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)

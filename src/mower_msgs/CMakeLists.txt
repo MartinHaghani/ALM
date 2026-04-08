@@ -12,6 +12,7 @@ add_message_files(
         ImuRaw.msg
         ESCStatus.msg
         HighLevelStatus.msg
+        TerrainState.msg
         Perimeter.msg
         Emergency.msg
         Power.msg
@@ -33,4 +34,8 @@ generate_messages(
         std_msgs
 )
 
-catkin_package()
+catkin_package(
+        CATKIN_DEPENDS
+        message_runtime
+        std_msgs
+)
