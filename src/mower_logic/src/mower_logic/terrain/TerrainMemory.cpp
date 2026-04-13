@@ -15,19 +15,38 @@ namespace mower_logic {
 namespace terrain {
 
 namespace {
-struct Point {
-  double x = 0.0;
-  double y = 0.0;
-};
-
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Point, x, y)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TerrainCell, observations, roll_abs_deg, pitch_abs_deg, uphill_abs_deg,
-                                   cross_abs_deg, slip_score, risk, recovery_count, hard_failure_count)
-
 double clamp01(double value) {
   if (value < 0.0) return 0.0;
   if (value > 1.0) return 1.0;
   return value;
+}
+
+TerrainCell parseTerrainCell(const json& entry) {
+  TerrainCell cell;
+  cell.observations = entry.value("observations", 0U);
+  cell.roll_abs_deg = entry.value("roll_abs_deg", 0.0);
+  cell.pitch_abs_deg = entry.value("pitch_abs_deg", 0.0);
+  cell.uphill_abs_deg = entry.value("uphill_abs_deg", 0.0);
+  cell.cross_abs_deg = entry.value("cross_abs_deg", 0.0);
+  cell.slip_score = entry.value("slip_score", 0.0);
+  cell.risk = entry.value("risk", 0.0);
+  cell.recovery_count = entry.value("recovery_count", 0U);
+  cell.hard_failure_count = entry.value("hard_failure_count", 0U);
+  return cell;
+}
+
+json terrainCellToJson(const TerrainCell& cell) {
+  json j = json::object();
+  j["observations"] = cell.observations;
+  j["roll_abs_deg"] = cell.roll_abs_deg;
+  j["pitch_abs_deg"] = cell.pitch_abs_deg;
+  j["uphill_abs_deg"] = cell.uphill_abs_deg;
+  j["cross_abs_deg"] = cell.cross_abs_deg;
+  j["slip_score"] = cell.slip_score;
+  j["risk"] = cell.risk;
+  j["recovery_count"] = cell.recovery_count;
+  j["hard_failure_count"] = cell.hard_failure_count;
+  return j;
 }
 
 bool pointInsidePolygon(const geometry_msgs::Polygon& polygon, double x, double y) {
@@ -78,7 +97,8 @@ bool TerrainMemory::load(const std::string& path) {
       CellIndex idx;
       idx.x = entry.value("x", 0);
       idx.y = entry.value("y", 0);
-      cells_[idx] = entry.value("stats", TerrainCell{});
+      const auto stats_it = entry.find("stats");
+      cells_[idx] = stats_it != entry.end() && stats_it->is_object() ? parseTerrainCell(*stats_it) : TerrainCell{};
     }
   } catch (const json::exception&) {
     cells_.clear();
@@ -97,7 +117,11 @@ bool TerrainMemory::save(const std::string& path) const {
   for (const auto& entry : cells_) {
     const CellIndex& index = entry.first;
     const TerrainCell& cell = entry.second;
-    j["cells"].push_back({{"x", index.x}, {"y", index.y}, {"stats", cell}});
+    json serialized = json::object();
+    serialized["x"] = index.x;
+    serialized["y"] = index.y;
+    serialized["stats"] = terrainCellToJson(cell);
+    j["cells"].push_back(std::move(serialized));
   }
 
   std::ofstream file(path);

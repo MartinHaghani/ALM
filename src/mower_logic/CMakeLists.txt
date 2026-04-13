@@ -31,6 +31,8 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(CRYPTOPP REQUIRED libcrypto++)
 
+add_subdirectory(../lib/json json EXCLUDE_FROM_ALL)
+
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -146,6 +148,7 @@ add_library(mower_logic_terrain_support
 )
 add_dependencies(mower_logic_terrain_support ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(mower_logic_terrain_support ${catkin_LIBRARIES})
+target_link_libraries(mower_logic_terrain_support nlohmann_json::nlohmann_json)
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
