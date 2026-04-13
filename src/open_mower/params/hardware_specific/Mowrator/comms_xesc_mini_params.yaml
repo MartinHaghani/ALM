@@ -1,20 +1,38 @@
 left_xesc:
   xesc_type: "xesc_mini"
   serial_port: "/dev/ttyAMA5"
+  state_request_millis: 100
   motor_pole_pairs: 7  # 14-pole drive motor => 7 pole pairs
   has_motor_temp: false
   invert_direction: false
 right_xesc:
   xesc_type: "xesc_mini"
   serial_port: "/dev/ttyAMA3"
+  state_request_millis: 100
   motor_pole_pairs: 7  # 14-pole drive motor => 7 pole pairs
   has_motor_temp: false
   invert_direction: false
+drive_command_ramp_up_seconds: 0.8
+drive_command_ramp_down_seconds: 0.25
+drive_command_scale: 0.3
+mowing_drive_command_scale: 0.2
+ignore_low_level_emergency_inputs: true  # Mowrator's low-level stop/lift/tilt sensors are disconnected during bring-up
 mower_xesc:
   xesc_type: "xesc_mini"
   serial_port: "/dev/ttyAMA4"
-  motor_pole_pairs: 4  # Temporary placeholder until the blade motor migration is measured
-  has_motor_temp: true
+  state_request_millis: 50
+  motor_pole_pairs: 2  # Live 2026-04-02 blade VESC readback reported 4 motor poles => 2 pole pairs
+  control_mode: "duty"  # Keep blade startup on the proven duty path from the live VESC Tool sweep
+  target_duty_cycle: 1.0
+  target_duty_ramp_seconds: 0.25
+  startup_boost_duty_cycle: 1.0
+  startup_boost_current: 0.0
+  startup_boost_duration_seconds: 0.0
+  startup_boost_rpm_threshold: 300.0
+  startup_boost_release_rpm_threshold: 0.0
+  stop_brake_current: 40.0
+  stop_brake_duration_seconds: 1.0
+  has_motor_temp: false  # The live blade VESC readback shows no configured motor temp sensor
   min_motor_rpm_critical: 2300
   min_motor_rpm: 2800
   max_motor_rpm: 3800

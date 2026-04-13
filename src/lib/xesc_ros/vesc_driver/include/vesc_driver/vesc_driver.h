@@ -63,6 +63,12 @@ public:
 
     void setDutyCycle(float duty_cycle) override;
 
+    void setCurrent(float current) override;
+
+    void setBrake(float brake) override;
+
+    void setSpeed(float speed) override;
+
     VescDriver(ros::NodeHandle &nh, ros::NodeHandle &private_nh);
 
     void stop();
@@ -83,10 +89,14 @@ private:
     boost::optional<double> upper;
   };
   CommandLimit duty_cycle_limit_;
+  CommandLimit current_limit_;
+  CommandLimit brake_limit_;
+  CommandLimit speed_limit_;
 
   VescStatusStruct vesc_status = {0};
 
   int pole_pairs;
+  bool has_motor_temp_;
 };
 
 }  // namespace vesc_driver

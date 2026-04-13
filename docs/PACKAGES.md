@@ -7,7 +7,7 @@ Purpose: inventory the workspace packages and clarify which ones are first-party
 - `src/open_mower`: orchestration package. It provides launch files, parameter YAML, hardware-specific presets, RViz configs, and the raw TCP RTCM bridge script used by the main comms launch flow.
 - `src/mower_comms_v1`: v1 low-level mower comms executable for `HARDWARE_PLATFORM=1`.
 - `src/mower_comms_v2`: v2 ROS bridge built on xBot service interfaces. It consumes the shared JSON definitions under `services/`.
-- `src/mower_logic`: high-level mower behavior package. It defines the `mower_logic` executable, dynamic reconfigure configs, and a separate `monitoring` executable.
+- `src/mower_logic`: high-level mower behavior package. It defines the `mower_logic` executable, dynamic reconfigure configs, and a separate `monitoring` executable. On startup it clears stale xBot behavior-action registrations before re-registering the active state so the WebUI action set tracks the current behavior after node restarts. Each behavior entry now also clears the previous behavior prefixes again before advertising its own actions, so stale `Pause`/`Start` combinations do not linger after failed state transitions. Manual `Start Mowing` runs now clear any stored mowing checkpoint before re-entering `MowingBehavior`, while paused semiautomatic resumes still keep their saved progress. Its mowing pause recovery now re-checks live fused GPS directly, and the node uses more than one callback thread so UI/state timers keep updating while safety callbacks are busy. During mowing it now publishes both the full current-area plan and the live remaining path to the shared xBot map-overlay channel so the existing WebUI can draw path progress on top of the stored map.
 - `src/mower_map`: map service package. It defines messages and services, publishes map topics, persists map data, and exposes an RPC provider.
 - `src/mower_msgs`: shared mower-specific ROS messages and services such as `Status`, `Power`, `HighLevelStatus`, and `HighLevelControlSrv`.
 - `src/mower_simulation`: simulator-side low-level service implementation. It defines `mower_simulation` and dynamic reconfigure for simulation.
@@ -17,16 +17,16 @@ Purpose: inventory the workspace packages and clarify which ones are first-party
 
 ### Planning and navigation
 
-- `src/lib/ftc_local_planner`: follow-the-carrot local planner plugin with dynamic reconfigure, debug topics, and recovery behavior. Observed from its README and CMake targets.
+- `src/lib/ftc_local_planner`: follow-the-carrot local planner plugin with dynamic reconfigure, debug topics, and recovery behavior. This fork's live mower defaults now enable obstacle checking against the map edge during mowing and use a tighter `max_follow_distance` than upstream so the controller bails out sooner instead of wandering far off the planned path before declaring a crash. Observed from its README and CMake targets.
 - `src/lib/slic3r_coverage_planner`: coverage-planning package used by `open_mower.launch` and planner-related tooling.
 
 ### Positioning, monitoring, and remote control
 
 - `src/lib/xbot_driver_gps`: External/Submodule. High-performance u-blox GPS driver with RTCM, IMU, and wheel-tick support, based on its README.
-- `src/lib/xbot_monitoring`: monitoring package providing `xbot_monitoring`, `heatmap_generator`, and an example sensor node.
+- `src/lib/xbot_monitoring`: monitoring package providing `xbot_monitoring`, `heatmap_generator`, and an example sensor node. Its teleop bridge now suppresses redundant neutral `Twist` frames so an idle connected client does not keep `twist_mux` pinned away from autonomous navigation.
 - `src/lib/xbot_msgs`: shared xBot message and service package.
 - `src/lib/xbot_positioning`: localization package providing the `xbot_positioning` executable and pose-related services.
-- `src/lib/xbot_remote`: remote command-velocity bridge used by the main launch flow.
+- `src/lib/xbot_remote`: remote command-velocity bridge used by the main launch flow. Like `xbot_monitoring`, it publishes a single zero command on teleop release instead of streaming repeated neutral frames from an idle client.
 - `src/lib/xbot_rpc`: RPC library plus ROS messages and services used by `mower_map`.
 
 ### Service framework and hardware interface libraries

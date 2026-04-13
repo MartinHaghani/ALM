@@ -237,6 +237,10 @@ export OM_GPS_TIMEOUT_SEC=5.0
 # True to enable mowing motor
 export OM_ENABLE_MOWER=true
 
+# True to alternate blade direction each time mowing is enabled.
+# Keep this false unless you explicitly want alternating spin direction.
+export OM_RANDOMIZE_MOWER_DIRECTION=false
+
 # Set the automatic start value based on required behaviour
 #  2 - AUTO - mow whenever possible
 #  1 - SEMIAUTO - mow the entire map once then wait for manual start again

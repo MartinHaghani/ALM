@@ -108,6 +108,8 @@ Observed examples:
 
 - docking and undocking distances and timing
 - tool width
+- `OM_ENABLE_MOWER`
+- `OM_RANDOMIZE_MOWER_DIRECTION`
 - battery voltage thresholds
 - mower motor temperature thresholds
 - GPS wait and timeout settings

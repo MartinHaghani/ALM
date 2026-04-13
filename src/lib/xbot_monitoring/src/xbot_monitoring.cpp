@@ -3,6 +3,7 @@
 // Copyright (c) 2022 Clemens Elflein. All rights reserved.
 //
 #include <filesystem>
+#include <cmath>
 
 #include "ros/ros.h"
 #include <memory>
@@ -62,6 +63,32 @@ std::mutex mqtt_callback_mutex;
 ros::Publisher cmd_vel_pub;
 ros::Publisher action_pub;
 ros::Publisher rpc_request_pub;
+bool teleop_override_active = false;
+
+namespace {
+constexpr double kTeleopZeroEpsilon = 1e-4;
+
+bool hasTeleopCommand(const geometry_msgs::Twist &twist) {
+    return std::abs(twist.linear.x) > kTeleopZeroEpsilon ||
+           std::abs(twist.linear.y) > kTeleopZeroEpsilon ||
+           std::abs(twist.linear.z) > kTeleopZeroEpsilon ||
+           std::abs(twist.angular.x) > kTeleopZeroEpsilon ||
+           std::abs(twist.angular.y) > kTeleopZeroEpsilon ||
+           std::abs(twist.angular.z) > kTeleopZeroEpsilon;
+}
+
+void publishTeleopTwist(const geometry_msgs::Twist &twist) {
+    const bool has_command = hasTeleopCommand(twist);
+    if (!has_command && !teleop_override_active) {
+        return;
+    }
+
+    // Publish a single zero twist when teleop is released, but avoid repeated
+    // neutral frames that keep twist_mux pinned away from autonomous navigation.
+    teleop_override_active = has_command;
+    cmd_vel_pub.publish(twist);
+}
+}  // namespace
 
 // properties for external mqtt
 bool external_mqtt_enable = false;
@@ -109,7 +136,7 @@ public:
                 geometry_msgs::Twist t;
                 t.linear.x = json["vx"];
                 t.angular.z = json["vz"];
-                cmd_vel_pub.publish(t);
+                publishTeleopTwist(t);
             } catch (const json::exception &e) {
                 ROS_ERROR_STREAM("Error decoding teleop bson: " << e.what());
             }

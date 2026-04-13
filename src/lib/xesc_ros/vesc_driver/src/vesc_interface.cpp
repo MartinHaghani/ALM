@@ -37,6 +37,39 @@
 
 namespace vesc_driver {
 
+    bool VescInterface::isCompatibleFirmware(uint8_t major, uint8_t minor) {
+        (void)minor;
+        return major == 5 || major == 6;
+    }
+
+    std::string VescInterface::formatDiagnostic(const std::string &message) {
+        uint8_t fw_major = 0;
+        uint8_t fw_minor = 0;
+        VESC_CONNECTION_STATE connection_state = DISCONNECTED;
+        {
+            std::lock_guard<std::mutex> lk(status_mutex_);
+            fw_major = status_.fw_version_major;
+            fw_minor = status_.fw_version_minor;
+            connection_state = status_.connection_state;
+        }
+
+        std::ostringstream ss;
+        ss << "VESC[" << (port_.empty() ? "<unset>" : port_) << "]";
+        if (fw_major != 0 || fw_minor != 0) {
+            ss << " fw " << static_cast<int>(fw_major) << "." << static_cast<int>(fw_minor);
+        } else if (connection_state == WAITING_FOR_FW) {
+            ss << " fw pending";
+        } else {
+            ss << " fw unknown";
+        }
+        ss << ": " << message;
+        return ss.str();
+    }
+
+    void VescInterface::reportError(const std::string &message) {
+        error_handler_(formatDiagnostic(message));
+    }
+
     VescInterface::VescInterface(const ErrorHandlerFunction &error_handler, uint32_t state_request_millis)
             : serial_(std::string(), 115200, serial::Timeout::simpleTimeout(100), serial::eightbits,
                       serial::parity_none,
@@ -71,7 +104,7 @@ namespace vesc_driver {
                     requestFWVersion();
                 }
                 continue;
-            } else if(status_.connection_state == CONNECTED || status_.connection_state == CONNECTED_INCOMPATIBLE_FW) {
+            } else if (state == CONNECTED || state == CONNECTED_INCOMPATIBLE_FW) {
                 requestState();
             }
         }
@@ -129,7 +162,7 @@ namespace vesc_driver {
                                 std::ostringstream ss;
                                 ss << "Out-of-sync with VESC, unknown data leading valid frame. Discarding "
                                    << std::distance(iter_begin, iter) << " bytes.";
-                                error_handler_(ss.str());
+                                reportError(ss.str());
                             }
                             // call packet handler
 
@@ -144,7 +177,7 @@ namespace vesc_driver {
                             break;  // for (iter_sof...
                         } else {
                             // else, this was not a packet, move on to next byte
-                            error_handler_(error);
+                            reportError(error);
                         }
                     }
 
@@ -159,7 +192,7 @@ namespace vesc_driver {
                 if (std::distance(iter_begin, iter) > 0) {
                     std::ostringstream ss;
                     ss << "Out-of-sync with VESC, discarding " << std::distance(iter_begin, iter) << " bytes.";
-                    error_handler_(ss.str());
+                    reportError(ss.str());
                 }
                 buffer.erase(buffer.begin(), iter);
             }
@@ -169,10 +202,14 @@ namespace vesc_driver {
             try {
                 int bytes_read = serial_.read(buffer, bytes_to_read);
                 if (bytes_needed > 0 && 0 == bytes_read && !buffer.empty()) {
-                    error_handler_("Possibly out-of-sync with VESC, read timout in the middle of a frame.");
+                    reportError("Possibly out-of-sync with VESC, read timeout in the middle of a frame. "
+                                "Resetting the partial frame buffer.");
+                    // If a frame is truncated, keeping the partial payload around can wedge the parser
+                    // indefinitely on the same stale length field. Drop it and resync on the next SOF.
+                    buffer.clear();
                 }
             } catch (std::exception &e) {
-                error_handler_("error during serial read. reconnecting.");
+                reportError(std::string("Error during serial read. Reconnecting. ") + e.what());
                 {
                     std::unique_lock<std::mutex> lk(status_mutex_);
                     status_.connection_state = VESC_CONNECTION_STATE::DISCONNECTED;
@@ -224,7 +261,7 @@ namespace vesc_driver {
             status_.fw_version_minor = fw_version->fwMinor();
 
             // check for fully compatible FW here
-            if (status_.fw_version_major == 5 && status_.fw_version_minor == 3) {
+            if (isCompatibleFirmware(status_.fw_version_major, status_.fw_version_minor)) {
                 status_.connection_state = CONNECTED;
             } else {
                 status_.connection_state = CONNECTED_INCOMPATIBLE_FW;

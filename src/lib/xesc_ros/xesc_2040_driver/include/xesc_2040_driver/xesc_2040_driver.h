@@ -19,6 +19,12 @@ namespace xesc_2040_driver  {
 
         void setDutyCycle(float duty_cycle) override;
 
+        void setCurrent(float current) override;
+
+        void setBrake(float brake) override;
+
+        void setSpeed(float speed) override;
+
         void stop() override;
 
     private:

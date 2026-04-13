@@ -463,6 +463,13 @@
           "description": "Enable mowing motor. Set to false for testing.",
           "x-environment-variable": "OM_ENABLE_MOWER"
         },
+        "OM_RANDOMIZE_MOWER_DIRECTION": {
+          "type": "boolean",
+          "default": false,
+          "title": "Randomize Mower Direction",
+          "description": "Alternate mower start direction on enable. Leave this disabled unless you explicitly want alternating blade rotation.",
+          "x-environment-variable": "OM_RANDOMIZE_MOWER_DIRECTION"
+        },
         "OM_AUTOMATIC_MODE": {
           "type": "string",
           "enum": [

@@ -52,6 +52,7 @@ roslaunch open_mower open_mower.launch
 - Do not do broad formatting or cleanup edits in `src/lib/`, `services/`, or `web/`.
 - Treat `web/` as generated/build output unless direct evidence in the repo says otherwise.
 - Treat `mower_logic`, `mower_comms_*`, launch wiring, hardware-specific params, and container entrypoints as safety-sensitive.
+- Treat live VESC configuration as safety-sensitive. If you write new VESC settings to the mower, refresh `docs/vesc_configs/` and `docs/VESC_MAINTENANCE.md` in the same change.
 - `config/mower_config.schema.json` is the authoritative structured config artifact. If config semantics change, update the schema, the deprecated shell example, and docs together.
 - `config/mower_config.sh.example` is deprecated but still expected to stay aligned while it exists.
 - `src/open_mower/config/mower_config.sh.example` is only a stub redirect. Do not expand it into the real config file.
@@ -113,6 +114,9 @@ roslaunch open_mower open_mower.launch
 - [docs/REPO_MAP.md](docs/REPO_MAP.md): directory structure and ownership boundaries.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): launch-composed runtime and package roles.
 - [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md): build, launch, container, and dev-environment flows.
+- [docs/RASPBERRY_PI.md](docs/RASPBERRY_PI.md): plain Raspberry Pi OS bring-up and manual update loop.
+- [docs/VESC_MAINTENANCE.md](docs/VESC_MAINTENANCE.md): headless VESC Tool install and ESC-config workflow on the Pi.
+- [docs/vesc_configs/README.md](docs/vesc_configs/README.md): repo-tracked live VESC XML snapshots and refresh rule.
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md): schema, legacy shell config, YAML/env loading, and drift notes.
 - [docs/PACKAGES.md](docs/PACKAGES.md): package inventory.
 - [docs/DOCKER.md](docs/DOCKER.md): runtime versus development container guidance.
