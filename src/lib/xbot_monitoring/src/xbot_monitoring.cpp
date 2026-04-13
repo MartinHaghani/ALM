@@ -39,6 +39,18 @@ void publish_version();
 void publish_params();
 void rpc_request_callback(const std::string &payload);
 
+namespace {
+std::string terrain_mode_name(uint8_t mode) {
+    switch (mode) {
+        case 0: return "NORMAL";
+        case 1: return "COMPENSATING";
+        case 2: return "RECOVERY";
+        case 3: return "HOLD";
+        default: return "UNKNOWN";
+    }
+}
+}
+
 // Stores registered actions (prefix to vector<action>)
 std::map<std::string, std::vector<xbot_msgs::ActionInfo>> registered_actions;
 
@@ -511,6 +523,18 @@ void robot_state_callback(const xbot_msgs::RobotState::ConstPtr &msg) {
     j["emergency"] = msg->emergency;
     j["is_charging"] = msg->is_charging;
     j["rain_detected"] = msg->rain_detected;
+    j["terrain"]["mode"] = terrain_mode_name(msg->terrain_mode);
+    j["terrain"]["mode_id"] = msg->terrain_mode;
+    j["terrain"]["roll_deg"] = msg->terrain_roll_deg;
+    j["terrain"]["pitch_deg"] = msg->terrain_pitch_deg;
+    j["terrain"]["uphill_slope_deg"] = msg->terrain_uphill_slope_deg;
+    j["terrain"]["cross_slope_deg"] = msg->terrain_cross_slope_deg;
+    j["terrain"]["slip_score"] = msg->terrain_slip_score;
+    j["terrain"]["speed_scale"] = msg->terrain_speed_scale;
+    j["terrain"]["heading_bias"] = msg->terrain_heading_bias;
+    j["terrain"]["risk_ahead"] = msg->terrain_risk_ahead;
+    j["terrain"]["memory_risk"] = msg->terrain_memory_risk;
+    j["terrain"]["recovery_count"] = msg->terrain_recovery_count;
     j["pose"]["x"] = msg->robot_pose.pose.pose.position.x;
     j["pose"]["y"] = msg->robot_pose.pose.pose.position.y;
     j["pose"]["heading"] = msg->robot_pose.vehicle_heading;

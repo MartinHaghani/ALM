@@ -37,6 +37,7 @@ For a fast orientation pass, read in this order:
 - [MOWRATOR_MIGRATION.md](MOWRATOR_MIGRATION.md): staged Flipsky-based hardware migration for the custom `Mowrator` profile.
 - [VESC_MAINTENANCE.md](VESC_MAINTENANCE.md): headless VESC Tool install and UART config workflow on the Pi.
 - [vesc_configs/README.md](vesc_configs/README.md): repo-tracked live VESC XML snapshots for the current mower.
+- [MOWRATOR_SLOPE_RELIABILITY_PLAN.md](MOWRATOR_SLOPE_RELIABILITY_PLAN.md): staged terrain-aware controller, recovery, and terrain-memory implementation path for the `Mowrator` mower.
 - [CONFIGURATION.md](CONFIGURATION.md): config schema, deprecated shell example, YAML and env loading.
 - [PACKAGES.md](PACKAGES.md): package inventory for `src/` and important `src/lib/` packages.
 - [DOCKER.md](DOCKER.md): runtime versus development container behavior.

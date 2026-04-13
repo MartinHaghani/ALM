@@ -17,3 +17,21 @@ xbot_positioning:
 
 mower_logic:
   tool_width: 0.4
+terrain_observer:
+  terrain_memory_cell_size: 0.4
+  terrain_memory_lookahead_poses: 24
+  terrain_memory_caution_threshold: 0.30
+  terrain_memory_exclusion_threshold: 0.70
+  terrain_memory_exclusion_buffer: 0.12
+  terrain_memory_max_exclusion_cells: 160
+  compensation_slip_threshold: 0.24
+  recovery_slip_threshold: 0.50
+  hold_slip_threshold: 0.72
+  compensation_cross_slope_deg: 3.0
+  speed_scale_min: 0.30
+  speed_scale_cross_per_deg: 0.06
+  speed_scale_downhill_per_deg: 0.03
+  uphill_speed_bonus_per_deg: 0.012
+  speed_scale_max_uphill: 1.12
+  heading_bias_gain: 0.05
+  heading_bias_max_rad: 0.24
