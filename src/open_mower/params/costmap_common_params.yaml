@@ -1,5 +1,5 @@
-#footprint: [[x0, y0], [x1, y1], ... [xn, yn]]
-robot_radius: 0.0
+# Shared default footprint now matches the measured Mowrator rectangle in meters.
+footprint: [[0.0, 0.34], [0.82, 0.34], [0.82, -0.34], [0.0, -0.34]]
 
 global_frame: map
 robot_base_frame: base_link

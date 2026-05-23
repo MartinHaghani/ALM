@@ -132,6 +132,23 @@ export OM_USE_F9R_SENSOR_FUSION=False
 
 
 ################################
+##        IMU Settings        ##
+################################
+# The old low-level board published /ll/imu/data_raw. If that board is removed and a SparkFun
+# LSM6DSO is wired to the Raspberry Pi I2C pins, enable the replacement publisher below.
+# Header pins 3 and 5 are /dev/i2c-1 on the Pi. SparkFun's default LSM6DSO address is 0x6B;
+# use 0x6A if the address jumper has been changed.
+# export OM_USE_LSM6DSO_IMU=False
+# export OM_LSM6DSO_I2C_BUS=1
+# export OM_LSM6DSO_I2C_ADDRESS=0x6B
+# export OM_LSM6DSO_RATE_HZ=104
+# export OM_LSM6DSO_ACCEL_RANGE_G=4
+# export OM_LSM6DSO_GYRO_RANGE_DPS=500
+# export OM_LSM6DSO_AXIS_CONFIG=+X+Y+Z
+# export OM_LSM6DSO_FRAME_ID=base_link
+
+
+################################
 ##    Mower Logic Settings    ##
 ################################
 
@@ -236,6 +253,10 @@ export OM_GPS_TIMEOUT_SEC=5.0
 # Mowing Behavior Settings
 # True to enable mowing motor
 export OM_ENABLE_MOWER=true
+
+# True to alternate blade direction each time mowing is enabled.
+# Keep this false unless you explicitly want alternating spin direction.
+export OM_RANDOMIZE_MOWER_DIRECTION=false
 
 # Set the automatic start value based on required behaviour
 #  2 - AUTO - mow whenever possible

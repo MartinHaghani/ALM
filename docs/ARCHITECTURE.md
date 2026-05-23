@@ -20,7 +20,7 @@ This summary is grounded in:
 ### Launch includes
 
 - `_params.launch`: loads parameters from YAML and or environment variables, depending on legacy mode and hardware platform.
-- `_comms.launch`: selects `mower_comms_v1` for `HARDWARE_PLATFORM=1` or `mower_comms_v2` for `HARDWARE_PLATFORM=2`, then chooses either the built-in NTRIP client or the raw TCP RTCM bridge for correction input.
+- `_comms.launch`: selects `mower_comms_v1` for `HARDWARE_PLATFORM=1` or `mower_comms_v2` for `HARDWARE_PLATFORM=2`, optionally starts the Raspberry Pi I2C LSM6DSO IMU publisher, then chooses either the built-in NTRIP client or the raw TCP RTCM bridge for correction input.
 - `_move_base.launch`: starts `mbf_costmap_nav` plus the legacy relay shim, loading costmap and planner YAML from `src/open_mower/params/`.
 - `_localization.launch`: starts `xbot_positioning`.
 - `_teleop.launch`: starts joystick input and teleop mapping based on the selected gamepad.
@@ -48,7 +48,7 @@ This summary is grounded in:
 
 ## Package role split
 
-- `open_mower`: orchestration package. It provides launch, params, RViz assets, and a small Python RTCM bridge script for raw TCP correction sources.
+- `open_mower`: orchestration package. It provides launch, params, RViz assets, a small Python RTCM bridge script for raw TCP correction sources, and a small Python LSM6DSO IMU publisher for the current Pi-I2C bench hardware path.
 - `mower_logic`: high-level decision-making and mower state transitions.
 - `mower_map`: map storage and retrieval plus occupancy-grid and marker publication.
 - `mower_comms_v1` and `mower_comms_v2`: ROS bridges to low-level mower hardware or services.

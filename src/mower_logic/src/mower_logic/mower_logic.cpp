@@ -79,6 +79,7 @@ ros::Time joy_vel_time(0.0);
 ros::Time last_good_gps(0.0);
 
 std::recursive_mutex mower_logic_mutex;
+std::mutex mower_enable_mutex;
 
 mower_msgs::HighLevelStatus high_level_status;
 
@@ -93,6 +94,9 @@ double max_v_battery_seen = 0.0;
 ros::Time last_rain_check;
 bool rain_detected = true;
 ros::Time rain_resume;
+bool mower_has_motor_temp = true;
+double manual_drive_linear_scale = 1.0;
+double manual_drive_angular_scale = 1.0;
 
 /**
  * Some thread safe methods to get a copy of the logic state
@@ -150,6 +154,14 @@ void registerActions(std::string prefix, const std::vector<xbot_msgs::ActionInfo
     }
     ROS_ERROR_STREAM("Error registering actions for " << prefix << ". Retrying.");
     retry_delay.sleep();
+  }
+}
+
+void clearBehaviorActions() {
+  for (const auto* prefix :
+       {"mower_logic:idle", "mower_logic:mowing", "mower_logic:docking", "mower_logic:undocking",
+        "mower_logic:area_recording"}) {
+    registerActions(prefix, {});
   }
 }
 
@@ -217,6 +229,7 @@ bool setGPS(bool enabled) {
 /// @param enabled
 /// @return
 bool setMowerEnabled(bool enabled) {
+  std::lock_guard<std::mutex> lk{mower_enable_mutex};
   const auto last_config = getConfig();
 
   if (!last_config.enable_mower && enabled) {
@@ -231,7 +244,8 @@ bool setMowerEnabled(bool enabled) {
     ros::Time started = ros::Time::now();
     mower_msgs::MowerControlSrv mow_srv;
     mow_srv.request.mow_enabled = enabled;
-    mow_srv.request.mow_direction = started.sec & 0x1;  // Randomize mower direction on second
+    const bool randomize_mower_direction = paramNh->param<bool>("randomize_mower_direction", false);
+    mow_srv.request.mow_direction = randomize_mower_direction ? (started.sec & 0x1) : 1;
     ROS_WARN_STREAM("#### om_mower_logic: setMowerEnabled("
                     << enabled << ", " << static_cast<unsigned>(mow_srv.request.mow_direction) << ") call");
 
@@ -434,13 +448,26 @@ void checkSafety(const ros::TimerEvent& timer_event) {
     return;
   }
 
-  // If the motor controllers error, we enter emergency mode in the hope to save them. They should not error.
-  if (last_left_esc_state.status <= mower_msgs::ESCStatus::ESC_STATUS_ERROR ||
-      last_right_esc_state.status <= mower_msgs::ESCStatus::ESC_STATUS_ERROR) {
+  // Treat real drive ESC faults as emergencies. However, do not re-latch emergency just because
+  // the drive ESCs report DISCONNECTED while the low-level board says drivetrain ESC power is off;
+  // that bench state is expected during Mowrator bring-up and should still allow non-drive testing.
+  const bool left_drive_esc_disconnected = last_left_esc_state.status == mower_msgs::ESCStatus::ESC_STATUS_DISCONNECTED;
+  const bool right_drive_esc_disconnected = last_right_esc_state.status == mower_msgs::ESCStatus::ESC_STATUS_DISCONNECTED;
+  const bool left_drive_esc_fault = last_left_esc_state.status == mower_msgs::ESCStatus::ESC_STATUS_ERROR;
+  const bool right_drive_esc_fault = last_right_esc_state.status == mower_msgs::ESCStatus::ESC_STATUS_ERROR;
+  const bool drive_esc_fault_or_unexpected_disconnect =
+      left_drive_esc_fault || right_drive_esc_fault ||
+      (last_status.esc_power && (left_drive_esc_disconnected || right_drive_esc_disconnected));
+  if (drive_esc_fault_or_unexpected_disconnect) {
     setEmergencyMode(true);
     ROS_ERROR_STREAM("EMERGENCY: at least one motor control errored. errors left: "
                      << (last_left_esc_state.status) << ", status right: " << last_right_esc_state.status);
     return;
+  }
+  if (!last_status.esc_power && (left_drive_esc_disconnected || right_drive_esc_disconnected)) {
+    stopMoving();
+    ROS_WARN_STREAM_THROTTLE(
+        5.0, "Drive ESCs are disconnected while low-level ESC power is off; suppressing emergency relatch.");
   }
 
   // We need orientation and a positional accuracy less than configured
@@ -523,7 +550,7 @@ void checkSafety(const ros::TimerEvent& timer_event) {
     last_v_battery_check = ros::Time::now();
   }
 
-  if (!dockingNeeded && last_status.mower_motor_temperature >= last_config.motor_hot_temperature) {
+  if (mower_has_motor_temp && !dockingNeeded && last_status.mower_motor_temperature >= last_config.motor_hot_temperature) {
     dockingReason << "Mow motor over temp: " << last_status.mower_motor_temperature;
     dockingNeeded = true;
   }
@@ -628,7 +655,14 @@ void actionReceived(const std_msgs::String::ConstPtr& action) {
 void joyVelReceived(const geometry_msgs::Twist::ConstPtr& joy_vel) {
   joy_vel_time = ros::Time::now();
   if (currentBehavior && currentBehavior->redirect_joystick()) {
-    cmd_vel_pub.publish(joy_vel);
+    geometry_msgs::Twist scaled = *joy_vel;
+    scaled.linear.x *= manual_drive_linear_scale;
+    scaled.linear.y *= manual_drive_linear_scale;
+    scaled.linear.z *= manual_drive_linear_scale;
+    scaled.angular.x *= manual_drive_angular_scale;
+    scaled.angular.y *= manual_drive_angular_scale;
+    scaled.angular.z *= manual_drive_angular_scale;
+    cmd_vel_pub.publish(scaled);
   }
 }
 
@@ -649,6 +683,12 @@ int main(int argc, char** argv) {
   paramNh = new ros::NodeHandle("~");
   ros::NodeHandle powerNodeHandle("/ll/services/power");
   mowerAllowed = false;
+  mower_has_motor_temp = n->param("/ll/services/diff_drive/mower_xesc/has_motor_temp", true);
+  const double default_manual_drive_scale = 1.0;
+  manual_drive_linear_scale = n->param("/mower_logic/manual_drive_linear_scale", default_manual_drive_scale);
+  manual_drive_angular_scale = n->param("/mower_logic/manual_drive_angular_scale", default_manual_drive_scale);
+  ROS_INFO_STREAM("Manual drive linear scale: " << manual_drive_linear_scale);
+  ROS_INFO_STREAM("Manual drive angular scale: " << manual_drive_angular_scale);
 
   boost::recursive_mutex mutex;
 
@@ -696,7 +736,9 @@ int main(int argc, char** argv) {
 
   ros::ServiceServer high_level_control_srv = n->advertiseService("mower_service/high_level_control", highLevelCommand);
 
-  ros::AsyncSpinner asyncSpinner(1);
+  // Keep timers and state subscribers responsive even if one callback is waiting on
+  // a service call or transport hiccup during mowing recovery.
+  ros::AsyncSpinner asyncSpinner(2);
   asyncSpinner.start();
 
   ros::Rate r(1.0);
@@ -874,6 +916,9 @@ int main(int argc, char** argv) {
     }
   }
 
+  ROS_INFO("clearing stale behavior actions");
+  clearBehaviorActions();
+
   ROS_INFO("registering actions");
   registerActions("mower_logic", rootActions);
 
@@ -893,6 +938,7 @@ int main(int argc, char** argv) {
   // Behavior execution loop
   while (ros::ok()) {
     if (currentBehavior != nullptr) {
+      clearBehaviorActions();
       currentBehavior->start(last_config, shared_state);
       Behavior* newBehavior = currentBehavior->execute();
       currentBehavior->exit();

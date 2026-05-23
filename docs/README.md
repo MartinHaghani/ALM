@@ -11,8 +11,9 @@ For a fast orientation pass, read in this order:
 3. [../CONTRIBUTING.md](../CONTRIBUTING.md) for contributor workflow and safety expectations.
 4. [BUILD_AND_RUN.md](BUILD_AND_RUN.md) for setup, build, launch, and container usage.
 5. [RASPBERRY_PI.md](RASPBERRY_PI.md) if you want a plain Raspberry Pi bring-up and fast local-repo workflow.
-6. [CONFIGURATION.md](CONFIGURATION.md) before touching config, params, or environment handling.
-7. [PACKAGES.md](PACKAGES.md) and [ARCHITECTURE.md](ARCHITECTURE.md) for codebase structure.
+6. [MOWRATOR_BENCH_BRINGUP.md](MOWRATOR_BENCH_BRINGUP.md) before touching the current custom mower bench hardware.
+7. [CONFIGURATION.md](CONFIGURATION.md) before touching config, params, or environment handling.
+8. [PACKAGES.md](PACKAGES.md) and [ARCHITECTURE.md](ARCHITECTURE.md) for codebase structure.
 
 ## Agent-facing entrypoints
 
@@ -35,6 +36,9 @@ For a fast orientation pass, read in this order:
 - [BUILD_AND_RUN.md](BUILD_AND_RUN.md): local build, launch, development containers, and runtime images.
 - [RASPBERRY_PI.md](RASPBERRY_PI.md): plain Raspberry Pi OS bring-up and manual update loop.
 - [MOWRATOR_MIGRATION.md](MOWRATOR_MIGRATION.md): staged Flipsky-based hardware migration for the custom `Mowrator` profile.
+- [MOWRATOR_BENCH_BRINGUP.md](MOWRATOR_BENCH_BRINGUP.md): current one-by-one bench checks for the RUTX11, LSM6DSO, F9P, and Slamtec C1 hardware.
+- [VESC_MAINTENANCE.md](VESC_MAINTENANCE.md): headless VESC Tool install and UART config workflow on the Pi.
+- [vesc_configs/README.md](vesc_configs/README.md): repo-tracked live VESC XML snapshots for the current mower.
 - [CONFIGURATION.md](CONFIGURATION.md): config schema, deprecated shell example, YAML and env loading.
 - [PACKAGES.md](PACKAGES.md): package inventory for `src/` and important `src/lib/` packages.
 - [DOCKER.md](DOCKER.md): runtime versus development container behavior.

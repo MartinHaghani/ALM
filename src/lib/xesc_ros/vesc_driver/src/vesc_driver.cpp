@@ -37,14 +37,20 @@
 
 namespace vesc_driver {
     VescDriver::VescDriver(ros::NodeHandle &nh, ros::NodeHandle &private_nh)
-            : vesc_(std::bind(&VescDriver::vescErrorCallback, this, std::placeholders::_1)),
-              duty_cycle_limit_(private_nh, "duty_cycle", -1.0, 1.0) {
+            : vesc_(std::bind(&VescDriver::vescErrorCallback, this, std::placeholders::_1),
+                    private_nh.param("state_request_millis", 20)),
+              duty_cycle_limit_(private_nh, "duty_cycle", -1.0, 1.0),
+              current_limit_(private_nh, "current"),
+              brake_limit_(private_nh, "brake_current", 0.0),
+              speed_limit_(private_nh, "speed_rpm") {
         // get vesc serial port address
         std::string port;
         if (!private_nh.getParam("serial_port", port)) {
             ROS_FATAL("VESC communication port parameter required.");
             throw ros::InvalidParameterException("VESC communication port parameter required.");
         }
+
+        has_motor_temp_ = private_nh.param("has_motor_temp", true);
 
         // get motor pole pairs, just needed for eRPM to RPM calculation
         if (!private_nh.getParam("motor_pole_pairs", pole_pairs)) {
@@ -78,7 +84,7 @@ namespace vesc_driver {
         state_msg.state.fw_minor = vesc_status.fw_version_minor;
         state_msg.state.voltage_input = vesc_status.voltage_input;
         state_msg.state.temperature_pcb = vesc_status.temperature_pcb;
-        state_msg.state.temperature_motor = vesc_status.temperature_motor;
+        state_msg.state.temperature_motor = has_motor_temp_ ? vesc_status.temperature_motor : 0.0;
         state_msg.state.current_input = vesc_status.current_input;
         state_msg.state.duty_cycle = vesc_status.duty_cycle;
         state_msg.state.tacho = vesc_status.tacho;
@@ -97,7 +103,7 @@ namespace vesc_driver {
         state_msg.state.fw_minor = vesc_status.fw_version_minor;
         state_msg.state.voltage_input = vesc_status.voltage_input;
         state_msg.state.temperature_pcb = vesc_status.temperature_pcb;
-        state_msg.state.temperature_motor = vesc_status.temperature_motor;
+        state_msg.state.temperature_motor = has_motor_temp_ ? vesc_status.temperature_motor : 0.0;
         state_msg.state.current_input = vesc_status.current_input;
         state_msg.state.duty_cycle = vesc_status.duty_cycle;
         state_msg.state.tacho = vesc_status.tacho;
@@ -108,7 +114,20 @@ namespace vesc_driver {
     }
 
     void VescDriver::setDutyCycle(float duty_cycle) {
-        vesc_.setDutyCycle(duty_cycle);
+        vesc_.setDutyCycle(duty_cycle_limit_.clip(duty_cycle));
+    }
+
+    void VescDriver::setCurrent(float current) {
+        vesc_.setCurrent(current_limit_.clip(current));
+    }
+
+    void VescDriver::setBrake(float brake) {
+        vesc_.setBrake(brake_limit_.clip(std::abs(brake)));
+    }
+
+    void VescDriver::setSpeed(float speed) {
+        const auto clipped_speed = speed_limit_.clip(speed);
+        vesc_.setSpeed(clipped_speed * pole_pairs);
     }
 
 

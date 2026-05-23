@@ -128,3 +128,17 @@ void xesc_2040_driver::Xesc2040Driver::setDutyCycle(float duty_cycle) {
         xesc_interface->setDutyCycle(duty_cycle);
     }
 }
+
+void xesc_2040_driver::Xesc2040Driver::setCurrent(float current) {
+    ROS_WARN_STREAM_THROTTLE(5, "Current control is not supported by xesc_2040; command ignored.");
+}
+
+void xesc_2040_driver::Xesc2040Driver::setBrake(float brake) {
+    if (xesc_interface) {
+        xesc_interface->setDutyCycle(0.0);
+    }
+}
+
+void xesc_2040_driver::Xesc2040Driver::setSpeed(float speed) {
+    ROS_WARN_STREAM_THROTTLE(5, "RPM control is not supported by xesc_2040; command ignored.");
+}

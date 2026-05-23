@@ -307,6 +307,81 @@
         }
       ]
     },
+    "imu_settings": {
+      "title": "IMU Settings",
+      "type": "object",
+      "properties": {
+        "OM_USE_LSM6DSO_IMU": {
+          "type": "boolean",
+          "default": false,
+          "title": "Use LSM6DSO IMU",
+          "description": "Start the Raspberry Pi I2C LSM6DSO publisher and publish it to /ll/imu/data_raw.",
+          "x-environment-variable": "OM_USE_LSM6DSO_IMU"
+        },
+        "OM_LSM6DSO_I2C_BUS": {
+          "type": "integer",
+          "default": 1,
+          "title": "LSM6DSO I2C bus",
+          "description": "Raspberry Pi I2C bus number. Header pins 3 and 5 use bus 1.",
+          "x-environment-variable": "OM_LSM6DSO_I2C_BUS"
+        },
+        "OM_LSM6DSO_I2C_ADDRESS": {
+          "type": "string",
+          "default": "0x6B",
+          "title": "LSM6DSO I2C address",
+          "description": "SparkFun LSM6DSO default address is 0x6B. Use 0x6A if the address jumper is changed.",
+          "x-environment-variable": "OM_LSM6DSO_I2C_ADDRESS"
+        },
+        "OM_LSM6DSO_RATE_HZ": {
+          "type": "number",
+          "default": 104,
+          "title": "LSM6DSO publish rate",
+          "description": "IMU publish rate in Hz. The current driver configures the sensor for 104 Hz.",
+          "x-environment-variable": "OM_LSM6DSO_RATE_HZ"
+        },
+        "OM_LSM6DSO_ACCEL_RANGE_G": {
+          "type": "integer",
+          "enum": [
+            2,
+            4,
+            8,
+            16
+          ],
+          "default": 4,
+          "title": "LSM6DSO accel range",
+          "description": "Accelerometer full-scale range in g. Supported values: 2, 4, 8, 16.",
+          "x-environment-variable": "OM_LSM6DSO_ACCEL_RANGE_G"
+        },
+        "OM_LSM6DSO_GYRO_RANGE_DPS": {
+          "type": "integer",
+          "enum": [
+            125,
+            250,
+            500,
+            1000,
+            2000
+          ],
+          "default": 500,
+          "title": "LSM6DSO gyro range",
+          "description": "Gyroscope full-scale range in degrees per second. Supported values: 125, 250, 500, 1000, 2000.",
+          "x-environment-variable": "OM_LSM6DSO_GYRO_RANGE_DPS"
+        },
+        "OM_LSM6DSO_AXIS_CONFIG": {
+          "type": "string",
+          "default": "+X+Y+Z",
+          "title": "LSM6DSO axis config",
+          "description": "Signed sensor-axis mapping into base_link, for example +X+Y+Z or +X-Y-Z. Final value depends on sensor mounting orientation.",
+          "x-environment-variable": "OM_LSM6DSO_AXIS_CONFIG"
+        },
+        "OM_LSM6DSO_FRAME_ID": {
+          "type": "string",
+          "default": "base_link",
+          "title": "LSM6DSO frame ID",
+          "description": "ROS frame_id used on /ll/imu/data_raw.",
+          "x-environment-variable": "OM_LSM6DSO_FRAME_ID"
+        }
+      }
+    },
     "mower_logic_settings": {
       "title": "Mower Logic Settings",
       "type": "object",
@@ -462,6 +537,13 @@
           "title": "Enable Mowing Motor",
           "description": "Enable mowing motor. Set to false for testing.",
           "x-environment-variable": "OM_ENABLE_MOWER"
+        },
+        "OM_RANDOMIZE_MOWER_DIRECTION": {
+          "type": "boolean",
+          "default": false,
+          "title": "Randomize Mower Direction",
+          "description": "Alternate mower start direction on enable. Leave this disabled unless you explicitly want alternating blade rotation.",
+          "x-environment-variable": "OM_RANDOMIZE_MOWER_DIRECTION"
         },
         "OM_AUTOMATIC_MODE": {
           "type": "string",

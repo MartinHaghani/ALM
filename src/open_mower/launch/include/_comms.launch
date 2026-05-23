@@ -33,6 +33,24 @@
             </node>
         </group>
     </group>
+
+    <node if="$(eval optenv('OM_USE_LSM6DSO_IMU', 'False').lower() == 'true')"
+          pkg="open_mower"
+          type="lsm6dso_imu_node.py"
+          name="lsm6dso_imu"
+          output="screen"
+          respawn="true"
+          respawn_delay="5">
+        <param name="bus" value="$(optenv OM_LSM6DSO_I2C_BUS 1)" type="int"/>
+        <param name="address" value="$(optenv OM_LSM6DSO_I2C_ADDRESS 0x6B)"/>
+        <param name="rate_hz" value="$(optenv OM_LSM6DSO_RATE_HZ 104)" type="double"/>
+        <param name="accel_range_g" value="$(optenv OM_LSM6DSO_ACCEL_RANGE_G 4)" type="int"/>
+        <param name="gyro_range_dps" value="$(optenv OM_LSM6DSO_GYRO_RANGE_DPS 500)" type="int"/>
+        <param name="axis_config" value="$(optenv OM_LSM6DSO_AXIS_CONFIG +X+Y+Z)"/>
+        <param name="frame_id" value="$(optenv OM_LSM6DSO_FRAME_ID base_link)"/>
+        <remap from="imu" to="/ll/imu/data_raw"/>
+    </node>
+
     <group unless="$(optenv OM_NO_GPS False)">
     <!-- Correction input for both: v1 and v2 -->
         <include if="$(eval optenv('OM_USE_NTRIP', 'True').lower() == 'true' and optenv('OM_USE_RTCM_TCP', 'False').lower() != 'true')"

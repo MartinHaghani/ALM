@@ -14,6 +14,10 @@
 //
 #include "MowingBehavior.h"
 
+#include <algorithm>
+#include <cerrno>
+#include <cstdio>
+#include <cstring>
 #include <cryptopp/cryptlib.h>
 #include <cryptopp/hex.h>
 #include <cryptopp/sha.h>
@@ -23,23 +27,71 @@
 
 #include "mower_logic/CheckPoint.h"
 #include "mower_map/ClearNavPointSrv.h"
+#include "mower_map/GetDockingPointSrv.h"
 #include "mower_map/GetMowingAreaSrv.h"
 #include "mower_map/SetNavPointSrv.h"
+#include "xbot_msgs/MapOverlay.h"
+#include "IdleBehavior.h"
 
+extern ros::NodeHandle* n;
 extern ros::ServiceClient mapClient;
 extern ros::ServiceClient pathClient;
 extern ros::ServiceClient pathProgressClient;
 extern ros::ServiceClient setNavPointClient;
 extern ros::ServiceClient clearNavPointClient;
+extern ros::ServiceClient dockingPointClient;
 
 extern actionlib::SimpleActionClient<mbf_msgs::MoveBaseAction>* mbfClient;
 extern actionlib::SimpleActionClient<mbf_msgs::ExePathAction>* mbfClientExePath;
 extern mower_logic::MowerLogicConfig getConfig();
+extern bool isGpsGood();
 extern void setConfig(mower_logic::MowerLogicConfig);
+extern void stopBlade();
+extern void stopMoving();
 
 extern void registerActions(std::string prefix, const std::vector<xbot_msgs::ActionInfo>& actions);
 
 MowingBehavior MowingBehavior::INSTANCE;
+
+namespace {
+// The compiled WebUI bundle currently maps only red/green/blue overlay color names.
+constexpr char kFullPlanOverlayColor[] = "blue";
+constexpr char kRemainingPlanOverlayColor[] = "green";
+constexpr float kFullPlanOverlayLineWidth = 0.05f;
+constexpr float kRemainingPlanOverlayLineWidth = 0.10f;
+
+void add_overlay_polyline(xbot_msgs::MapOverlay& overlay, const std::vector<geometry_msgs::PoseStamped>& poses,
+                          size_t start_index, const char* color, float line_width) {
+  if (start_index >= poses.size() || (poses.size() - start_index) < 2) {
+    return;
+  }
+
+  xbot_msgs::MapOverlayPolygon polyline;
+  polyline.closed = false;
+  polyline.color = color;
+  polyline.line_width = line_width;
+
+  for (size_t pose_index = start_index; pose_index < poses.size(); ++pose_index) {
+    const auto& pose = poses[pose_index].pose.position;
+    geometry_msgs::Point32 pt;
+    pt.x = pose.x;
+    pt.y = pose.y;
+    pt.z = 0.0f;
+    polyline.polygon.points.push_back(pt);
+  }
+
+  overlay.polygons.push_back(polyline);
+}
+
+Behavior* getPostMowingBehavior() {
+  mower_map::GetDockingPointSrv get_docking_point_srv;
+  if (!dockingPointClient.call(get_docking_point_srv)) {
+    ROS_WARN_STREAM("MowingBehavior: No docking point configured, returning to IDLE instead of DOCKING.");
+    return &IdleBehavior::INSTANCE;
+  }
+  return &DockingBehavior::INSTANCE;
+}
+}  // namespace
 
 std::string MowingBehavior::state_name() {
   if (paused) {
@@ -53,15 +105,16 @@ Behavior* MowingBehavior::execute() {
 
   while (ros::ok() && !aborted) {
     if (currentMowingPaths.empty() && !create_mowing_plan(currentMowingArea)) {
-      ROS_INFO_STREAM("MowingBehavior: Could not create mowing plan, docking");
+      ROS_INFO_STREAM("MowingBehavior: Could not create mowing plan, leaving mowing state");
       // Start again from first area next time.
       reset();
-      // We cannot create a plan, so we're probably done. Go to docking station
-      return &DockingBehavior::INSTANCE;
+      // We cannot create a plan, so we're probably done.
+      return getPostMowingBehavior();
     }
 
     // No plan will be created if the area is skipped
     if (currentMowingPaths.empty()) {
+      clear_mowing_overlay();
       currentMowingArea++;
       currentMowingPath = 0;
       currentMowingPathIndex = 0;
@@ -78,6 +131,7 @@ Behavior* MowingBehavior::execute() {
       currentMowingPaths.clear();
       currentMowingPath = 0;
       currentMowingPathIndex = 0;
+      clear_mowing_overlay();
     }
   }
 
@@ -85,14 +139,16 @@ Behavior* MowingBehavior::execute() {
     // something went wrong
     return nullptr;
   }
-  // we got aborted, go to docking station
-  return &DockingBehavior::INSTANCE;
+  // we got aborted, or manual mowing completed, choose the safest reachable next state.
+  return getPostMowingBehavior();
 }
 
 void MowingBehavior::enter() {
   skip_area = false;
   skip_path = false;
   paused = aborted = false;
+  map_overlay_pub = n->advertise<xbot_msgs::MapOverlay>("xbot_monitoring/map_overlay", 10);
+  clear_mowing_overlay();
 
   for (auto& a : actions) {
     a.enabled = true;
@@ -101,6 +157,10 @@ void MowingBehavior::enter() {
 }
 
 void MowingBehavior::exit() {
+  clear_mowing_overlay();
+  if (map_overlay_pub) {
+    map_overlay_pub.shutdown();
+  }
   for (auto& a : actions) {
     a.enabled = false;
   }
@@ -112,6 +172,7 @@ void MowingBehavior::reset() {
   currentMowingArea = 0;
   currentMowingPath = 0;
   currentMowingPathIndex = 0;
+  clear_mowing_overlay();
   // increase cumulative mowing angle offset increment
   currentMowingAngleIncrementSum = std::fmod(currentMowingAngleIncrementSum + getConfig().mow_angle_increment, 360);
   checkpoint();
@@ -146,6 +207,7 @@ bool MowingBehavior::create_mowing_plan(int area_index) {
   ROS_INFO_STREAM("MowingBehavior: Creating mowing plan for area: " << area_index);
   // Delete old plan and progress.
   currentMowingPaths.clear();
+  clear_mowing_overlay();
 
   // get the mowing area
   mower_map::GetMowingAreaSrv mapSrv;
@@ -236,6 +298,7 @@ bool MowingBehavior::create_mowing_plan(int area_index) {
     currentMowingPathIndex = 0;
   }
 
+  publish_mowing_overlay();
   return true;
 }
 
@@ -303,7 +366,8 @@ bool MowingBehavior::execute_mowing_plan() {
     }
     if (paused) {
       paused_time = ros::Time::now();
-      while (!this->hasGoodGPS() && !aborted)  // while no good GPS we wait
+      while (!(getConfig().ignore_gps_errors || this->hasGoodGPS() || isGpsGood()) &&
+             !aborted)  // while no good GPS we wait
       {
         ROS_INFO_STREAM("MowingBehavior: PAUSED (" << (ros::Time::now() - paused_time).toSec()
                                                    << "s) (waiting for GPS)");
@@ -323,6 +387,7 @@ bool MowingBehavior::execute_mowing_plan() {
       ROS_INFO_STREAM("MowingBehavior: Skipping empty path.");
       currentMowingPath++;
       currentMowingPathIndex = 0;
+      publish_mowing_overlay();
       continue;
     }
 
@@ -364,12 +429,14 @@ bool MowingBehavior::execute_mowing_plan() {
             mbfClientExePath->cancelAllGoals();
             currentMowingPaths.clear();
             skip_area = false;
+            clear_mowing_overlay();
             return true;
           }
           if (skip_path) {
             skip_path = false;
             currentMowingPath++;
             currentMowingPathIndex = 0;
+            publish_mowing_overlay();
             return false;
           }
           if (aborted) {
@@ -415,6 +482,7 @@ bool MowingBehavior::execute_mowing_plan() {
                             << first_point_trim_counter << " / " << config.max_first_point_trim_attempts
                             << " Trimming first point off the beginning of the mow path.");
             currentMowingPathIndex++;
+            publish_mowing_overlay();
             first_point_trim_counter++;
             first_point_attempt_counter = 0;  // give it another <config.max_first_point_attempts> attempts
             paused = true;
@@ -479,12 +547,14 @@ bool MowingBehavior::execute_mowing_plan() {
             mowerEnabled = false;
             currentMowingPaths.clear();
             skip_area = false;
+            clear_mowing_overlay();
             return true;
           }
           if (skip_path) {
             skip_path = false;
             currentMowingPath++;
             currentMowingPathIndex = 0;
+            publish_mowing_overlay();
             return false;
           }
           if (aborted) {
@@ -503,7 +573,11 @@ bool MowingBehavior::execute_mowing_plan() {
             // show progress
             int currentIndex = getCurrentMowPathIndex();
             if (currentIndex != -1) {
-              currentMowingPathIndex = exePathStartIndex + currentIndex;
+              int nextMowingPathIndex = exePathStartIndex + currentIndex;
+              if (nextMowingPathIndex != currentMowingPathIndex) {
+                currentMowingPathIndex = nextMowingPathIndex;
+                publish_mowing_overlay();
+              }
             }
             ROS_INFO_STREAM_THROTTLE(
                 5, "MowingBehavior: (MOW) Progress: " << currentMowingPathIndex << "/" << path.path.poses.size());
@@ -534,6 +608,7 @@ bool MowingBehavior::execute_mowing_plan() {
           ROS_INFO_STREAM("MowingBehavior: (MOW) Mow path finished, skipping to next mow path.");
           currentMowingPath++;
           currentMowingPathIndex = 0;
+          publish_mowing_overlay();
           // continue with next segment
         } else {
           // we didnt drive all points in the mow path, so we go into pause mode
@@ -543,7 +618,11 @@ bool MowingBehavior::execute_mowing_plan() {
 
           // currentMowingPathIndex might be 0 if we never consumed one of the points, we advance at least 1 point
           if (currentMowingPathIndex == 0) currentMowingPathIndex++;
+          publish_mowing_overlay();
           if (!requested_pause_flag) {
+            mowerEnabled = false;
+            stopBlade();
+            stopMoving();
             ROS_INFO_STREAM("MowingBehavior: (MOW) PAUSED due to MBF Error at " << currentMowingPathIndex);
             paused = true;
             update_actions();
@@ -726,4 +805,62 @@ bool MowingBehavior::restore_checkpoint() {
     bag.close();
   }
   return found;
+}
+
+void MowingBehavior::start_new_session() {
+  ROS_INFO_STREAM("MowingBehavior: Starting a fresh mowing session, clearing any stored checkpoint.");
+  currentMowingPaths.clear();
+  currentMowingPath = 0;
+  currentMowingArea = 0;
+  currentMowingPathIndex = 0;
+  currentMowingPlanDigest.clear();
+  currentMowingAngleIncrementSum = 0.0;
+  last_checkpoint = ros::Time(0.0);
+
+  if (std::remove("checkpoint.bag") != 0 && errno != ENOENT) {
+    ROS_WARN_STREAM("MowingBehavior: Failed to remove checkpoint.bag: " << std::strerror(errno));
+  }
+}
+
+void MowingBehavior::publish_mowing_overlay() {
+  if (!map_overlay_pub) {
+    return;
+  }
+
+  if (currentMowingPaths.empty()) {
+    clear_mowing_overlay();
+    return;
+  }
+
+  const size_t current_path_index = static_cast<size_t>(currentMowingPath);
+  if (current_path_index >= currentMowingPaths.size()) {
+    clear_mowing_overlay();
+    return;
+  }
+
+  xbot_msgs::MapOverlay overlay;
+
+  for (const auto& mowing_path : currentMowingPaths) {
+    add_overlay_polyline(
+        overlay, mowing_path.path.poses, 0, kFullPlanOverlayColor, kFullPlanOverlayLineWidth);
+  }
+
+  for (size_t path_index = current_path_index; path_index < currentMowingPaths.size(); ++path_index) {
+    const auto& mowing_path = currentMowingPaths[path_index];
+    const size_t start_index = path_index == current_path_index ? static_cast<size_t>(std::max(currentMowingPathIndex, 0))
+                                                                : 0;
+    add_overlay_polyline(
+        overlay, mowing_path.path.poses, start_index, kRemainingPlanOverlayColor, kRemainingPlanOverlayLineWidth);
+  }
+
+  map_overlay_pub.publish(overlay);
+}
+
+void MowingBehavior::clear_mowing_overlay() {
+  if (!map_overlay_pub) {
+    return;
+  }
+
+  xbot_msgs::MapOverlay overlay;
+  map_overlay_pub.publish(overlay);
 }

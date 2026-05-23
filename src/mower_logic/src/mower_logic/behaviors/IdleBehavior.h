@@ -15,6 +15,8 @@
 #ifndef SRC_IDLEBEHAVIOR_H
 #define SRC_IDLEBEHAVIOR_H
 
+#include <atomic>
+
 #include <dynamic_reconfigure/server.h>
 #include <mower_map/GetDockingPointSrv.h>
 
@@ -27,8 +29,8 @@
 class IdleBehavior : public Behavior {
  private:
   bool stay_docked = false;
-  bool manual_start_mowing = false;
-  bool start_area_recorder = false;
+  std::atomic_bool manual_start_mowing{false};
+  std::atomic_bool start_area_recorder{false};
   std::vector<xbot_msgs::ActionInfo> actions;
 
  public:

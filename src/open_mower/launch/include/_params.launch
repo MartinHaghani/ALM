@@ -111,6 +111,7 @@
         <param name="mower_logic/perimeter_signal" value="$(optenv OM_PERIMETER_SIGNAL)"/>
         <param name="mower_logic/tool_width" value="$(env OM_TOOL_WIDTH)"/>
         <param name="mower_logic/enable_mower" value="$(env OM_ENABLE_MOWER)"/>
+        <param name="mower_logic/randomize_mower_direction" value="$(optenv OM_RANDOMIZE_MOWER_DIRECTION False)"/>
         <param name="ll/services/power/battery_empty_voltage" value="$(env OM_BATTERY_EMPTY_VOLTAGE)"/>
         <param
                 name="ll/services/power/battery_critical_voltage"

@@ -20,6 +20,7 @@ Purpose: explain the repo’s actual configuration model, sources of truth, and 
 - The observed top-level groups are:
   - `important_settings` with title `Hardware Settings`
   - `gps_settings` with title `GPS Settings`
+  - `imu_settings` with title `IMU Settings`
   - `mower_logic_settings` with title `Mower Logic Settings`
   - `external_mqtt_broker` with title `External MQTT Broker`
   - `sound_settings` with title `Sound Settings`
@@ -70,6 +71,7 @@ Observed from `docker/openmower_entrypoint.legacy.sh` and `_params.launch`:
 - In legacy mode, `_params.launch` maps many environment variables directly onto the ROS parameter server for mower comms, GPS, xbot positioning, correction input, mower logic, monitoring, and snapshot features.
 - `_comms.launch` starts the built-in NTRIP client only when `OM_USE_NTRIP=True` and `OM_USE_RTCM_TCP` is not truthy.
 - `_comms.launch` starts `open_mower/scripts/rtcm_tcp_bridge.py` when `OM_USE_RTCM_TCP=True`, publishing raw TCP RTCM into the same `/ll/position/gps/rtcm` path used by the GPS driver.
+- `_comms.launch` starts `open_mower/scripts/lsm6dso_imu_node.py` when `OM_USE_LSM6DSO_IMU=True`, publishing the Raspberry Pi I2C LSM6DSO to `/ll/imu/data_raw`.
 
 ## Schema grouping summary
 
@@ -102,12 +104,29 @@ Choose one correction source in normal operation:
 
 If both are truthy, the current launch wiring gives raw TCP precedence and skips the NTRIP client.
 
+### IMU settings
+
+Observed examples:
+
+- `OM_USE_LSM6DSO_IMU`
+- `OM_LSM6DSO_I2C_BUS`
+- `OM_LSM6DSO_I2C_ADDRESS`
+- `OM_LSM6DSO_RATE_HZ`
+- `OM_LSM6DSO_ACCEL_RANGE_G`
+- `OM_LSM6DSO_GYRO_RANGE_DPS`
+- `OM_LSM6DSO_AXIS_CONFIG`
+- `OM_LSM6DSO_FRAME_ID`
+
+These settings are for the current Raspberry Pi I2C SparkFun LSM6DSO replacement path. They are disabled by default so existing low-level-board IMU publishers do not silently compete with the new node.
+
 ### Mower logic settings
 
 Observed examples:
 
 - docking and undocking distances and timing
 - tool width
+- `OM_ENABLE_MOWER`
+- `OM_RANDOMIZE_MOWER_DIRECTION`
 - battery voltage thresholds
 - mower motor temperature thresholds
 - GPS wait and timeout settings

@@ -50,6 +50,24 @@ void xesc_driver::XescDriver::setDutyCycle(float duty_cycle) {
     xesc_driver->setDutyCycle(duty_cycle);
 }
 
+void xesc_driver::XescDriver::setCurrent(float current) {
+    if (!xesc_driver)
+        return;
+    xesc_driver->setCurrent(current);
+}
+
+void xesc_driver::XescDriver::setBrake(float brake) {
+    if (!xesc_driver)
+        return;
+    xesc_driver->setBrake(brake);
+}
+
+void xesc_driver::XescDriver::setSpeed(float speed) {
+    if (!xesc_driver)
+        return;
+    xesc_driver->setSpeed(speed);
+}
+
 xesc_driver::XescDriver::~XescDriver() {
     if (xesc_driver) {
         delete xesc_driver;

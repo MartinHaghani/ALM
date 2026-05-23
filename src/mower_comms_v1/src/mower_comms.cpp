@@ -29,6 +29,7 @@
 
 #include <algorithm>
 #include <bitset>
+#include <cmath>
 
 #include "COBS.h"
 #include "boost/crc.hpp"
@@ -48,6 +49,35 @@
 namespace {
 constexpr const char* kLogicReconfigureService = "/mower_logic/set_parameters";
 constexpr const char* kPowerReconfigureService = "/ll/services/power/set_parameters";
+constexpr double kLlEmergencyReleaseGraceSeconds = 0.35;
+
+enum class MowControlMode {
+  DUTY,
+  CURRENT,
+  RPM,
+};
+
+struct ActuatorCommands {
+  float left_duty = 0.0f;
+  float right_duty = 0.0f;
+  float mow_duty = 0.0f;
+  float mow_current = 0.0f;
+  float mow_brake_current = 0.0f;
+  float mow_rpm = 0.0f;
+  bool mow_use_current_override = false;
+};
+
+bool isMowCommandEnabled(MowControlMode mode, float target_duty, float target_current, float target_rpm) {
+  switch (mode) {
+    case MowControlMode::RPM:
+      return target_rpm != 0.0f;
+    case MowControlMode::CURRENT:
+      return target_current != 0.0f;
+    case MowControlMode::DUTY:
+    default:
+      return target_duty != 0.0f;
+  }
+}
 }
 
 ros::Publisher status_pub;
@@ -69,12 +99,38 @@ uint8_t active_low_level_emergency = 0;
 
 // True, if the LL emergency should be cleared in the next request
 bool ll_clear_emergency = false;
+ros::Time ll_clear_requested_at(0.0);
 
 // True, if we can send to the low level board
 bool allow_send = false;
+bool configured_ignore_low_level_emergency_inputs = false;
 
-// Current speeds (duty cycle) for the three ESCs
-float speed_l = 0, speed_r = 0, speed_mow = 0, target_speed_mow = 0;
+// Current speeds (duty cycle) for the drive ESCs, plus mower command state
+float speed_l = 0, speed_r = 0;
+float applied_speed_l = 0, applied_speed_r = 0;
+float target_speed_mow = 0;
+float target_current_mow = 0;
+float target_rpm_mow = 0;
+float configured_target_duty_mow = 1;
+float configured_target_current_mow = 15;
+float configured_target_rpm_mow = 3200;
+float configured_stop_brake_current_mow = 0;
+float configured_startup_boost_duty_mow = 0;
+float configured_startup_boost_current_mow = 0;
+double configured_target_duty_ramp_seconds = 0.8;
+double configured_drive_command_scale = 1.0;
+double configured_mowing_drive_command_scale = 1.0;
+double configured_drive_command_ramp_up_seconds = 0.0;
+double configured_drive_command_ramp_down_seconds = 0.0;
+double configured_startup_boost_duration_seconds = 0.0;
+double configured_startup_boost_rpm_threshold = 0.0;
+double configured_startup_boost_release_rpm_threshold = 0.0;
+double configured_stop_brake_duration_seconds = 0.0;
+MowControlMode mow_control_mode = MowControlMode::DUTY;
+ros::Time mow_enable_started_at(0.0);
+ros::Time mow_disable_started_at(0.0);
+double last_observed_mower_motor_rpm = 0.0;
+bool mow_started_from_rest = false;
 
 // Ticks / m and wheel distance for this robot
 double wheel_ticks_per_m = 0.0;
@@ -94,6 +150,7 @@ ll::PowerConfig power_config;
 serial::Serial serial_port;
 uint8_t out_buf[1000];
 ros::Time last_cmd_vel(0.0);
+ros::Time last_drive_command_update(0.0);
 
 boost::crc_ccitt_type crc;
 
@@ -121,30 +178,144 @@ bool is_emergency() {
   return emergency_high_level || emergency_low_level;
 }
 
-void publishActuators() {
-  speed_mow = target_speed_mow;
+float clampDriveDuty(float duty) {
+  if (duty >= 1.0f) {
+    return 1.0f;
+  }
+  if (duty <= -1.0f) {
+    return -1.0f;
+  }
+  return duty;
+}
+
+float moveToward(float current, float target, float max_delta) {
+  if (max_delta <= 0.0f) {
+    return target;
+  }
+  if (target > current) {
+    return std::min(target, current + max_delta);
+  }
+  return std::max(target, current - max_delta);
+}
+
+float getDriveCommandScale() {
+  const bool mowing_state = last_high_level_status.state_name == "MOWING";
+  const double configured_scale = mowing_state ? configured_mowing_drive_command_scale : configured_drive_command_scale;
+  return clampDriveDuty(static_cast<float>(configured_scale));
+}
+
+void updateDriveDutyCommands(float target_left, float target_right, const ros::Time& now, bool force_stop) {
+  target_left = clampDriveDuty(target_left);
+  target_right = clampDriveDuty(target_right);
+
+  double dt = 0.02;
+  if (last_drive_command_update != ros::Time(0.0)) {
+    dt = std::max(0.0, (now - last_drive_command_update).toSec());
+  }
+  last_drive_command_update = now;
+
+  if (force_stop) {
+    applied_speed_l = 0.0f;
+    applied_speed_r = 0.0f;
+    return;
+  }
+
+  const auto ramp_channel = [dt](float current, float target) {
+    const bool changing_direction = current != 0.0f && target != 0.0f && ((current > 0.0f) != (target > 0.0f));
+    const bool increasing_magnitude = std::abs(target) > std::abs(current);
+    const double ramp_seconds =
+        (changing_direction || !increasing_magnitude) ? configured_drive_command_ramp_down_seconds
+                                                      : configured_drive_command_ramp_up_seconds;
+    if (ramp_seconds <= 0.0) {
+      return target;
+    }
+    return moveToward(current, target, static_cast<float>(dt / ramp_seconds));
+  };
+
+  applied_speed_l = ramp_channel(applied_speed_l, target_left);
+  applied_speed_r = ramp_channel(applied_speed_r, target_right);
+}
+
+ActuatorCommands getActuatorCommands() {
+  ActuatorCommands commands;
+  const bool drive_force_stop = is_emergency() || (ros::Time::now() - last_cmd_vel > ros::Duration(1.0));
+  const float drive_scale = getDriveCommandScale();
+  updateDriveDutyCommands(speed_l * drive_scale, speed_r * drive_scale, ros::Time::now(), drive_force_stop);
+
+  commands.left_duty = applied_speed_l;
+  commands.right_duty = applied_speed_r;
+  commands.mow_duty = target_speed_mow;
+  commands.mow_current = target_current_mow;
+  commands.mow_rpm = target_rpm_mow;
 
   // emergency or timeout -> send 0 speeds
   if (is_emergency()) {
-    speed_l = 0;
-    speed_r = 0;
-    speed_mow = 0;
+    commands.left_duty = 0;
+    commands.right_duty = 0;
+    commands.mow_duty = 0;
+    commands.mow_current = 0;
+    commands.mow_rpm = 0;
   }
   if (ros::Time::now() - last_cmd_vel > ros::Duration(1.0)) {
-    speed_l = 0;
-    speed_r = 0;
+    commands.left_duty = 0;
+    commands.right_duty = 0;
   }
-  if (ros::Time::now() - last_cmd_vel > ros::Duration(25.0)) {
-    speed_l = 0;
-    speed_r = 0;
-    speed_mow = 0;
+  const double observed_mower_motor_rpm = std::abs(last_observed_mower_motor_rpm);
+  const bool startup_boost_active =
+      mow_control_mode == MowControlMode::DUTY && mow_started_from_rest && commands.mow_duty != 0.0f &&
+      configured_startup_boost_duration_seconds > 0.0 &&
+      ros::Time::now() - mow_enable_started_at <= ros::Duration(configured_startup_boost_duration_seconds) &&
+      (configured_startup_boost_release_rpm_threshold <= 0.0 ||
+       observed_mower_motor_rpm < configured_startup_boost_release_rpm_threshold);
+  if (startup_boost_active && configured_startup_boost_current_mow > 0.0f) {
+    commands.mow_current = std::copysign(configured_startup_boost_current_mow, commands.mow_duty);
+    commands.mow_use_current_override = true;
+  }
+  if (mow_control_mode == MowControlMode::DUTY && commands.mow_duty != 0.0f && configured_target_duty_ramp_seconds > 0.0) {
+    const float target_mow_duty = commands.mow_duty;
+    const float target_mow_duty_abs = std::abs(target_mow_duty);
+    float ramp_start_abs = 0.0f;
+    if (mow_started_from_rest && configured_startup_boost_duty_mow > 0.0f) {
+      ramp_start_abs = std::min(configured_startup_boost_duty_mow, target_mow_duty_abs);
+    }
+    const double ramp_progress =
+        std::min(1.0, (ros::Time::now() - mow_enable_started_at).toSec() / configured_target_duty_ramp_seconds);
+    const float ramped_mow_duty_abs =
+        ramp_start_abs + ((target_mow_duty_abs - ramp_start_abs) * static_cast<float>(ramp_progress));
+    commands.mow_duty = std::copysign(ramped_mow_duty_abs, target_mow_duty);
+  }
+  if (!isMowCommandEnabled(mow_control_mode, commands.mow_duty, commands.mow_current, commands.mow_rpm) &&
+      configured_stop_brake_current_mow > 0.0f && configured_stop_brake_duration_seconds > 0.0 &&
+      mow_disable_started_at != ros::Time(0.0) &&
+      ros::Time::now() - mow_disable_started_at <= ros::Duration(configured_stop_brake_duration_seconds)) {
+    commands.mow_brake_current = configured_stop_brake_current_mow;
   }
 
+  return commands;
+}
+
+void publishEscActuators(const ActuatorCommands& commands) {
+  // Keep drive commands first so mower-side startup stalls cannot make teleop feel sluggish.
+  left_xesc_interface->setDutyCycle(left_xesc_invert_direction ? -commands.left_duty : commands.left_duty);
+  right_xesc_interface->setDutyCycle(right_xesc_invert_direction ? -commands.right_duty : commands.right_duty);
+
   if (mow_xesc_interface) {
-    mow_xesc_interface->setDutyCycle(speed_mow);
+    if (commands.mow_brake_current != 0.0f) {
+      mow_xesc_interface->setBrake(commands.mow_brake_current);
+    } else if (commands.mow_use_current_override) {
+      mow_xesc_interface->setCurrent(commands.mow_current);
+    } else if (mow_control_mode == MowControlMode::RPM) {
+      mow_xesc_interface->setSpeed(commands.mow_rpm);
+    } else if (mow_control_mode == MowControlMode::CURRENT) {
+      mow_xesc_interface->setCurrent(commands.mow_current);
+    } else {
+      mow_xesc_interface->setDutyCycle(commands.mow_duty);
+    }
   }
-  left_xesc_interface->setDutyCycle(left_xesc_invert_direction ? -speed_l : speed_l);
-  right_xesc_interface->setDutyCycle(right_xesc_invert_direction ? -speed_r : speed_r);
+}
+
+void publishActuators() {
+  publishEscActuators(getActuatorCommands());
 
   struct ll_heartbeat heartbeat = {.type = PACKET_ID_LL_HEARTBEAT,
                                    // If high level has emergency and LL does not know yet, we set it
@@ -227,16 +398,38 @@ void publishStatus() {
   status_msg.sound_module_available = (last_ll_status.status_bitmask & 0b00100000) != 0;
   status_msg.sound_module_busy = (last_ll_status.status_bitmask & 0b01000000) != 0;
   status_msg.ui_board_available = (last_ll_status.status_bitmask & 0b10000000) != 0;
-  status_msg.mow_enabled = !(target_speed_mow == 0);
+  status_msg.mow_enabled = isMowCommandEnabled(mow_control_mode, target_speed_mow, target_current_mow, target_rpm_mow);
 
-  // overwrite emergency with the LL value.
-  emergency_low_level = last_ll_status.emergency_bitmask > 0;
-  active_low_level_emergency = last_ll_status.emergency_bitmask & 0xFE;
-  if (!emergency_low_level) {
-    // it obviously worked, reset the request
+  // Distinguish active emergency inputs from the low-level board's aggregate latch bit.
+  // Some LL firmware revisions can keep the latch bit asserted briefly after a clear request
+  // even when no active stop/lift source remains. Keep the release request asserted, but stop
+  // blocking the mower once we only see a stale latch after an operator-triggered clear.
+  const uint8_t low_level_emergency_bitmask = last_ll_status.emergency_bitmask;
+  const bool low_level_latch_bit = (low_level_emergency_bitmask & LL_EMERGENCY_BIT_LATCH) != 0;
+  active_low_level_emergency = low_level_emergency_bitmask & ~LL_EMERGENCY_BIT_LATCH;
+  const bool latch_only_emergency = low_level_latch_bit && active_low_level_emergency == 0;
+  const bool stale_latch_after_release =
+      latch_only_emergency && ll_clear_emergency && ll_clear_requested_at != ros::Time(0.0) &&
+      ros::Time::now() - ll_clear_requested_at > ros::Duration(kLlEmergencyReleaseGraceSeconds);
+
+  if (configured_ignore_low_level_emergency_inputs) {
+    active_low_level_emergency = 0;
+    emergency_low_level = false;
     ll_clear_emergency = false;
+    ll_clear_requested_at = ros::Time(0.0);
   } else {
-    ROS_ERROR_STREAM_THROTTLE(1, "Low Level Emergency. Bitmask was: " << (int)last_ll_status.emergency_bitmask);
+    emergency_low_level = active_low_level_emergency > 0 || (low_level_latch_bit && !stale_latch_after_release);
+    if (!low_level_latch_bit && active_low_level_emergency == 0) {
+      // The low-level board has fully released the emergency latch; stop requesting release.
+      ll_clear_emergency = false;
+      ll_clear_requested_at = ros::Time(0.0);
+    } else if (stale_latch_after_release) {
+      ROS_WARN_STREAM_THROTTLE(
+          1.0, "Ignoring stale low-level emergency latch bit after release request. Bitmask was: "
+                   << static_cast<int>(low_level_emergency_bitmask));
+    } else {
+      ROS_ERROR_STREAM_THROTTLE(1.0, "Low Level Emergency. Bitmask was: " << static_cast<int>(low_level_emergency_bitmask));
+    }
   }
 
   // True, if high or low level emergency condition is present
@@ -275,6 +468,7 @@ void publishStatus() {
   status_msg.mower_esc_current = static_cast<float>(mow_status.state.current_input);
   status_msg.mower_esc_status = mow_status.state.connection_state;
   status_msg.mower_motor_rpm = mow_status.state.rpm;
+  last_observed_mower_motor_rpm = mow_status.state.rpm;
   status_msg.mower_esc_temperature = static_cast<float>(mow_status.state.temperature_pcb);
   status_msg.mower_motor_temperature = static_cast<float>(mow_status.state.temperature_motor);
 
@@ -431,12 +625,49 @@ void publishActuatorsTimerTask(const ros::TimerEvent& timer_event) {
 }
 
 bool setMowEnabled(mower_msgs::MowerControlSrvRequest& req, mower_msgs::MowerControlSrvResponse& res) {
+  const bool was_enabled = isMowCommandEnabled(mow_control_mode, target_speed_mow, target_current_mow, target_rpm_mow);
+
   if (req.mow_enabled && !is_emergency()) {
-    target_speed_mow = req.mow_direction ? 1 : -1;
+    if (mow_control_mode == MowControlMode::RPM) {
+      target_speed_mow = 0;
+      target_current_mow = 0;
+      target_rpm_mow = req.mow_direction ? configured_target_rpm_mow : -configured_target_rpm_mow;
+    } else if (mow_control_mode == MowControlMode::CURRENT) {
+      target_speed_mow = 0;
+      target_current_mow = req.mow_direction ? configured_target_current_mow : -configured_target_current_mow;
+      target_rpm_mow = 0;
+    } else {
+      target_speed_mow = req.mow_direction ? configured_target_duty_mow : -configured_target_duty_mow;
+      target_current_mow = 0;
+      target_rpm_mow = 0;
+    }
   } else {
     target_speed_mow = 0;
+    target_current_mow = 0;
+    target_rpm_mow = 0;
   }
-  ROS_INFO_STREAM("Setting mow enabled to " << target_speed_mow);
+
+  const bool is_enabled = isMowCommandEnabled(mow_control_mode, target_speed_mow, target_current_mow, target_rpm_mow);
+  if (is_enabled && !was_enabled) {
+    mow_started_from_rest = std::abs(last_observed_mower_motor_rpm) <= configured_startup_boost_rpm_threshold;
+    mow_enable_started_at = ros::Time::now();
+    mow_disable_started_at = ros::Time(0.0);
+  } else if (!is_enabled && was_enabled) {
+    mow_started_from_rest = false;
+    mow_enable_started_at = ros::Time(0.0);
+    mow_disable_started_at = ros::Time::now();
+  }
+
+  ROS_INFO_STREAM("Setting mow enabled to "
+                  << (mow_control_mode == MowControlMode::RPM
+                          ? target_rpm_mow
+                          : (mow_control_mode == MowControlMode::CURRENT ? target_current_mow : target_speed_mow))
+                  << " in "
+                  << (mow_control_mode == MowControlMode::RPM
+                          ? "rpm"
+                          : (mow_control_mode == MowControlMode::CURRENT ? "current" : "duty"))
+                  << " mode");
+  publishEscActuators(getActuatorCommands());
   return true;
 }
 
@@ -444,8 +675,15 @@ bool setEmergencyStop(mower_msgs::EmergencyStopSrvRequest& req, mower_msgs::Emer
   if (req.emergency) {
     ROS_ERROR_STREAM("Setting emergency!!");
     ll_clear_emergency = false;
+    ll_clear_requested_at = ros::Time(0.0);
   } else {
     ll_clear_emergency = true;
+    ll_clear_requested_at = ros::Time::now();
+    if ((last_ll_status.emergency_bitmask & ~LL_EMERGENCY_BIT_LATCH) == 0) {
+      last_ll_status.emergency_bitmask = 0;
+      active_low_level_emergency = 0;
+      emergency_low_level = false;
+    }
   }
   // Set the high level emergency instantly. Low level value will be set on next update.
   emergency_high_level = req.emergency;
@@ -454,6 +692,7 @@ bool setEmergencyStop(mower_msgs::EmergencyStopSrvRequest& req, mower_msgs::Emer
 }
 
 void highLevelStatusReceived(const mower_msgs::HighLevelStatus::ConstPtr& msg) {
+  last_high_level_status = *msg;
   struct ll_high_level_state hl_state = {.type = PACKET_ID_LL_HIGH_LEVEL_STATE,
                                          .current_mode = msg->state,
                                          .gps_quality = static_cast<uint8_t>(msg->gps_quality_percent * 100.0)};
@@ -491,6 +730,8 @@ void velReceived(const geometry_msgs::Twist::ConstPtr& msg) {
   } else if (speed_r <= -1.0) {
     speed_r = -1.0;
   }
+
+  publishEscActuators(getActuatorCommands());
 }
 
 void handleLowLevelUIEvent(struct ll_ui_event* ui_event) {
@@ -747,13 +988,70 @@ int main(int argc, char** argv) {
   paramNh.getParam("services/diff_drive/wheel_distance_m", wheel_distance_m);
   leftParamNh.param("invert_direction", left_xesc_invert_direction, false);
   rightParamNh.param("invert_direction", right_xesc_invert_direction, true);
+  {
+    const auto mower_mode = mowerParamNh.param<std::string>("control_mode", "duty");
+    if (mower_mode == "rpm") {
+      mow_control_mode = MowControlMode::RPM;
+    } else if (mower_mode == "current") {
+      mow_control_mode = MowControlMode::CURRENT;
+    } else if (mower_mode == "duty") {
+      mow_control_mode = MowControlMode::DUTY;
+    } else {
+      ROS_WARN_STREAM("Unknown mower_xesc control_mode '" << mower_mode << "', falling back to duty.");
+      mow_control_mode = MowControlMode::DUTY;
+    }
+  }
+  mowerParamNh.param("target_duty_cycle", configured_target_duty_mow, 1.0f);
+  mowerParamNh.param("target_motor_current", configured_target_current_mow, 15.0f);
+  mowerParamNh.param("target_motor_rpm", configured_target_rpm_mow, 3200.0f);
+  mowerParamNh.param("startup_boost_duty_cycle", configured_startup_boost_duty_mow, 0.0f);
+  mowerParamNh.param("startup_boost_current", configured_startup_boost_current_mow, 0.0f);
+  mowerParamNh.param("stop_brake_current", configured_stop_brake_current_mow, 0.0f);
+  mowerParamNh.param("target_duty_ramp_seconds", configured_target_duty_ramp_seconds, 0.8);
+  paramNh.param("services/diff_drive/drive_command_scale", configured_drive_command_scale, 1.0);
+  paramNh.param("services/diff_drive/mowing_drive_command_scale", configured_mowing_drive_command_scale,
+                configured_drive_command_scale);
+  paramNh.param("services/diff_drive/ignore_low_level_emergency_inputs", configured_ignore_low_level_emergency_inputs,
+                false);
+  paramNh.param("services/diff_drive/drive_command_ramp_up_seconds", configured_drive_command_ramp_up_seconds, 0.0);
+  paramNh.param("services/diff_drive/drive_command_ramp_down_seconds", configured_drive_command_ramp_down_seconds, 0.0);
+  mowerParamNh.param("startup_boost_duration_seconds", configured_startup_boost_duration_seconds, 0.0);
+  mowerParamNh.param("startup_boost_rpm_threshold", configured_startup_boost_rpm_threshold, 0.0);
+  mowerParamNh.param("startup_boost_release_rpm_threshold", configured_startup_boost_release_rpm_threshold,
+                     configured_startup_boost_rpm_threshold);
+  mowerParamNh.param("stop_brake_duration_seconds", configured_stop_brake_duration_seconds, 0.0);
 
   ROS_INFO_STREAM("Wheel ticks [1/m]: " << wheel_ticks_per_m);
   ROS_INFO_STREAM("Wheel distance [m]: " << wheel_distance_m);
+  ROS_INFO_STREAM("Drive command scale: " << configured_drive_command_scale);
+  ROS_INFO_STREAM("Mowing drive command scale: " << configured_mowing_drive_command_scale);
+  ROS_INFO_STREAM("Ignore low-level emergency inputs: "
+                  << (configured_ignore_low_level_emergency_inputs ? "true" : "false"));
+  ROS_INFO_STREAM("Drive command ramp up seconds: " << configured_drive_command_ramp_up_seconds);
+  ROS_INFO_STREAM("Drive command ramp down seconds: " << configured_drive_command_ramp_down_seconds);
   ROS_INFO_STREAM("Left drive ESC invert direction: " << (left_xesc_invert_direction ? "true" : "false"));
   ROS_INFO_STREAM("Right drive ESC invert direction: " << (right_xesc_invert_direction ? "true" : "false"));
+  ROS_INFO_STREAM("Mower ESC control mode: "
+                  << (mow_control_mode == MowControlMode::RPM
+                          ? "rpm"
+                          : (mow_control_mode == MowControlMode::CURRENT ? "current" : "duty")));
+  if (mow_control_mode == MowControlMode::DUTY) {
+    ROS_INFO_STREAM("Mower ESC target duty cycle: " << configured_target_duty_mow);
+    ROS_INFO_STREAM("Mower ESC duty ramp seconds: " << configured_target_duty_ramp_seconds);
+    ROS_INFO_STREAM("Mower ESC startup boost duty cycle: " << configured_startup_boost_duty_mow);
+    ROS_INFO_STREAM("Mower ESC startup boost current: " << configured_startup_boost_current_mow);
+    ROS_INFO_STREAM("Mower ESC startup boost duration seconds: " << configured_startup_boost_duration_seconds);
+    ROS_INFO_STREAM("Mower ESC startup boost rpm threshold: " << configured_startup_boost_rpm_threshold);
+    ROS_INFO_STREAM("Mower ESC startup boost release rpm threshold: " << configured_startup_boost_release_rpm_threshold);
+  } else if (mow_control_mode == MowControlMode::CURRENT) {
+    ROS_INFO_STREAM("Mower ESC target motor current: " << configured_target_current_mow);
+  } else if (mow_control_mode == MowControlMode::RPM) {
+    ROS_INFO_STREAM("Mower ESC target motor rpm: " << configured_target_rpm_mow);
+  }
+  ROS_INFO_STREAM("Mower ESC stop brake current: " << configured_stop_brake_current_mow);
+  ROS_INFO_STREAM("Mower ESC stop brake duration seconds: " << configured_stop_brake_duration_seconds);
 
-  speed_l = speed_r = speed_mow = target_speed_mow = 0;
+  speed_l = speed_r = applied_speed_l = applied_speed_r = target_speed_mow = target_current_mow = target_rpm_mow = 0;
 
   // Some generic settings from param server (non- dynamic)
   llhl_config.options.ignore_charging_current =
@@ -895,7 +1193,13 @@ int main(int argc, char** argv) {
   spinner.stop();
 
   if (mow_xesc_interface) {
-    mow_xesc_interface->setDutyCycle(0.0);
+    if (mow_control_mode == MowControlMode::RPM) {
+      mow_xesc_interface->setSpeed(0.0);
+    } else if (mow_control_mode == MowControlMode::CURRENT) {
+      mow_xesc_interface->setCurrent(0.0);
+    } else {
+      mow_xesc_interface->setDutyCycle(0.0);
+    }
     mow_xesc_interface->stop();
   }
   left_xesc_interface->setDutyCycle(0.0);

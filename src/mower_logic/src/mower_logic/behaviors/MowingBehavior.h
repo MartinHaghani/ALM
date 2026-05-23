@@ -25,12 +25,15 @@
 class MowingBehavior : public Behavior {
  private:
   std::vector<xbot_msgs::ActionInfo> actions;
+  ros::Publisher map_overlay_pub;
 
   bool skip_area;
   bool skip_path;
   bool create_mowing_plan(int area_index);
 
   bool execute_mowing_plan();
+  void publish_mowing_overlay();
+  void clear_mowing_overlay();
 
   // Progress
   bool mowerEnabled = false;
@@ -89,6 +92,8 @@ class MowingBehavior : public Behavior {
   void checkpoint();
 
   bool restore_checkpoint();
+
+  void start_new_session();
 };
 
 #endif  // SRC_MOWINGBEHAVIOR_H

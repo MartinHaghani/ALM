@@ -16,6 +16,8 @@ In the current Pi-dev workflow, the main container provides `nginx` and `rosbrid
 
 This guide does not assume OpenMower OS v2 is already installed on the Pi.
 
+For the current custom `Mowrator` bench hardware sequence, use [MOWRATOR_BENCH_BRINGUP.md](MOWRATOR_BENCH_BRINGUP.md) before connecting ESCs or motors.
+
 ## Recommended layout on the Pi
 
 - repo checkout: `~/open_mower_ros`
@@ -45,6 +47,24 @@ Optional hardening for the manual-update workflow:
 ```bash
 git config pull.ff only
 ```
+
+## Host Wi-Fi profile notes
+
+Wi-Fi credentials for the Pi live on the Raspberry Pi OS host, not in this repo and not in `~/mower_config.sh`. On a default Raspberry Pi OS setup, NetworkManager stores the saved SSID profile under `/etc/NetworkManager/system-connections/`.
+
+For a mesh network, keep the saved profile free of a fixed BSSID so the Pi can roam between extenders. If outdoor range and consistency matter more than peak throughput, prefer a 2.4 GHz-only client profile:
+
+```bash
+sudo nmcli connection modify "YOUR_SSID" 802-11-wireless.band bg
+sudo nmcli connection down "YOUR_SSID"
+sudo nmcli connection up "YOUR_SSID"
+```
+
+Notes:
+
+- `connection.autoconnect=yes` keeps the saved profile reconnecting on the next boot.
+- leaving `802-11-wireless.bssid` unset keeps roaming mesh-friendly instead of pinning the Pi to one extender.
+- use the host Wi-Fi profile for SSID, password, and band selection; do not expect runtime mower config files in this repo to manage host networking.
 
 ## Create the Pi config file
 
@@ -171,6 +191,32 @@ Expected service endpoints after startup:
 - `ws://rpi4.local:9002/` for `xbot_remote`
 - `mqtt://rpi4.local:1883` for MQTT
 - `ws://rpi4.local:9001/` for MQTT-over-WebSockets
+
+Current `Mowrator` web/gamepad mapping:
+
+- the editable source of the served UI lives in the separate `OpenMowerApp` Flutter repository; do not hand-edit the compiled `web/` bundle for feature work
+- in `AREA_RECORDING`, the left stick drives without a gamepad deadman
+- the remote-control screen exposes a press-and-hold blade button
+- holding `L1 + R1` also runs the blade while held
+- both blade hold paths reuse the active mower profile's blade control mode
+- the hold path in `mower_logic` now exposes a stable `start_manual_mowing` / `stop_manual_mowing` pair to the WebUI and gamepad, with a brief 50 ms-polled stop-chatter guard so noisy start/stop bursts do not toggle the blade during a hold
+- blade enable changes from manual hold are applied immediately in `mower_logic`, so they do not wait for the 0.5 s safety timer
+- the blade command is no longer tied to the drive `cmd_vel` timeout path in `mower_comms_v1`
+- in duty mode, `mower_comms_v1` ramps the blade command up instead of stepping straight to full duty in one cycle; the current `Mowrator` profile keeps the dead-start path duty-first with a full-duty startup floor because the live blade responds more cleanly to direct duty than to a Pi-side startup current override
+- on blade disable, `mower_comms_v1` can send a short VESC brake-current pulse before returning to zero command, which sharpens blade spin-down without changing the steady-state control mode
+- blade hold-control only works if the active rover config has `OM_ENABLE_MOWER=true`
+- the current plain-Pi runtime still launches in legacy-config mode unless `OM_V2` is set truthy in `~/mower_config.sh`, so if that file sources `config/mower_config.sh.example` it must override `OM_TOOL_WIDTH=0.4` afterward for `Mowrator` instead of inheriting the example's `0.13`
+- the low-level stop/lift/tilt sensor inputs on the current `Mowrator` rover are disconnected, so the `Mowrator` profile now sets `ignore_low_level_emergency_inputs=true` and completely ignores low-level emergency flags during bench bring-up
+- during `Mowrator` bench bring-up, `mower_logic` now suppresses emergency re-latching from drive-ESC `DISCONNECTED` status when `/ll/mower_status` reports `esc_power=false`; real ESC faults still stay emergency-worthy
+- if a map exists but no docking point has been recorded yet, `mower_logic` now stays in `IDLE` instead of force-jumping back into `AREA_RECORDING`; starting mowing while physically on charge still requires a valid docking point
+- the `IDLE` behavior now latches `start_mowing` and `start_area_recording` requests with atomics before the main behavior loop consumes them, which avoids flaky lost WebUI or MQTT action presses on the Pi
+- the normal undocked `IDLE` state now keeps GPS enabled so RTK stays warm before a mowing start; only the docked idle variant disables GPS
+- in `IDLE`, the start-mowing action is now only enabled when GPS is actually usable (or GPS errors are explicitly ignored); this prevents a manual start from immediately falling into a failed mow-plan attempt and then docking retries on a bad fix
+- if `MowingBehavior` finishes or aborts on a rover with no recorded docking point, it now returns to `IDLE` instead of entering `DOCKING`; this keeps no-dock Mowrator test loops local to mowing and localization rather than falling into impossible dock retries
+
+## VESC maintenance
+
+For headless VESC Tool install, config dumps, and safe UART maintenance from the Pi, use [VESC_MAINTENANCE.md](VESC_MAINTENANCE.md).
 
 To stop the runtime container:
 

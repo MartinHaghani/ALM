@@ -146,6 +146,9 @@ namespace vesc_driver {
         void *update_thread();
 
         void handle_packet(VescPacketConstPtr packet);
+        void reportError(const std::string &message);
+        std::string formatDiagnostic(const std::string &message);
+        static bool isCompatibleFirmware(uint8_t major, uint8_t minor);
 
 
         pthread_t rx_thread_handle_;

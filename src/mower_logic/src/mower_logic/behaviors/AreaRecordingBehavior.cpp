@@ -14,18 +14,38 @@
 //
 #include "AreaRecordingBehavior.h"
 
+#include <atomic>
+
 extern ros::ServiceClient dockingPointClient;
 extern ros::ServiceClient emergencyClient;
 extern actionlib::SimpleActionClient<mbf_msgs::MoveBaseAction>* mbfClient;
 extern actionlib::SimpleActionClient<mbf_msgs::ExePathAction>* mbfClientExePath;
 extern ros::NodeHandle* n;
 extern void registerActions(std::string prefix, const std::vector<xbot_msgs::ActionInfo>& actions);
+extern bool setMowerEnabled(bool enabled);
+extern std::atomic<bool> mowerAllowed;
 
 extern void stop();
 
 extern bool setGPS(bool enabled);
 
 AreaRecordingBehavior AreaRecordingBehavior::INSTANCE;
+
+namespace {
+constexpr double kManualMowingStopGuardSec = 0.2;
+constexpr double kAreaRecordingLoopPeriodSec = 0.05;
+
+void applyManualMowingState(bool manual_mowing) {
+  setMowerEnabled(mowerAllowed.load() && manual_mowing);
+}
+
+void stopManualMowing(bool& manual_mowing, ros::Time& manual_mowing_stop_guard_until, bool& manual_mowing_stop_pending) {
+  manual_mowing = false;
+  manual_mowing_stop_guard_until = ros::Time(0);
+  manual_mowing_stop_pending = false;
+  applyManualMowingState(false);
+}
+}
 
 std::string AreaRecordingBehavior::state_name() {
   return "AREA_RECORDING";
@@ -34,7 +54,7 @@ std::string AreaRecordingBehavior::state_name() {
 Behavior* AreaRecordingBehavior::execute() {
   setGPS(true);
   bool error = false;
-  ros::Rate inputDelay(ros::Duration().fromSec(0.1));
+  ros::Rate inputDelay(ros::Duration().fromSec(kAreaRecordingLoopPeriodSec));
 
   while (ros::ok() && !aborted) {
     mower_map::MapArea result;
@@ -47,6 +67,12 @@ Behavior* AreaRecordingBehavior::execute() {
 
     sub_state = 0;
     while (ros::ok() && !finished_all && !error && !aborted) {
+      if (manual_mowing && manual_mowing_stop_pending && !is_manual_mowing_stop_guard_active()) {
+        ROS_INFO_STREAM("Stopping manual mowing after start/stop chatter guard");
+        stopManualMowing(manual_mowing, manual_mowing_stop_guard_until, manual_mowing_stop_pending);
+        update_actions();
+      }
+
       if (set_docking_position) {
         geometry_msgs::Pose pos;
         if (getDockingPosition(pos)) {
@@ -150,6 +176,8 @@ void AreaRecordingBehavior::enter() {
   is_mowing_area = false;
   is_navigation_area = false;
   manual_mowing = false;
+  manual_mowing_stop_guard_until = ros::Time(0);
+  manual_mowing_stop_pending = false;
 
   update_actions();
 
@@ -187,6 +215,8 @@ void AreaRecordingBehavior::enter() {
 }
 
 void AreaRecordingBehavior::exit() {
+  stopManualMowing(manual_mowing, manual_mowing_stop_guard_until, manual_mowing_stop_pending);
+
   for (auto& a : actions) {
     a.enabled = false;
   }
@@ -216,6 +246,10 @@ bool AreaRecordingBehavior::needs_gps() {
 
 bool AreaRecordingBehavior::mower_enabled() {
   return manual_mowing;
+}
+
+bool AreaRecordingBehavior::is_manual_mowing_stop_guard_active() const {
+  return manual_mowing && ros::Time::now() <= manual_mowing_stop_guard_until;
 }
 
 void AreaRecordingBehavior::pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg) {
@@ -578,11 +612,24 @@ void AreaRecordingBehavior::handle_action(std::string action) {
     ROS_INFO_STREAM("Got collect point");
     collect_point = true;
   } else if (action == "mower_logic:area_recording/start_manual_mowing") {
-    ROS_INFO_STREAM("Starting manual mowing");
-    manual_mowing = true;
+    const ros::Time now = ros::Time::now();
+    if (!manual_mowing) {
+      ROS_INFO_STREAM("Starting manual mowing");
+      manual_mowing = true;
+      applyManualMowingState(manual_mowing);
+    }
+    manual_mowing_stop_guard_until = now + ros::Duration(kManualMowingStopGuardSec);
+    manual_mowing_stop_pending = false;
   } else if (action == "mower_logic:area_recording/stop_manual_mowing") {
-    ROS_INFO_STREAM("Stopping manual mowing");
-    manual_mowing = false;
+    if (!manual_mowing) {
+      ROS_INFO_STREAM("Manual mowing is already stopped");
+    } else if (is_manual_mowing_stop_guard_active()) {
+      ROS_INFO_STREAM("Deferring stop_manual_mowing until start/stop chatter guard expires");
+      manual_mowing_stop_pending = true;
+    } else {
+      ROS_INFO_STREAM("Stopping manual mowing");
+      stopManualMowing(manual_mowing, manual_mowing_stop_guard_until, manual_mowing_stop_pending);
+    }
   }
   update_actions();
 }
@@ -698,9 +745,7 @@ void AreaRecordingBehavior::update_actions() {
         actions[6].enabled = true;
       }
     }
-    // start_manual_mowing
     actions[10].enabled = !manual_mowing;
-    // stop manual mowing
     actions[11].enabled = manual_mowing;
 
     registerActions("mower_logic:area_recording", actions);

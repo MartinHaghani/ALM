@@ -17,6 +17,7 @@
 #include <mower_logic/PowerConfig.h>
 #include <mower_msgs/Power.h>
 
+#include "MowingBehavior.h"
 #include "PerimeterDocking.h"
 
 extern void stopMoving();
@@ -34,6 +35,7 @@ extern mower_logic::MowerLogicConfig getConfig();
 extern void setConfig(mower_logic::MowerLogicConfig);
 extern ll::PowerConfig getPowerConfig();
 extern dynamic_reconfigure::Server<mower_logic::MowerLogicConfig>* reconfigServer;
+extern bool isGpsGood();
 
 extern ros::ServiceClient mapClient;
 extern ros::ServiceClient dockingPointClient;
@@ -56,16 +58,21 @@ Behavior* IdleBehavior::execute() {
 
   // Check, if we have a docking position. If not, print info and go to area recorder
   mower_map::GetDockingPointSrv get_docking_point_srv;
-  if (!dockingPointClient.call(get_docking_point_srv)) {
-    ROS_WARN("We don't have a docking point configured. Starting Area Recorder!");
-    return &AreaRecordingBehavior::INSTANCE;
+  const bool has_docking_point = dockingPointClient.call(get_docking_point_srv);
+  if (!has_docking_point) {
+    ROS_WARN_THROTTLE(30, "We don't have a docking point configured. Staying in IDLE until one is recorded.");
   }
 
-  setGPS(false);
+  // Keep GPS warm in the normal undocked idle state so a manual mowing start
+  // does not trip over a stale "last good GPS" window while xbot_positioning
+  // re-accepts RTK updates. Only the docked idle variant should disable GPS.
+  setGPS(!stay_docked);
   geometry_msgs::PoseStamped docking_pose_stamped;
-  docking_pose_stamped.pose = get_docking_point_srv.response.docking_pose;
-  docking_pose_stamped.header.frame_id = "map";
-  docking_pose_stamped.header.stamp = ros::Time::now();
+  if (has_docking_point) {
+    docking_pose_stamped.pose = get_docking_point_srv.response.docking_pose;
+    docking_pose_stamped.header.frame_id = "map";
+    docking_pose_stamped.header.stamp = ros::Time::now();
+  }
 
   ros::Rate r(25);
   while (ros::ok()) {
@@ -75,6 +82,15 @@ Behavior* IdleBehavior::execute() {
     const auto last_power_config = getPowerConfig();
     const auto last_status = getStatus();
     const auto last_power = getPower();
+    const bool gps_ready_for_mowing = last_config.ignore_gps_errors || isGpsGood();
+    const bool can_start_from_charge = has_docking_point || last_power.v_charge <= 5.0;
+    const bool start_mowing_enabled = gps_ready_for_mowing && can_start_from_charge;
+
+    if (actions[0].enabled != start_mowing_enabled || !actions[1].enabled) {
+      actions[0].enabled = start_mowing_enabled;
+      actions[1].enabled = true;
+      registerActions("mower_logic:idle", actions);
+    }
 
     const bool automatic_mode = last_config.automatic_mode == eAutoMode::AUTO;
     const bool active_semiautomatic_task =
@@ -87,20 +103,35 @@ Behavior* IdleBehavior::execute() {
                              last_status.mower_motor_temperature < last_config.motor_cold_temperature &&
                              !last_config.manual_pause_mowing && !rain_delay;
 
-    if (manual_start_mowing || ((automatic_mode || active_semiautomatic_task) && mower_ready)) {
+    if (manual_start_mowing.load() || ((automatic_mode || active_semiautomatic_task) && mower_ready)) {
+      if (!gps_ready_for_mowing) {
+        ROS_WARN_THROTTLE(5, "Cannot start mowing until GPS is good.");
+        manual_start_mowing.store(false);
+        r.sleep();
+        continue;
+      }
       // set the robot's position to the dock if we're actually docked
       if (last_power.v_charge > 5.0) {
+        if (!has_docking_point) {
+          ROS_ERROR_THROTTLE(5, "Cannot start mowing from charge without a configured docking point.");
+          manual_start_mowing.store(false);
+          r.sleep();
+          continue;
+        }
         if (PerimeterUndockingBehavior::configured(config)) return &PerimeterUndockingBehavior::INSTANCE;
         ROS_INFO_STREAM("Currently inside the docking station, we set the robot's pose to the docks pose.");
         setRobotPose(docking_pose_stamped.pose);
         return &UndockingBehavior::INSTANCE;
       }
       // Not docked, so just mow
+      if (manual_start_mowing.exchange(false)) {
+        MowingBehavior::INSTANCE.start_new_session();
+      }
       setGPS(true);
       return &MowingBehavior::INSTANCE;
     }
 
-    if (start_area_recorder) {
+    if (start_area_recorder.exchange(false)) {
       return &AreaRecordingBehavior::INSTANCE;
     }
 
@@ -121,15 +152,15 @@ Behavior* IdleBehavior::execute() {
 }
 
 void IdleBehavior::enter() {
-  start_area_recorder = false;
+  start_area_recorder.store(false);
   // Reset the docking behavior, to allow docking
   DockingBehavior::INSTANCE.reset();
 
   // disable it, so that we don't start mowing immediately
-  manual_start_mowing = false;
+  manual_start_mowing.store(false);
 
   for (auto& a : actions) {
-    a.enabled = true;
+    a.enabled = false;
   }
   registerActions("mower_logic:idle", actions);
 }
@@ -162,11 +193,11 @@ void IdleBehavior::command_start() {
   config.manual_pause_mowing = false;
   setConfig(config);
 
-  manual_start_mowing = true;
+  manual_start_mowing.store(true);
 }
 
 void IdleBehavior::command_s1() {
-  start_area_recorder = true;
+  start_area_recorder.store(true);
 }
 
 void IdleBehavior::command_s2() {

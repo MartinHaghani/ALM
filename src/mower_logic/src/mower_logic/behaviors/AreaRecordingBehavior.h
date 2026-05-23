@@ -86,6 +86,8 @@ class AreaRecordingBehavior : public Behavior {
   bool collect_point = false;
 
   bool manual_mowing = false;
+  ros::Time manual_mowing_stop_guard_until = ros::Time(0);
+  bool manual_mowing_stop_pending = false;
 
   visualization_msgs::MarkerArray markers;
   visualization_msgs::Marker marker;
@@ -102,6 +104,7 @@ class AreaRecordingBehavior : public Behavior {
   void record_auto_point_collecting(std_msgs::Bool state_msg);
   void record_collect_point(std_msgs::Bool state_msg);
 
+  bool is_manual_mowing_stop_guard_active() const;
   void update_actions();
 
  public:
