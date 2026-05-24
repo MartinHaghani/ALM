@@ -1,0 +1,15 @@
+time stamp
+float32 v_battery
+bool battery_voltage_valid
+float32 battery_percentage
+string battery_source
+
+float32 left_drive_voltage
+bool left_drive_voltage_valid
+float32 right_drive_voltage
+bool right_drive_voltage_valid
+float32 mower_esc_voltage
+bool mower_esc_voltage_valid
+bool drive_voltage_mismatch
+
+string warning

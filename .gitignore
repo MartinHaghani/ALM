@@ -61,3 +61,4 @@ cmake-build-debug/
 .vscode
 .venv
 src/cmake-build-debug-ros
+.DS_Store

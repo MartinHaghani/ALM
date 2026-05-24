@@ -41,7 +41,6 @@ This is the supported way for agents and contributors to inspect or change VESC 
 
 Observed from the active hardware profile:
 
-- low-level board: `/dev/ttyAMA0`
 - left drive ESC: `/dev/ttyAMA5`
 - right drive ESC: `/dev/ttyAMA3`
 - mower ESC: `/dev/ttyAMA4`

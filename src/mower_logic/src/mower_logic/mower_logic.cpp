@@ -20,10 +20,13 @@
 #include <mower_logic/PowerConfig.h>
 #include <mower_msgs/ESCStatus.h>
 #include <mower_msgs/Emergency.h>
-#include <mower_msgs/Power.h>
+#include <mower_msgs/HwPower.h>
+#include <mower_msgs/HwStatus.h>
 #include <tf2/LinearMath/Transform.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <ios>
 #include <mutex>
 #include <sstream>
@@ -45,7 +48,6 @@
 #include "mower_msgs/HighLevelControlSrv.h"
 #include "mower_msgs/HighLevelStatus.h"
 #include "mower_msgs/MowerControlSrv.h"
-#include "mower_msgs/Status.h"
 #include "ros/ros.h"
 #include "slic3r_coverage_planner/PlanPath.h"
 #include "std_msgs/String.h"
@@ -68,11 +70,11 @@ ros::Publisher cmd_vel_pub, high_level_state_publisher;
 mower_logic::MowerLogicConfig last_config;
 ll::PowerConfig last_power_config;
 
-StateSubscriber<mower_msgs::Emergency> emergency_state_subscriber{"/ll/emergency"};
-StateSubscriber<mower_msgs::Status> status_state_subscriber{"/ll/mower_status"};
-StateSubscriber<mower_msgs::Power> power_state_subscriber{"/ll/power"};
-StateSubscriber<mower_msgs::ESCStatus> left_esc_status_state_subscriber{"/ll/diff_drive/left_esc_status"};
-StateSubscriber<mower_msgs::ESCStatus> right_esc_status_state_subscriber{"/ll/diff_drive/right_esc_status"};
+StateSubscriber<mower_msgs::Emergency> emergency_state_subscriber{"/hw/emergency"};
+StateSubscriber<mower_msgs::HwStatus> status_state_subscriber{"/hw/status"};
+StateSubscriber<mower_msgs::HwPower> power_state_subscriber{"/hw/power"};
+StateSubscriber<mower_msgs::ESCStatus> left_esc_status_state_subscriber{"/hw/diff_drive/left_esc_status"};
+StateSubscriber<mower_msgs::ESCStatus> right_esc_status_state_subscriber{"/hw/diff_drive/right_esc_status"};
 StateSubscriber<xbot_msgs::AbsolutePose> pose_state_subscriber{"/xbot_positioning/xb_pose"};
 ros::Time joy_vel_time(0.0);
 
@@ -91,9 +93,6 @@ std::vector<xbot_msgs::ActionInfo> rootActions;
 ros::Time last_v_battery_check;
 double max_v_battery_seen = 0.0;
 
-ros::Time last_rain_check;
-bool rain_detected = true;
-ros::Time rain_resume;
 bool mower_has_motor_temp = true;
 double manual_drive_linear_scale = 1.0;
 double manual_drive_angular_scale = 1.0;
@@ -127,11 +126,11 @@ void setConfig(mower_logic::MowerLogicConfig c) {
   reconfigServer->updateConfig(c);
 }
 
-mower_msgs::Status getStatus() {
+mower_msgs::HwStatus getStatus() {
   return status_state_subscriber.getMessage();
 }
 
-mower_msgs::Power getPower() {
+mower_msgs::HwPower getPower() {
   return power_state_subscriber.getMessage();
 }
 
@@ -400,13 +399,14 @@ void checkSafety(const ros::TimerEvent& timer_event) {
   const auto last_left_esc_state_time = left_esc_status_state_subscriber.getMessageTime();
   const auto last_right_esc_state = right_esc_status_state_subscriber.getMessage();
   const auto last_right_esc_state_time = right_esc_status_state_subscriber.getMessageTime();
+  const auto now = ros::Time::now();
   const auto pose_time = pose_state_subscriber.getMessageTime();
   const auto status_time = status_state_subscriber.getMessageTime();
   const auto power_time = power_state_subscriber.getMessageTime();
   const auto last_good_gps = getLastGoodGPS();
 
   high_level_status.emergency = last_emergency.latched_emergency;
-  high_level_status.is_charging = last_power.v_charge > 10.0;
+  high_level_status.is_charging = false;
 
   // Initialize to true, if after all checks it is still true then mower should be enabled.
   mowerAllowed = true;
@@ -415,14 +415,6 @@ void checkSafety(const ros::TimerEvent& timer_event) {
   if (currentBehavior != nullptr) {
     if (last_emergency.latched_emergency) {
       currentBehavior->requestPause(pauseType::PAUSE_EMERGENCY);
-      if (currentBehavior == &AreaRecordingBehavior::INSTANCE || currentBehavior == &IdleBehavior::INSTANCE ||
-          currentBehavior == &IdleBehavior::DOCKED_INSTANCE) {
-        if (last_power.v_charge > 10.0) {
-          // emergency and docked and idle or area recording, so it's safe to reset the emergency mode, reset it. It's
-          // safe since we won't start moving in this mode.
-          setEmergencyMode(false);
-        }
-      }
     } else {
       currentBehavior->requestContinue(pauseType::PAUSE_EMERGENCY);
     }
@@ -431,43 +423,46 @@ void checkSafety(const ros::TimerEvent& timer_event) {
   // TODO: Have a single point where we check for this timeout instead of twice (here and in the behavior)
   // check if odometry is current. If not, the GPS was bad so we stop moving.
   // Note that the mowing behavior will pause as well by itself.
-  if (ros::Time::now() - pose_time > ros::Duration(1.0)) {
+  if (now - pose_time > ros::Duration(1.0)) {
     stopBlade();
     stopMoving();
     ROS_WARN_STREAM_THROTTLE(
-        5, "om_mower_logic: EMERGENCY pose values stopped. dt was: " << (ros::Time::now() - pose_time));
+        5, "om_mower_logic: EMERGENCY pose values stopped. dt was: " << (now - pose_time));
     return;
   }
 
   // check if status is current. if not, we have a problem since it contains wheel ticks and so on.
   // Since these should never drop out, we enter emergency instead of "only" stopping
-  if (ros::Time::now() - status_time > ros::Duration(3) || ros::Time::now() - power_time > ros::Duration(3)) {
+  if (now - status_time > ros::Duration(3) || now - power_time > ros::Duration(3)) {
     setEmergencyMode(true);
     ROS_WARN_STREAM_THROTTLE(
-        5, "om_mower_logic: EMERGENCY /mower/status values stopped. dt was: " << (ros::Time::now() - status_time));
+        5, "om_mower_logic: EMERGENCY /hw/status or /hw/power values stopped. status dt was: " << (now - status_time)
+                                                                                                 << ", power dt was: "
+                                                                                                 << (now - power_time));
     return;
   }
 
-  // Treat real drive ESC faults as emergencies. However, do not re-latch emergency just because
-  // the drive ESCs report DISCONNECTED while the low-level board says drivetrain ESC power is off;
-  // that bench state is expected during Mowrator bring-up and should still allow non-drive testing.
+  if (now - last_left_esc_state_time > ros::Duration(3) || now - last_right_esc_state_time > ros::Duration(3)) {
+    setEmergencyMode(true);
+    ROS_WARN_STREAM_THROTTLE(5, "om_mower_logic: EMERGENCY drive ESC telemetry stopped. left dt was: "
+                                    << (now - last_left_esc_state_time) << ", right dt was: "
+                                    << (now - last_right_esc_state_time));
+    return;
+  }
+
+  // Mowrator has no low-level-board stop/lift/tilt inputs. Software emergency and drive ESC health
+  // are the hardware emergency sources.
   const bool left_drive_esc_disconnected = last_left_esc_state.status == mower_msgs::ESCStatus::ESC_STATUS_DISCONNECTED;
   const bool right_drive_esc_disconnected = last_right_esc_state.status == mower_msgs::ESCStatus::ESC_STATUS_DISCONNECTED;
   const bool left_drive_esc_fault = last_left_esc_state.status == mower_msgs::ESCStatus::ESC_STATUS_ERROR;
   const bool right_drive_esc_fault = last_right_esc_state.status == mower_msgs::ESCStatus::ESC_STATUS_ERROR;
   const bool drive_esc_fault_or_unexpected_disconnect =
-      left_drive_esc_fault || right_drive_esc_fault ||
-      (last_status.esc_power && (left_drive_esc_disconnected || right_drive_esc_disconnected));
+      left_drive_esc_fault || right_drive_esc_fault || left_drive_esc_disconnected || right_drive_esc_disconnected;
   if (drive_esc_fault_or_unexpected_disconnect) {
     setEmergencyMode(true);
     ROS_ERROR_STREAM("EMERGENCY: at least one motor control errored. errors left: "
                      << (last_left_esc_state.status) << ", status right: " << last_right_esc_state.status);
     return;
-  }
-  if (!last_status.esc_power && (left_drive_esc_disconnected || right_drive_esc_disconnected)) {
-    stopMoving();
-    ROS_WARN_STREAM_THROTTLE(
-        5.0, "Drive ESCs are disconnected while low-level ESC power is off; suppressing emergency relatch.");
   }
 
   // We need orientation and a positional accuracy less than configured
@@ -487,7 +482,7 @@ void checkSafety(const ros::TimerEvent& timer_event) {
     ROS_WARN_STREAM_THROTTLE(1, "Low quality GPS");
   }
 
-  bool gpsTimeout = ros::Time::now() - last_good_gps > ros::Duration(last_config.gps_timeout);
+  bool gpsTimeout = now - last_good_gps > ros::Duration(last_config.gps_timeout);
 
   if (gpsTimeout) {
     // GPS = bad, set quality to 0
@@ -506,7 +501,7 @@ void checkSafety(const ros::TimerEvent& timer_event) {
   }
 
   if (currentBehavior != nullptr && currentBehavior->redirect_joystick()) {
-    if (ros::Time::now() - joy_vel_time > ros::Duration(10)) {
+    if (now - joy_vel_time > ros::Duration(10)) {
       stopMoving();  // To avoid cmd_vel receive timeout in mower_comms
     }
   }
@@ -514,19 +509,12 @@ void checkSafety(const ros::TimerEvent& timer_event) {
   // enable the mower (if not aleady) if mowerAllowed is still true after checks and bahavior agrees
   setMowerEnabled(currentBehavior != nullptr && mowerAllowed && currentBehavior->mower_enabled());
 
-  double battery_percent = (last_power.v_battery - last_power_config.battery_empty_voltage) /
-                           (last_power_config.battery_full_voltage - last_power_config.battery_empty_voltage);
-  if (battery_percent > 1.0) {
-    battery_percent = 1.0;
-  } else if (battery_percent < 0.0) {
-    battery_percent = 0.0;
-  }
-  high_level_status.battery_percent = battery_percent;
+  high_level_status.battery_percent = last_power.battery_voltage_valid ? last_power.battery_percentage : 0.0;
 
-  // we are in non emergency, check if we should pause. This could be empty battery, rain or hot mower motor etc.
+  // we are in non emergency, check if we should pause. This could be empty battery or hot mower motor.
   bool dockingNeeded = false;
 
-  std::stringstream dockingReason("Docking: ", std::ios_base::ate | std::ios_base::in | std::ios_base::out);
+  std::stringstream dockingReason("Parking: ", std::ios_base::ate | std::ios_base::in | std::ios_base::out);
 
   if (last_config.manual_pause_mowing) {
     dockingReason << "Manual pause";
@@ -534,48 +522,28 @@ void checkSafety(const ros::TimerEvent& timer_event) {
   }
 
   // Dock if below critical voltage to avoid BMS undervoltage protection
-  if (!dockingNeeded && (last_power.v_battery < last_power_config.battery_critical_voltage)) {
+  if (!dockingNeeded && last_power.battery_voltage_valid &&
+      (last_power.v_battery < last_power_config.battery_critical_voltage)) {
     dockingReason << "Battery voltage min critical: " << last_power.v_battery;
     dockingNeeded = true;
   }
 
   // Otherwise take the max battery voltage over 20s to ignore droop during short current spikes
-  max_v_battery_seen = std::max<double>(max_v_battery_seen, last_power.v_battery);
-  if (ros::Time::now() - last_v_battery_check > ros::Duration(20.0)) {
+  if (last_power.battery_voltage_valid) {
+    max_v_battery_seen = std::max<double>(max_v_battery_seen, last_power.v_battery);
+  }
+  if (now - last_v_battery_check > ros::Duration(20.0)) {
     if (!dockingNeeded && (max_v_battery_seen < last_power_config.battery_empty_voltage)) {
       dockingReason << "Battery average voltage low: " << max_v_battery_seen;
       dockingNeeded = true;
     }
     max_v_battery_seen = 0.0;
-    last_v_battery_check = ros::Time::now();
+    last_v_battery_check = now;
   }
 
   if (mower_has_motor_temp && !dockingNeeded && last_status.mower_motor_temperature >= last_config.motor_hot_temperature) {
     dockingReason << "Mow motor over temp: " << last_status.mower_motor_temperature;
     dockingNeeded = true;
-  }
-
-  // Rain detected is initialized to true and flips to false if rain is not detected
-  // continuously for rain_check_seconds. This is to avoid false positives due to noise
-  rain_detected = rain_detected && last_status.rain_detected;
-  if (last_config.rain_check_seconds == 0 ||
-      ros::Time::now() - last_rain_check > ros::Duration(last_config.rain_check_seconds)) {
-    if (rain_detected) {
-      // Reset rain resume time
-      rain_resume =
-          ros::Time::now() + ros::Duration(last_config.rain_check_seconds + last_config.rain_delay_minutes * 60);
-    }
-    if (!dockingNeeded && rain_detected && last_config.rain_mode) {
-      dockingReason << "Rain detected";
-      dockingNeeded = true;
-      if (last_config.rain_mode == 3) {
-        auto new_config = getConfig();
-        new_config.manual_pause_mowing = true;
-        setConfig(new_config);
-      }
-    }
-    last_rain_check = ros::Time::now();
-    rain_detected = true;
   }
 
   if (dockingNeeded && currentBehavior != &DockingBehavior::INSTANCE &&
@@ -681,9 +649,9 @@ int main(int argc, char** argv) {
 
   n = new ros::NodeHandle();
   paramNh = new ros::NodeHandle("~");
-  ros::NodeHandle powerNodeHandle("/ll/services/power");
+  ros::NodeHandle powerNodeHandle("/hw/services/power");
   mowerAllowed = false;
-  mower_has_motor_temp = n->param("/ll/services/diff_drive/mower_xesc/has_motor_temp", true);
+  mower_has_motor_temp = n->param("/hw/services/diff_drive/mower_xesc/has_motor_temp", true);
   const double default_manual_drive_scale = 1.0;
   manual_drive_linear_scale = n->param("/mower_logic/manual_drive_linear_scale", default_manual_drive_scale);
   manual_drive_angular_scale = n->param("/mower_logic/manual_drive_angular_scale", default_manual_drive_scale);
@@ -710,8 +678,8 @@ int main(int argc, char** argv) {
   positioningClient = n->serviceClient<xbot_positioning::SetPoseSrv>("xbot_positioning/set_robot_pose");
   actionRegistrationClient = n->serviceClient<xbot_msgs::RegisterActionsSrv>("xbot/register_actions");
 
-  mowClient = n->serviceClient<mower_msgs::MowerControlSrv>("ll/_service/mow_enabled");
-  emergencyClient = n->serviceClient<mower_msgs::EmergencyStopSrv>("ll/_service/emergency");
+  mowClient = n->serviceClient<mower_msgs::MowerControlSrv>("hw/_service/mow_enabled");
+  emergencyClient = n->serviceClient<mower_msgs::EmergencyStopSrv>("hw/_service/emergency");
 
   dockingPointClient = n->serviceClient<mower_map::GetDockingPointSrv>("mower_map_service/get_docking_point");
 
@@ -924,7 +892,7 @@ int main(int argc, char** argv) {
 
   ROS_INFO("om_mower_logic: Got all servers, we can mow");
 
-  rain_resume = last_rain_check = last_v_battery_check = ros::Time::now();
+  last_v_battery_check = ros::Time::now();
   ros::Timer safety_timer = n->createTimer(ros::Duration(0.5), checkSafety);
   ros::Timer ui_timer = n->createTimer(ros::Duration(1.0), updateUI);
 

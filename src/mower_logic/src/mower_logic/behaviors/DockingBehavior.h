@@ -25,7 +25,6 @@
 #include "Behavior.h"
 #include "DockingBehavior.h"
 #include "IdleBehavior.h"
-#include "mower_msgs/Status.h"
 #include "ros/ros.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include "xbot_msgs/ActionInfo.h"

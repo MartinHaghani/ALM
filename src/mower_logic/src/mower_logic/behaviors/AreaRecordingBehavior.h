@@ -29,7 +29,6 @@
 #include "mower_map/MapArea.h"
 #include "mower_map/SetDockingPointSrv.h"
 #include "mower_msgs/EmergencyStopSrv.h"
-#include "mower_msgs/Status.h"
 #include "ros/ros.h"
 #include "sensor_msgs/Joy.h"
 #include "std_msgs/Bool.h"

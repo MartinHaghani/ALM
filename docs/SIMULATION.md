@@ -74,7 +74,8 @@ Observed composition:
 
 Observed difference:
 
-- The real runtime uses `_comms.launch` to choose between `mower_comms_v1` and `mower_comms_v2`.
+- The supported real Mowrator runtime uses `_comms.launch` to start `mower_hardware` under `/hw`.
+- Legacy non-Mowrator and simulation paths still involve `mower_comms_v1` or `mower_comms_v2`.
 - The simulation runtime starts `mower_simulation` and still starts `mower_comms_v2` in `sim_mower_logic.launch`.
 
 Best grounded interpretation:

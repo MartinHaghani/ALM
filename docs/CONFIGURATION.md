@@ -49,7 +49,8 @@ Observed from `src/open_mower/launch/include/_params.launch` and `docker/openmow
   - `src/open_mower/params/openmower_defaults_v2.yaml`
   - `src/open_mower/params/hardware_specific/$(env MOWER)/params_v2.yaml`
   - `$(env PARAMS_PATH)/mower_params.yaml`
-- If `HARDWARE_PLATFORM=1`, it also loads hardware-specific comms YAML for v1 low-level settings.
+- If `HARDWARE_PLATFORM=1` and `MOWER=Mowrator`, it loads Mowrator direct hardware YAML under `/hw/services/...`.
+- If `HARDWARE_PLATFORM=1` and `MOWER` is not `Mowrator`, it still loads legacy low-level-board comms YAML under `/ll/...`.
 - `docker/openmower_entrypoint.sh` does not source `mower_config.sh`; it sources ROS setup, the built workspace, and `version_info.env`, then relies on runtime environment variables that are expected to come from outside the image.
 
 The exact OSv2-side mechanism that provides `MOWER`, `PARAMS_PATH`, `HARDWARE_PLATFORM`, and related variables is not fully described inside this repo, so do not claim more than the files show.
@@ -68,10 +69,12 @@ Observed from `docker/openmower_entrypoint.legacy.sh` and `_params.launch`:
 - It sets:
   - `RECORDINGS_PATH=$HOME`
   - `PARAMS_PATH=$HOME`
-- In legacy mode, `_params.launch` maps many environment variables directly onto the ROS parameter server for mower comms, GPS, xbot positioning, correction input, mower logic, monitoring, and snapshot features.
+- In legacy mode with `MOWER=Mowrator`, `_params.launch` maps the useful environment variables onto `/hw/services/...`, disables runtime rain/charger/perimeter assumptions, and leaves low-level-board-only settings unused.
+- In legacy mode with non-Mowrator presets, `_params.launch` keeps the old `/ll/...` low-level-board mapping.
 - `_comms.launch` starts the built-in NTRIP client only when `OM_USE_NTRIP=True` and `OM_USE_RTCM_TCP` is not truthy.
-- `_comms.launch` starts `open_mower/scripts/rtcm_tcp_bridge.py` when `OM_USE_RTCM_TCP=True`, publishing raw TCP RTCM into the same `/ll/position/gps/rtcm` path used by the GPS driver.
-- `_comms.launch` starts `open_mower/scripts/lsm6dso_imu_node.py` when `OM_USE_LSM6DSO_IMU=True`, publishing the Raspberry Pi I2C LSM6DSO to `/ll/imu/data_raw`.
+- `_comms.launch` starts `open_mower/scripts/rtcm_tcp_bridge.py` when `OM_USE_RTCM_TCP=True`, publishing raw TCP RTCM into `/hw/position/gps/rtcm` for the supported Mowrator runtime.
+- `_comms.launch` starts `open_mower/scripts/lsm6dso_imu_node.py` for Mowrator by default, publishing the Raspberry Pi I2C LSM6DSO to `/hw/imu/data_raw`.
+- `_comms.launch` starts `open_mower/scripts/battery_voltage_logger.py` for Mowrator by default, subscribing to `/hw/power` and appending a fsynced CSV row every second for left drive, right drive, and mower/blade ESC voltages. It rotates at 10 MiB x 5 files by default. Set `OM_NO_BATTERY_VOLTAGE_LOG=True` to disable it.
 
 ## Schema grouping summary
 
@@ -117,7 +120,7 @@ Observed examples:
 - `OM_LSM6DSO_AXIS_CONFIG`
 - `OM_LSM6DSO_FRAME_ID`
 
-These settings are for the current Raspberry Pi I2C SparkFun LSM6DSO replacement path. They are disabled by default so existing low-level-board IMU publishers do not silently compete with the new node.
+These settings are for the current Raspberry Pi I2C SparkFun LSM6DSO replacement path. For `Mowrator`, the IMU publisher is default-on and publishes under `/hw/imu/data_raw`.
 
 ### Mower logic settings
 
@@ -128,10 +131,12 @@ Observed examples:
 - `OM_ENABLE_MOWER`
 - `OM_RANDOMIZE_MOWER_DIRECTION`
 - battery voltage thresholds
+- drive ESC battery voltage mismatch warning
+- battery voltage CSV logging controls: `OM_NO_BATTERY_VOLTAGE_LOG`, `OM_BATTERY_VOLTAGE_LOG_PATH`, `OM_BATTERY_VOLTAGE_LOG_PERIOD_SEC`, `OM_BATTERY_VOLTAGE_LOG_FSYNC`, `OM_BATTERY_VOLTAGE_LOG_MAX_BYTES`, and `OM_BATTERY_VOLTAGE_LOG_MAX_FILES`
 - mower motor temperature thresholds
 - GPS wait and timeout settings
 - automatic mode
-- rain handling
+- legacy rain settings, ignored by the supported Mowrator runtime
 - recording and snapshot settings
 
 ### External MQTT broker
@@ -142,6 +147,8 @@ Observed examples:
 - broker host, port, username, password, and topic prefix
 
 ### Sound settings
+
+Sound settings are legacy OpenMower low-level-board settings. The supported Mowrator runtime has no sound board.
 
 Observed examples:
 

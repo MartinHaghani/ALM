@@ -25,7 +25,6 @@
 #include <nav_msgs/Odometry.h>
 #include <tf2/LinearMath/Transform.h>
 
-#include "mower_msgs/Status.h"
 #include "ros/ros.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 */
@@ -66,9 +65,6 @@ class PerimeterFollowBehavior : public PerimeterBase {
 };
 
 class PerimeterDockingBehavior : public PerimeterFollowBehavior {
- private:
-  int chargeSeen;
-
  public:
   static PerimeterDockingBehavior INSTANCE;
   std::string state_name() override;

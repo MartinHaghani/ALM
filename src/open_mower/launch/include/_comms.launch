@@ -1,16 +1,40 @@
 <!--
-    This launch file starts all communication needed in order to control and localize the bot.
-    I.e. the raw data comms to the Low Level Board, the GPS, etc.
+    This launch file starts hardware communication needed in order to control and localize the bot.
 -->
 <launch>
-    <!-- TODO: Add parameter for simulation -->
-    <!-- v1 if HARDWARE_PLATFORM == 1 -->
-    <group if="$(eval env('HARDWARE_PLATFORM') == '1')">
-        <!-- Comms v1 -->
+    <!-- Mowrator direct Pi hardware bridge, no OpenMower low-level board. -->
+    <group if="$(eval env('HARDWARE_PLATFORM') == '1' and env('MOWER') == 'Mowrator')">
+        <node pkg="mower_hardware" type="mower_hardware" name="hw" unless="$(optenv OM_NO_COMMS False)"
+                output="screen" respawn="true" respawn_delay="10">
+        </node>
+        <node pkg="open_mower" type="battery_voltage_logger.py" name="battery_voltage_logger"
+                unless="$(optenv OM_NO_BATTERY_VOLTAGE_LOG False)"
+                output="screen" respawn="true" respawn_delay="2">
+            <param name="topic" value="/hw/power"/>
+            <param name="log_path" value="$(optenv OM_BATTERY_VOLTAGE_LOG_PATH)"/>
+            <param name="sample_period" value="$(optenv OM_BATTERY_VOLTAGE_LOG_PERIOD_SEC 1.0)" type="double"/>
+            <param name="fsync_each_row" value="$(optenv OM_BATTERY_VOLTAGE_LOG_FSYNC True)" type="bool"/>
+            <param name="max_bytes" value="$(optenv OM_BATTERY_VOLTAGE_LOG_MAX_BYTES 10485760)" type="int"/>
+            <param name="max_files" value="$(optenv OM_BATTERY_VOLTAGE_LOG_MAX_FILES 5)" type="int"/>
+        </node>
+        <node pkg="xbot_driver_gps" type="driver_gps_node" name="gps"
+                ns="hw/services"
+                output="screen"
+                respawn="$(eval optenv('OM_GPS_RESPAWN', 'True').lower() == 'true')"
+                respawn_delay="5"
+                unless="$(optenv OM_NO_GPS False)">
+            <param name="rtcm_topic" value="/hw/position/gps/rtcm"/>
+            <param name="nmea_topic" value="/hw/position/gps/nmea"/>
+            <param name="xb_pose_topic" value="/hw/position/gps"/>
+            <param name="wheel_ticks_topic" value="/mower/wheel_ticks"/>
+        </node>
+    </group>
+
+    <!-- Legacy YardForce/OpenMower v1 low-level-board bridge. Not used by the Mowrator runtime. -->
+    <group if="$(eval env('HARDWARE_PLATFORM') == '1' and env('MOWER') != 'Mowrator')">
         <node pkg="mower_comms_v1" type="mower_comms_v1" name="ll" unless="$(optenv OM_NO_COMMS False)"
                 output="screen" respawn="true" respawn_delay="10">
         </node>
-        <!-- GPS driver only for v1 builds -->
         <node pkg="xbot_driver_gps" type="driver_gps_node" name="gps"
                 ns="ll/services"
                 output="screen"
@@ -34,7 +58,7 @@
         </group>
     </group>
 
-    <node if="$(eval optenv('OM_USE_LSM6DSO_IMU', 'False').lower() == 'true')"
+    <node if="$(eval env('MOWER') == 'Mowrator' or optenv('OM_USE_LSM6DSO_IMU', 'False').lower() == 'true')"
           pkg="open_mower"
           type="lsm6dso_imu_node.py"
           name="lsm6dso_imu"
@@ -48,7 +72,7 @@
         <param name="gyro_range_dps" value="$(optenv OM_LSM6DSO_GYRO_RANGE_DPS 500)" type="int"/>
         <param name="axis_config" value="$(optenv OM_LSM6DSO_AXIS_CONFIG +X+Y+Z)"/>
         <param name="frame_id" value="$(optenv OM_LSM6DSO_FRAME_ID base_link)"/>
-        <remap from="imu" to="/ll/imu/data_raw"/>
+        <remap from="imu" to="/hw/imu/data_raw"/>
     </node>
 
     <group unless="$(optenv OM_NO_GPS False)">
@@ -64,7 +88,7 @@
               respawn_delay="10">
             <param name="host" value="$(optenv OM_RTCM_TCP_HOSTNAME 127.0.0.1)"/>
             <param name="port" value="$(optenv OM_RTCM_TCP_PORT 5016)"/>
-            <remap from="rtcm" to="/ll/position/gps/rtcm"/>
+            <remap from="rtcm" to="/hw/position/gps/rtcm"/>
         </node>
     </group>
 

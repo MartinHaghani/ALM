@@ -48,6 +48,8 @@ source devel/setup.bash
 roslaunch open_mower open_mower.launch
 ```
 
+For `MOWER=Mowrator`, the launch flow also starts the battery-voltage CSV logger by default. It writes one row per second to `~/.ros/battery_voltage_log.csv` unless `OM_BATTERY_VOLTAGE_LOG_PATH` overrides the location, rotates at 10 MiB x 5 files by default, and can be disabled with `OM_NO_BATTERY_VOLTAGE_LOG=True`.
+
 ## Configuration note before launching
 
 The current README still points at `src/open_mower/config/mower_config.sh.example`, but that file is now only a redirect stub. The real deprecated shell example lives at:

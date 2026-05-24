@@ -16,7 +16,6 @@ drive_command_ramp_up_seconds: 0.8
 drive_command_ramp_down_seconds: 0.25
 drive_command_scale: 0.3
 mowing_drive_command_scale: 0.2
-ignore_low_level_emergency_inputs: true  # Mowrator's low-level stop/lift/tilt sensors are disconnected during bring-up
 mower_xesc:
   xesc_type: "xesc_mini"
   serial_port: "/dev/ttyAMA4"

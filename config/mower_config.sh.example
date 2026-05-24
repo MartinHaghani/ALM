@@ -49,11 +49,11 @@ export OM_NTRIP_RECONNECT_MAX=99999
 
 # The type of mower you're using, used to get some hardware parameters automatically
 # Currently supported:
-# Mowrator (stage-1 Flipsky migration profile)
-# YardForce500
-# YardForceSA650
+# Mowrator (direct Pi hardware profile)
+# YardForce500 (legacy low-level-board profile)
+# YardForceSA650 (legacy low-level-board profile)
 # CUSTOM (put your configs in ~/mower_params/)
-export OM_MOWER="YardForce500"
+export OM_MOWER="Mowrator"
 
 # Select your ESC type
 # Supported values as of today:
@@ -67,12 +67,12 @@ export OM_MOWER_ESC_TYPE="xesc_mini"
 # Currently supported: ps3, shield, steam_stick, steam_touch, switch_pro, xbox360
 export OM_MOWER_GAMEPAD="xbox360"
 
-# Ignore Charging Current
+# Ignore Charging Current (legacy low-level-board only)
 # If you're affected by a wrong IC2 sourcing, read here https://openmower.de/docs/versions/errata/ic2-is-wrong/
-# for more details, you can disable the wrong charging current reading by disabling the charging protection via:
+# for more details. Mowrator batteries are removed for charging, so this setting is not used there.
 #export OM_IGNORE_CHARGING_CURRENT=True
 
-# Full Sound Support - But read on carefully:
+# Full Sound Support - legacy low-level-board only. Mowrator has no sound board.
 # Up to (and inclusive) OM hardware version 0.13.x, DFPlayer's power supply is set by default to 3.3V.
 # This is done by solder jumper "JP1" whose board track is by default at 3.3V.
 # If you manually opened the 3.3V track and solder a bridge to 5V, then you can indicate it here to get full sound support.
@@ -91,7 +91,7 @@ export OM_MOWER_GAMEPAD="xbox360"
 #    -1 = Don't change a previously set volume level
 # export OM_VOLUME=-1
 #
-# Background sounds
+# Background sounds (legacy low-level-board only)
 # Beside some spoken informational advert sounds like "Waiting for RTK GPS" or "Heading back to docking station",
 # the current sound implementation might also play some funny background sounds like "I'm singing in the rain" once rain got detected.
 # But it will also play background sounds which might unsettle your wife or neighbor.
@@ -134,11 +134,10 @@ export OM_USE_F9R_SENSOR_FUSION=False
 ################################
 ##        IMU Settings        ##
 ################################
-# The old low-level board published /ll/imu/data_raw. If that board is removed and a SparkFun
-# LSM6DSO is wired to the Raspberry Pi I2C pins, enable the replacement publisher below.
+# Mowrator uses a SparkFun LSM6DSO wired to the Raspberry Pi I2C pins and publishes /hw/imu/data_raw.
 # Header pins 3 and 5 are /dev/i2c-1 on the Pi. SparkFun's default LSM6DSO address is 0x6B;
 # use 0x6A if the address jumper has been changed.
-# export OM_USE_LSM6DSO_IMU=False
+# export OM_USE_LSM6DSO_IMU=True
 # export OM_LSM6DSO_I2C_BUS=1
 # export OM_LSM6DSO_I2C_ADDRESS=0x6B
 # export OM_LSM6DSO_RATE_HZ=104
@@ -175,30 +174,29 @@ export OM_UNDOCK_DISTANCE=2.0
 # Time to wait (s) before before starting to undock.
 export OM_UNDOCKING_WAIT_TIME=0.0
 
-# Docking:
+# Parking:
 #
-# Docking starts at this distance from the dock point.
-# Has to be at least the length from the dock to your nav- or mow-area, otherwise docking will fail!
+# Low-battery parking starts at this distance from the recorded docking point.
+# Has to be at least the length from the parking point to your nav- or mow-area, otherwise parking will fail!
 # export OM_DOCKING_APPROACH_DISTANCE=1.5
 #
-# The distance to drive forward AFTER reaching the second docking point
+# The distance to drive forward AFTER reaching the recorded parking point
 export OM_DOCKING_DISTANCE=1.0
 #
-# Extra time (s) to continue docking after detecting voltage
+# Legacy charger-contact dwell time. Mowrator does not use charger voltage detection.
 export OM_DOCKING_EXTRA_TIME=0.0
 #
-# How many times to retry docking before giving up.
+# How many times to retry parking before giving up.
 export OM_DOCKING_RETRY_COUNT=4
 #
-# Whether to attempt redocking if the voltage is no longer detected after docking.
+# Legacy charger-contact redock behavior. Mowrator disables automatic redocking.
 export OM_DOCKING_REDOCK=False
 #
-# Time to wait (s) at OM_DOCKING_APPROACH_DISTANCE before starting to dock.
+# Time to wait (s) at OM_DOCKING_APPROACH_DISTANCE before starting final parking approach.
 export OM_DOCKING_WAIT_TIME=0.0
 
-# Uncomment, if you want to use the perimeter sensor of your Mowgli-type mower
-# for docking. Set it to 1 or 2 dependig on the signal selected on the docking
-# station (S1 or S2).
+# Legacy perimeter docking for Mowgli-type mower builds. Mowrator parks at the recorded docking point
+# without charger or perimeter detection.
 # Normally docking is done counterclockwise. If you want to dock clockwise set
 # it to -1 or -2.
 # Set OM_DOCKING_DISTANCE to the number of meters, that must be travelled along
@@ -228,19 +226,18 @@ export OM_MOWING_ANGLE_INCREMENT=0
 # 0.13 works well for the Classic 500.
 export OM_TOOL_WIDTH=0.13
 
-# Voltages for battery to be considered full or empty
-export OM_BATTERY_FULL_VOLTAGE=28.5
-# Dock if voltage remains below empty for 20s
-export OM_BATTERY_EMPTY_VOLTAGE=24.0
-# Immediate dock if voltage is critical
-export OM_BATTERY_CRITICAL_VOLTAGE=23.0
+# Voltages for the removable 56V 18Ah LiFePO4 battery. Battery voltage is read from the drive ESCs.
+export OM_BATTERY_FULL_VOLTAGE=58.4
+# Park if voltage remains below empty for 20s
+export OM_BATTERY_EMPTY_VOLTAGE=45.0
+# Immediate park if voltage is critical. Revisit after measuring the real BMS cutoff and keep margin above it.
+export OM_BATTERY_CRITICAL_VOLTAGE=43.0
+# Warn if left/right drive ESC voltage readings differ by more than this many volts. Warning only, no emergency stop.
+#export OM_DRIVE_VOLTAGE_MISMATCH_WARN_V=1.0
 
-# Absolute battery and charging limits, before charging get switched off
-# Over-voltage battery protection
+# Legacy OpenMower low-level-board battery and charging limits; not used by Mowrator.
 #export OM_BATTERY_CRITICAL_HIGH_VOLTAGE=29.0
-# Over-voltage charge protection
 #export OM_CHARGE_CRITICAL_HIGH_VOLTAGE=30.0
-# Over-current charge protection
 #export OM_CHARGE_CRITICAL_HIGH_CURRENT=1.5
 
 # Mower motor temperatures to stop and start mowing
@@ -266,7 +263,7 @@ export OM_AUTOMATIC_MODE=0
 
 export OM_OUTLINE_OFFSET=0.05
 
-# Rain mode
+# Rain mode (legacy low-level-board rain sensor only; Mowrator has no rain sensor)
 #  0 - Ignore
 #  1 - Dock
 #  2 - Dock Until Dry
@@ -291,7 +288,7 @@ export OM_RAIN_DELAY_MINUTES=30
 # should be allowed.
 #export OM_SHUTDOWN_ESC_MAX_PITCH=30
 
-# Hall / Emergency input configuration
+# Hall / Emergency input configuration (legacy low-level-board only; Mowrator has no low-level stop/lift/tilt inputs)
 #
 # This is an expert configuration option, use it only for custom builds!
 # The normal YardForce Classic 500 user should leave all options in commented state.
@@ -349,6 +346,17 @@ export OM_RAIN_DELAY_MINUTES=30
 # Set to true to record your session.
 # Output will be stored in your $HOME
 # export OM_ENABLE_RECORDING_ALL=False
+
+# The Mowrator battery voltage CSV log is enabled by default. It appends the
+# left drive, right drive, and mower/blade ESC voltage once per second, then
+# fsyncs the row so sudden BMS power cutoff should leave the latest samples.
+# By default the file is written under ROS_HOME, normally ~/.ros/battery_voltage_log.csv.
+# export OM_NO_BATTERY_VOLTAGE_LOG=False
+# export OM_BATTERY_VOLTAGE_LOG_PATH=""
+# export OM_BATTERY_VOLTAGE_LOG_PERIOD_SEC=1.0
+# export OM_BATTERY_VOLTAGE_LOG_FSYNC=True
+# export OM_BATTERY_VOLTAGE_LOG_MAX_BYTES=10485760
+# export OM_BATTERY_VOLTAGE_LOG_MAX_FILES=5
 
 # OM_SNAPSHOT options can be used to enable an in-memory buffer of all recent
 # ROS messages for debugging. If something goes wrong, you can dump a

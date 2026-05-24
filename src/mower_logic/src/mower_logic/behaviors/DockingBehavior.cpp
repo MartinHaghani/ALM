@@ -14,15 +14,9 @@
 //
 #include "DockingBehavior.h"
 
-#include <mower_msgs/Power.h>
-
-#include "PerimeterDocking.h"
-
 extern ros::ServiceClient dockingPointClient;
 extern actionlib::SimpleActionClient<mbf_msgs::MoveBaseAction>* mbfClient;
 extern actionlib::SimpleActionClient<mbf_msgs::ExePathAction>* mbfClientExePath;
-extern mower_msgs::Status getStatus();
-extern mower_msgs::Power getPower();
 
 extern void stopMoving();
 extern bool setGPS(bool enabled);
@@ -35,7 +29,7 @@ DockingBehavior::DockingBehavior() {
   xbot_msgs::ActionInfo abort_docking_action;
   abort_docking_action.action_id = "abort_docking";
   abort_docking_action.enabled = true;
-  abort_docking_action.action_name = "Stop Docking";
+  abort_docking_action.action_name = "Stop Parking";
 
   actions.clear();
   actions.push_back(abort_docking_action);
@@ -133,16 +127,13 @@ bool DockingBehavior::dock_straight() {
 
   ros::Rate r(10);
 
-  // we can assume the last_state is current since we have a security timer
   while (waitingForResult) {
     r.sleep();
 
-    const auto last_status = getStatus();
-    const auto last_power = getPower();
     auto mbfState = mbfClientExePath->getState();
 
     if (aborted) {
-      ROS_INFO_STREAM("Docking aborted.");
+      ROS_INFO_STREAM("Parking aborted.");
       mbfClientExePath->cancelGoal();
       stopMoving();
       dockingSuccess = false;
@@ -152,28 +143,16 @@ bool DockingBehavior::dock_straight() {
     switch (mbfState.state_) {
       case actionlib::SimpleClientGoalState::ACTIVE:
       case actionlib::SimpleClientGoalState::PENDING:
-        // currently moving. Cancel as soon as we're in the station
-        if (last_power.v_charge > 5.0) {
-          ROS_INFO_STREAM("Got a voltage of " << last_power.v_charge << " V. Cancelling docking.");
-          ros::Duration(config.docking_extra_time).sleep();
-          mbfClientExePath->cancelGoal();
-          stopMoving();
-          dockingSuccess = true;
-          waitingForResult = false;
-        }
         break;
       case actionlib::SimpleClientGoalState::SUCCEEDED:
-        // we stopped moving because the path has ended. check, if we have docked successfully
-        ROS_INFO_STREAM("Docking stopped, because we reached end pose. Voltage was " << last_power.v_charge << " V.");
-        if (last_power.v_charge > 5.0) {
-          mbfClientExePath->cancelGoal();
-          dockingSuccess = true;
-          stopMoving();
-        }
+        ROS_INFO_STREAM("Parking stopped because the recorded parking path reached its end pose.");
+        mbfClientExePath->cancelGoal();
+        dockingSuccess = true;
+        stopMoving();
         waitingForResult = false;
         break;
       default:
-        ROS_WARN_STREAM("Some error during path execution. Docking failed. status value was: " << mbfState.state_);
+        ROS_WARN_STREAM("Some error during path execution. Parking failed. status value was: " << mbfState.state_);
         waitingForResult = false;
         stopMoving();
         break;
@@ -187,20 +166,13 @@ bool DockingBehavior::dock_straight() {
 }
 
 std::string DockingBehavior::state_name() {
-  return "DOCKING";
+  return "PARKING";
 }
 
 Behavior* DockingBehavior::execute() {
-  // Check if already docked (e.g. carried to base during emergency) and skip
-  if (getPower().v_charge > 5.0) {
-    ROS_INFO_STREAM("Already inside docking station, going directly to idle.");
-    stopMoving();
-    return &IdleBehavior::DOCKED_INSTANCE;
-  }
-
   while (!isGPSGood) {
     if (aborted) {
-      ROS_INFO_STREAM("Docking aborted.");
+      ROS_INFO_STREAM("Parking aborted.");
       stopMoving();
       return &IdleBehavior::INSTANCE;
     }
@@ -212,21 +184,21 @@ Behavior* DockingBehavior::execute() {
   bool approachSuccess = approach_docking_point();
 
   if (aborted) {
-    ROS_INFO_STREAM("Docking aborted.");
+    ROS_INFO_STREAM("Parking aborted.");
     stopMoving();
     return &IdleBehavior::INSTANCE;
   }
 
   if (!approachSuccess) {
-    ROS_ERROR("Error during docking approach.");
+    ROS_ERROR("Error during parking approach.");
 
     retryCount++;
     if (retryCount <= config.docking_retry_count) {
-      ROS_ERROR("Retrying docking approach");
+      ROS_ERROR("Retrying parking approach");
       return &DockingBehavior::INSTANCE;
     }
 
-    ROS_ERROR("Giving up on docking");
+    ROS_ERROR("Giving up on parking");
     return &IdleBehavior::INSTANCE;
   }
 
@@ -237,26 +209,24 @@ Behavior* DockingBehavior::execute() {
   inApproachMode = false;
   setGPS(false);
 
-  if (PerimeterSearchBehavior::configured(config)) return &PerimeterSearchBehavior::INSTANCE;
-
   bool docked = dock_straight();
 
   if (aborted) {
-    ROS_INFO_STREAM("Docking aborted.");
+    ROS_INFO_STREAM("Parking aborted.");
     stopMoving();
     return &IdleBehavior::INSTANCE;
   }
 
   if (!docked) {
-    ROS_ERROR("Error during docking.");
+    ROS_ERROR("Error during parking.");
 
     retryCount++;
     if (retryCount <= config.docking_retry_count && !aborted) {
-      ROS_ERROR_STREAM("Retrying docking. Try " << retryCount << " / " << config.docking_retry_count);
-      return &UndockingBehavior::RETRY_INSTANCE;
+      ROS_ERROR_STREAM("Retrying parking. Try " << retryCount << " / " << config.docking_retry_count);
+      return &DockingBehavior::INSTANCE;
     }
 
-    ROS_ERROR("Giving up on docking");
+    ROS_ERROR("Giving up on parking");
     // Reset retryCount
     reset();
     return &IdleBehavior::INSTANCE;
@@ -265,7 +235,7 @@ Behavior* DockingBehavior::execute() {
   // Reset retryCount
   reset();
 
-  return &IdleBehavior::DOCKED_INSTANCE;
+  return &IdleBehavior::INSTANCE;
 }
 
 void DockingBehavior::enter() {

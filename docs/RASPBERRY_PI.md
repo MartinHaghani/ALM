@@ -23,8 +23,21 @@ For the current custom `Mowrator` bench hardware sequence, use [MOWRATOR_BENCH_B
 - repo checkout: `~/open_mower_ros`
 - config file: `~/mower_config.sh`
 - ROS logs: `~/.ros`
+- Mowrator battery voltage CSV log: `~/.ros/battery_voltage_log.csv`
 
 The startup scripts under `utils/scripts/startup/` now default to exactly that layout.
+
+## Battery cutoff voltage log
+
+For `MOWER=Mowrator`, `open_mower.launch` starts a separate battery-voltage logger by default. It subscribes to `/hw/power`, appends one CSV row per second, and fsyncs every row so the most recent left drive, right drive, and mower/blade ESC voltages should survive a sudden BMS power cutoff. The active CSV rotates at 10 MiB and keeps 5 files by default, capping the log set at about 50 MiB.
+
+In the plain-Pi workflow, the container path `/root/.ros/battery_voltage_log.csv` is bind-mounted to the host as `~/.ros/battery_voltage_log.csv`. After recharging and rebooting, inspect the final complete rows:
+
+```bash
+tail -n 40 ~/.ros/battery_voltage_log.csv
+```
+
+Use `OM_BATTERY_VOLTAGE_LOG_PERIOD_SEC`, `OM_BATTERY_VOLTAGE_LOG_PATH`, `OM_BATTERY_VOLTAGE_LOG_FSYNC`, `OM_BATTERY_VOLTAGE_LOG_MAX_BYTES`, `OM_BATTERY_VOLTAGE_LOG_MAX_FILES`, or `OM_NO_BATTERY_VOLTAGE_LOG` in `~/mower_config.sh` only if you need to change the default logger behavior.
 
 ## First boot checklist
 
@@ -201,18 +214,17 @@ Current `Mowrator` web/gamepad mapping:
 - both blade hold paths reuse the active mower profile's blade control mode
 - the hold path in `mower_logic` now exposes a stable `start_manual_mowing` / `stop_manual_mowing` pair to the WebUI and gamepad, with a brief 50 ms-polled stop-chatter guard so noisy start/stop bursts do not toggle the blade during a hold
 - blade enable changes from manual hold are applied immediately in `mower_logic`, so they do not wait for the 0.5 s safety timer
-- the blade command is no longer tied to the drive `cmd_vel` timeout path in `mower_comms_v1`
-- in duty mode, `mower_comms_v1` ramps the blade command up instead of stepping straight to full duty in one cycle; the current `Mowrator` profile keeps the dead-start path duty-first with a full-duty startup floor because the live blade responds more cleanly to direct duty than to a Pi-side startup current override
-- on blade disable, `mower_comms_v1` can send a short VESC brake-current pulse before returning to zero command, which sharpens blade spin-down without changing the steady-state control mode
+- the blade command is no longer tied to the drive `cmd_vel` timeout path in `mower_hardware`
+- in duty mode, `mower_hardware` ramps the blade command up instead of stepping straight to full duty in one cycle; the current `Mowrator` profile keeps the dead-start path duty-first with a full-duty startup floor because the live blade responds more cleanly to direct duty than to a Pi-side startup current override
+- on blade disable, `mower_hardware` can send a short VESC brake-current pulse before returning to zero command, which sharpens blade spin-down without changing the steady-state control mode
 - blade hold-control only works if the active rover config has `OM_ENABLE_MOWER=true`
-- the current plain-Pi runtime still launches in legacy-config mode unless `OM_V2` is set truthy in `~/mower_config.sh`, so if that file sources `config/mower_config.sh.example` it must override `OM_TOOL_WIDTH=0.4` afterward for `Mowrator` instead of inheriting the example's `0.13`
-- the low-level stop/lift/tilt sensor inputs on the current `Mowrator` rover are disconnected, so the `Mowrator` profile now sets `ignore_low_level_emergency_inputs=true` and completely ignores low-level emergency flags during bench bring-up
-- during `Mowrator` bench bring-up, `mower_logic` now suppresses emergency re-latching from drive-ESC `DISCONNECTED` status when `/ll/mower_status` reports `esc_power=false`; real ESC faults still stay emergency-worthy
-- if a map exists but no docking point has been recorded yet, `mower_logic` now stays in `IDLE` instead of force-jumping back into `AREA_RECORDING`; starting mowing while physically on charge still requires a valid docking point
+- the `Mowrator` runtime now uses `/hw` and `mower_hardware`; the OpenMower low-level board, sound/rain/UI board, charger-contact sensing, and low-level stop/lift/tilt inputs are not modeled
+- drive ESC `DISCONNECTED` or `ERROR` status now latches emergency; a left/right drive voltage mismatch over 1.0V warns but does not emergency-stop
+- if a map exists but no docking point has been recorded yet, `mower_logic` now stays in `IDLE` instead of force-jumping back into `AREA_RECORDING`; low battery with no docking point stops blade/motion and idles
 - the `IDLE` behavior now latches `start_mowing` and `start_area_recording` requests with atomics before the main behavior loop consumes them, which avoids flaky lost WebUI or MQTT action presses on the Pi
 - the normal undocked `IDLE` state now keeps GPS enabled so RTK stays warm before a mowing start; only the docked idle variant disables GPS
 - in `IDLE`, the start-mowing action is now only enabled when GPS is actually usable (or GPS errors are explicitly ignored); this prevents a manual start from immediately falling into a failed mow-plan attempt and then docking retries on a bad fix
-- if `MowingBehavior` finishes or aborts on a rover with no recorded docking point, it now returns to `IDLE` instead of entering `DOCKING`; this keeps no-dock Mowrator test loops local to mowing and localization rather than falling into impossible dock retries
+- if `MowingBehavior` finishes or aborts on a rover with no recorded docking point, it now returns to `IDLE` instead of entering parking; this keeps no-dock Mowrator test loops local to mowing and localization rather than falling into impossible park retries
 
 ## VESC maintenance
 

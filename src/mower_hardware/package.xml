@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>mower_hardware</name>
+  <version>0.0.0</version>
+  <description>Direct Mowrator hardware bridge without the OpenMower low-level board.</description>
+
+  <maintainer email="martin@example.invalid">OpenMower fork maintainers</maintainer>
+  <license>CC BY-NC-SA 4.0</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>geometry_msgs</build_depend>
+  <build_depend>mower_msgs</build_depend>
+  <build_depend>roscpp</build_depend>
+  <build_depend>xesc_driver</build_depend>
+  <build_depend>xesc_interface</build_depend>
+  <build_depend>xesc_msgs</build_depend>
+
+  <build_export_depend>geometry_msgs</build_export_depend>
+  <build_export_depend>mower_msgs</build_export_depend>
+  <build_export_depend>roscpp</build_export_depend>
+  <build_export_depend>xesc_driver</build_export_depend>
+  <build_export_depend>xesc_interface</build_export_depend>
+  <build_export_depend>xesc_msgs</build_export_depend>
+
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>mower_msgs</exec_depend>
+  <exec_depend>roscpp</exec_depend>
+  <exec_depend>xesc_driver</exec_depend>
+  <exec_depend>xesc_interface</exec_depend>
+  <exec_depend>xesc_msgs</exec_depend>
+</package>

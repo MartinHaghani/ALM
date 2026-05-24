@@ -30,8 +30,8 @@
             "YardForceSA650",
             "CUSTOM"
           ],
-          "default": "YardForce500",
-          "description": "The type of mower you're using. This sets physical properties like antenna position and wheel ticks per meter. Use CUSTOM for a custom mower buiold.",
+          "default": "Mowrator",
+          "description": "The type of mower you're using. Mowrator is the supported direct-Pi hardware profile in this fork; YardForce/OpenMower low-level-board profiles are legacy.",
           "x-environment-variable": "OM_MOWER"
         },
         "ESC_TYPE": {
@@ -66,7 +66,7 @@
           "type": "boolean",
           "default": false,
           "title": "Ignore Charging Current",
-          "description": "Set to True if you're affected by a wrong IC2 sourcing. Read here https://openmower.de/docs/versions/errata/ic2-is-wrong/ for more details",
+          "description": "Legacy OpenMower low-level-board charging-current workaround. Mowrator batteries are removed for charging and this setting is not used.",
           "x-environment-variable": "OM_IGNORE_CHARGING_CURRENT"
         }
       }
@@ -313,9 +313,9 @@
       "properties": {
         "OM_USE_LSM6DSO_IMU": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "title": "Use LSM6DSO IMU",
-          "description": "Start the Raspberry Pi I2C LSM6DSO publisher and publish it to /ll/imu/data_raw.",
+          "description": "Start the Raspberry Pi I2C LSM6DSO publisher and publish it to /hw/imu/data_raw.",
           "x-environment-variable": "OM_USE_LSM6DSO_IMU"
         },
         "OM_LSM6DSO_I2C_BUS": {
@@ -377,7 +377,7 @@
           "type": "string",
           "default": "base_link",
           "title": "LSM6DSO frame ID",
-          "description": "ROS frame_id used on /ll/imu/data_raw.",
+          "description": "ROS frame_id used on /hw/imu/data_raw.",
           "x-environment-variable": "OM_LSM6DSO_FRAME_ID"
         }
       }
@@ -389,42 +389,42 @@
         "OM_DOCKING_DISTANCE": {
           "type": "number",
           "default": 1.0,
-          "title": "Docking Distance",
-          "description": "Distance in [m] to drive forward after docking.",
+          "title": "Parking Distance",
+          "description": "Distance in [m] to drive forward after reaching the recorded parking point.",
           "x-environment-variable": "OM_DOCKING_DISTANCE"
         },
         "OM_DOCKING_APPROACH_DISTANCE": {
           "type": "number",
           "default": 1.5,
-          "title": "Docking Approach Distance",
-          "description": "Distance in [m] from the docking point to start docking. Has to be at least the length from the dock to your nav- or mow-area, otherwise docking will fail!",
+          "title": "Parking Approach Distance",
+          "description": "Distance in [m] from the recorded docking point to start low-battery parking. Has to be at least the length from the parking point to your nav- or mow-area.",
           "x-environment-variable": "OM_DOCKING_APPROACH_DISTANCE"
         },
         "OM_DOCKING_EXTRA_TIME": {
           "type": "number",
           "default": 0.0,
-          "description": "Extra time in [s] to continue docking after voltage detection. This can be useful to make good contact with the base station. Use carefully.",
+          "description": "Legacy charger-contact dwell time after voltage detection. Mowrator has no in-mower charging and does not use this.",
           "x-environment-variable": "OM_DOCKING_EXTRA_TIME"
         },
         "OM_DOCKING_RETRY_COUNT": {
           "type": "number",
-          "title": "Docking retry count",
+          "title": "Parking retry count",
           "default": 4,
-          "description": "How many times to retry docking before giving up.",
+          "description": "How many times to retry parking before giving up.",
           "x-environment-variable": "OM_DOCKING_RETRY_COUNT"
         },
         "OM_DOCKING_REDOCK": {
           "type": "boolean",
-          "title": "Docking retry count",
+          "title": "Legacy redocking",
           "default": false,
-          "description": "Whether to attempt redocking if the voltage is no longer detected after docking.",
+          "description": "Legacy charger-contact redock behavior. Mowrator disables automatic redocking.",
           "x-environment-variable": "OM_DOCKING_REDOCK"
         },
         "OM_DOCKING_WAIT_TIME": {
           "type": "number",
-          "title": "Wait before docking",
+          "title": "Wait before parking",
           "default": 0,
-          "description": "Time to wait (s) at OM_DOCKING_APPROACH_DISTANCE before starting to dock.",
+          "description": "Time to wait (s) at OM_DOCKING_APPROACH_DISTANCE before starting final parking approach.",
           "x-environment-variable": "OM_DOCKING_WAIT_TIME"
         },
         "OM_UNDOCKING_WAIT_TIME": {
@@ -485,23 +485,30 @@
         "OM_BATTERY_FULL_VOLTAGE": {
           "type": "number",
           "title": "Battery Full Voltage",
-          "default": 28.5,
-          "description": "Voltage for battery to be considered full.",
+          "default": 58.4,
+          "description": "Voltage for the removable 56V LiFePO4 battery to be reported as full. Battery voltage is read from the drive ESCs.",
           "x-environment-variable": "OM_BATTERY_FULL_VOLTAGE"
         },
         "OM_BATTERY_EMPTY_VOLTAGE": {
           "type": "number",
-          "default": 24.0,
+          "default": 45.0,
           "title": "Battery Empty Voltage",
-          "description": "Dock if voltage remains below empty for 20s.",
+          "description": "Park if the drive-ESC battery voltage remains below empty for 20s.",
           "x-environment-variable": "OM_BATTERY_EMPTY_VOLTAGE"
         },
         "OM_BATTERY_CRITICAL_VOLTAGE": {
           "type": "number",
-          "default": 23.0,
+          "default": 43.0,
           "title": "Battery Critical Voltage",
-          "description": "Immediate dock if voltage is critical.",
+          "description": "Immediately park if the drive-ESC battery voltage is critical. Update this after measuring the battery BMS cutoff and leave margin above that value.",
           "x-environment-variable": "OM_BATTERY_CRITICAL_VOLTAGE"
+        },
+        "OM_DRIVE_VOLTAGE_MISMATCH_WARN_V": {
+          "type": "number",
+          "default": 1.0,
+          "title": "Drive voltage mismatch warning",
+          "description": "Warn if left and right drive ESC battery voltage readings differ by more than this many volts. This warning does not emergency-stop the mower.",
+          "x-environment-variable": "OM_DRIVE_VOLTAGE_MISMATCH_WARN_V"
         },
         "OM_MOWING_MOTOR_TEMP_HIGH": {
           "type": "number",
@@ -576,6 +583,48 @@
           "description": "Set to true to record your session for debugging. Recordings will be stored in $HOME. Only enable for testing, otherwise your SD card will get full soon.",
           "x-environment-variable": "OM_ENABLE_RECORDING_ALL"
         },
+        "OM_NO_BATTERY_VOLTAGE_LOG": {
+          "type": "boolean",
+          "default": false,
+          "title": "Disable Battery Voltage Log",
+          "description": "Set to true to disable the Mowrator CSV battery voltage logger. The logger is enabled by default and runs as a separate process from the hardware bridge.",
+          "x-environment-variable": "OM_NO_BATTERY_VOLTAGE_LOG"
+        },
+        "OM_BATTERY_VOLTAGE_LOG_PATH": {
+          "type": "string",
+          "default": "",
+          "title": "Battery Voltage Log Path",
+          "description": "Optional CSV path for the Mowrator battery voltage logger. Empty uses ROS_HOME or ~/.ros/battery_voltage_log.csv so the plain-Pi workflow keeps the file across container restarts.",
+          "x-environment-variable": "OM_BATTERY_VOLTAGE_LOG_PATH"
+        },
+        "OM_BATTERY_VOLTAGE_LOG_PERIOD_SEC": {
+          "type": "number",
+          "default": 1.0,
+          "title": "Battery Voltage Log Period",
+          "description": "Seconds between CSV samples. Each row records the battery voltage reported by the left drive, right drive, and mower/blade ESC.",
+          "x-environment-variable": "OM_BATTERY_VOLTAGE_LOG_PERIOD_SEC"
+        },
+        "OM_BATTERY_VOLTAGE_LOG_FSYNC": {
+          "type": "boolean",
+          "default": true,
+          "title": "Battery Voltage Log Fsync",
+          "description": "Flush and fsync every CSV row so the most recent battery samples are likely to survive sudden BMS power cutoff. The logger runs outside the mower control loop.",
+          "x-environment-variable": "OM_BATTERY_VOLTAGE_LOG_FSYNC"
+        },
+        "OM_BATTERY_VOLTAGE_LOG_MAX_BYTES": {
+          "type": "integer",
+          "default": 10485760,
+          "title": "Battery Voltage Log Max Bytes",
+          "description": "Maximum size for the active battery voltage CSV before rotation. Set 0 to disable rotation.",
+          "x-environment-variable": "OM_BATTERY_VOLTAGE_LOG_MAX_BYTES"
+        },
+        "OM_BATTERY_VOLTAGE_LOG_MAX_FILES": {
+          "type": "integer",
+          "default": 5,
+          "title": "Battery Voltage Log Max Files",
+          "description": "Maximum number of battery voltage CSV files to keep, including the active file. With the default max bytes this caps the log set at about 50 MiB.",
+          "x-environment-variable": "OM_BATTERY_VOLTAGE_LOG_MAX_FILES"
+        },
         "OM_SNAPSHOT_MEMORY_PER_TOPIC": {
           "type": "number",
           "default": 0.0,
@@ -603,7 +652,7 @@
           ],
           "default": "Ignore",
           "title": "Rain Mode",
-          "description": "Behaviour when rain detected",
+          "description": "Legacy low-level-board rain behavior. The Mowrator runtime has no rain sensor and ignores rain decisions.",
           "x-environment-variable": "OM_RAIN_MODE",
           "x-remap-values": {
             "Ignore": 0,
@@ -616,7 +665,7 @@
           "type": "number",
           "default": 30,
           "title": "Rain delay minutes",
-          "description": "How long to wait after rain to resume mowing when mode is \"Dock Until Dry\" (minimum value is 30)",
+          "description": "Legacy low-level-board rain delay. The Mowrator runtime has no rain sensor.",
           "x-environment-variable": "OM_RAIN_DELAY_MINUTES"
         },
         "advanced": {
@@ -661,25 +710,25 @@
               },
               "OM_PERIMETER_SIGNAL": {
                 "type": "number",
-                "description": "Use perimeter sensor for docking. Set to 1 or 2 depending on the signal selected on the docking station. This is only supported by Mowgli builds for now.",
+                "description": "Legacy perimeter docking sensor. The Mowrator runtime parks at the recorded docking point without charger or perimeter detection.",
                 "x-environment-variable": "OM_PERIMETER_SIGNAL"
               },
               "OM_EMERGENCY_INPUT_CONFIG": {
                 "type": "string",
                 "default": "",
-                "description": "Comma separated list of emergency inputs (halls or stop), where each sensor can be configured in one of the following modes '[!]<I>gnore|<U>nused|<S>top|<L>Lift'",
+                "description": "Legacy low-level-board emergency input list. The Mowrator runtime has no low-level-board stop/lift/tilt inputs.",
                 "x-environment-variable": "OM_EMERGENCY_INPUT_CONFIG"
               },
               "OM_EMERGENCY_LIFT_PERIOD": {
                 "type": "number",
                 "default": -1,
-                "description": "Period (ms) for >=2 wheels to be lifted in order to count as emergency (0 = disable)",
+                "description": "Legacy low-level-board lift filter. The Mowrator runtime has no low-level-board lift input.",
                 "x-environment-variable": "OM_EMERGENCY_LIFT_PERIOD"
               },
               "OM_EMERGENCY_TILT_PERIOD": {
                 "type": "number",
                 "default": -1,
-                "description": "Period (ms) for a single wheel to be lifted in order to count as emergency (0 = disable)",
+                "description": "Legacy low-level-board tilt/lift filter. The Mowrator runtime has no low-level-board tilt input.",
                 "x-environment-variable": "OM_EMERGENCY_TILT_PERIOD"
               },
               "OM_SHUTDOWN_ESC_MAX_PITCH": {
@@ -692,28 +741,28 @@
                 "type": "number",
                 "default": -1,
                 "title": "Stock-CoverUI rain sensor threshold",
-                "description": "Stock-CoverUI limited rain sensor threshold, below which humidity/dryness value get identified as rain. As higher, as more dry. Default to 700",
+                "description": "Legacy Stock-CoverUI rain threshold. The Mowrator runtime has no rain sensor.",
                 "x-environment-variable": "OM_CU_RAIN_THRESHOLD"
               },
               "OM_BATTERY_CRITICAL_HIGH_VOLTAGE": {
                 "type": "number",
                 "default": -1,
-                "title": "Max. battery voltage",
-                "description": "Max. battery voltage before charging get switched off",
+                "title": "Legacy max battery voltage",
+                "description": "Legacy OpenMower low-level-board charging limit. Not used by the Mowrator removable-battery runtime.",
                 "x-environment-variable": "OM_BATTERY_CRITICAL_HIGH_VOLTAGE"
               },
               "OM_CHARGE_CRITICAL_HIGH_VOLTAGE": {
                 "type": "number",
                 "default": -1,
-                "title": "Max. charge voltage",
-                "description": "Max. charge voltage before charging get switched off",
+                "title": "Legacy max charge voltage",
+                "description": "Legacy OpenMower low-level-board charging limit. Not used by the Mowrator removable-battery runtime.",
                 "x-environment-variable": "OM_CHARGE_CRITICAL_HIGH_VOLTAGE"
               },
               "OM_CHARGE_CRITICAL_HIGH_CURRENT": {
                 "type": "number",
                 "default": -1,
-                "title": "Max. charge current",
-                "description": "Max. charge current before charging get switched off",
+                "title": "Legacy max charge current",
+                "description": "Legacy OpenMower low-level-board charging limit. Not used by the Mowrator removable-battery runtime.",
                 "x-environment-variable": "OM_CHARGE_CRITICAL_HIGH_CURRENT"
               }
             }

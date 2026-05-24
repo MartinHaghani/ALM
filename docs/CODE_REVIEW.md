@@ -10,8 +10,8 @@ Purpose: reusable review checklist for human reviewers and agents working in thi
 
 ## Safety-sensitive checklist
 
-- Does the change affect `mower_logic`, `mower_comms_v1`, `mower_comms_v2`, launch wiring, entrypoints, or hardware-specific params?
-- Could the change alter mower motion, docking, undocking, emergency handling, battery thresholds, GPS behavior, or low-level comms?
+- Does the change affect `mower_logic`, `mower_hardware`, legacy `mower_comms_*`, launch wiring, entrypoints, or hardware-specific params?
+- Could the change alter mower motion, parking/docking, emergency handling, battery thresholds, GPS behavior, or hardware comms?
 - Are default values, thresholds, or parameter names changing?
 - Is the validation story strong enough for the risk level?
 

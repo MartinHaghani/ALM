@@ -86,7 +86,7 @@ void add_overlay_polyline(xbot_msgs::MapOverlay& overlay, const std::vector<geom
 Behavior* getPostMowingBehavior() {
   mower_map::GetDockingPointSrv get_docking_point_srv;
   if (!dockingPointClient.call(get_docking_point_srv)) {
-    ROS_WARN_STREAM("MowingBehavior: No docking point configured, returning to IDLE instead of DOCKING.");
+    ROS_WARN_STREAM("MowingBehavior: No parking point configured, returning to IDLE.");
     return &IdleBehavior::INSTANCE;
   }
   return &DockingBehavior::INSTANCE;

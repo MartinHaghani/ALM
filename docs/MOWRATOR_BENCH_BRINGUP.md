@@ -5,7 +5,7 @@ Purpose: verify the new bench hardware one piece at a time before the mower is m
 ## Current hardware snapshot
 
 - The old main board has been removed.
-- The old low-level board is no longer connected. Its useful IMU role is replaced by a SparkFun LSM6DSO on Raspberry Pi I2C bus 1:
+- The old low-level board is no longer connected and is not part of the supported runtime. Its useful IMU role is replaced by a SparkFun LSM6DSO on Raspberry Pi I2C bus 1:
   - `SDA`: physical pin 3, `GPIO2 / SDA1`
   - `SCL`: physical pin 5, `GPIO3 / SCL1`
   - use Pi `3V3`, not `5V`, and a shared ground
@@ -19,7 +19,7 @@ Do these checks with ESCs and motors disconnected or otherwise made physically u
 
 Do not use full autonomous launch as the first test. The first useful checks are host-level device checks, then narrow ROS topic checks.
 
-If the old low-level board is absent, `/ll/power` can report `0 V`. For bench-only area recording, set `OM_BATTERY_EMPTY_VOLTAGE=-1.0` and `OM_BATTERY_CRITICAL_VOLTAGE=-1.0` in the Pi runtime config to avoid false low-battery aborts. Restore real battery thresholds before any autonomous or field run.
+The supported runtime uses `/hw/power`. Battery percentage and low-battery parking thresholds use the drive ESC voltage pair, while `/hw/power` also carries the mower/blade ESC voltage for cutoff logging. For bench-only checks with drive ESCs unpowered, set `OM_BATTERY_EMPTY_VOLTAGE=-1.0` and `OM_BATTERY_CRITICAL_VOLTAGE=-1.0` only if you need to run mower logic without valid ESC voltage. Restore the real 58.4V/45.0V/43.0V thresholds before any autonomous or field run.
 
 ## One-command bench check
 
@@ -119,8 +119,8 @@ export OM_LSM6DSO_AXIS_CONFIG=+X+Y+Z
 Then rebuild/restart the Pi runtime and verify:
 
 ```bash
-rostopic echo -n 1 /ll/imu/data_raw
-rostopic hz /ll/imu/data_raw
+rostopic echo -n 1 /hw/imu/data_raw
+rostopic hz /hw/imu/data_raw
 ```
 
 The axis config is a mounting calibration, not just a wiring setting. Leave it as `+X+Y+Z` for bench electrical checks, then set the final signed axis mapping once the IMU is mounted in the mower frame.

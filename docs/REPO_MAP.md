@@ -26,10 +26,11 @@ Purpose: explain the directory tree, ownership boundaries, and which areas are s
 
 ## `src/` layout
 
-- `src/open_mower/`: main orchestration package. Contains launch files, parameter YAML, hardware-specific presets, and RViz configs.
+- `src/open_mower/`: main orchestration package. Contains launch files, parameter YAML, hardware-specific presets, RViz configs, and small runtime helper scripts such as the battery-voltage logger.
 - `src/mower_logic/`: high-level mower state machine and monitoring node. Safety-critical.
-- `src/mower_comms_v1/`: v1 hardware comms executable. Safety-critical.
-- `src/mower_comms_v2/`: v2 xBot-service bridge. Safety-critical.
+- `src/mower_hardware/`: supported Mowrator direct hardware bridge under `/hw`. Safety-critical.
+- `src/mower_comms_v1/`: legacy v1 low-level-board comms executable. Safety-critical when touched, but not the supported Mowrator runtime.
+- `src/mower_comms_v2/`: legacy/simulation v2 xBot-service bridge. Safety-critical when touched.
 - `src/mower_map/`: map service, RPC entrypoints, occupancy-grid publication, and map persistence.
 - `src/mower_msgs/`: repo-specific messages and services shared across packages.
 - `src/mower_simulation/`: simulation-side low-level service implementation.

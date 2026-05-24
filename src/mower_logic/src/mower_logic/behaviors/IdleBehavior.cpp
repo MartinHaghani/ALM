@@ -15,22 +15,20 @@
 #include "IdleBehavior.h"
 
 #include <mower_logic/PowerConfig.h>
-#include <mower_msgs/Power.h>
+#include <mower_msgs/HwPower.h>
+#include <mower_msgs/HwStatus.h>
 
 #include "MowingBehavior.h"
-#include "PerimeterDocking.h"
 
 extern void stopMoving();
 extern void stopBlade();
 extern void setEmergencyMode(bool emergency);
 extern void setGPS(bool enabled);
-extern void setRobotPose(geometry_msgs::Pose& pose);
 extern void registerActions(std::string prefix, const std::vector<xbot_msgs::ActionInfo>& actions);
-extern ros::Time rain_resume;
 
 extern ros::ServiceClient dockingPointClient;
-extern mower_msgs::Status getStatus();
-extern mower_msgs::Power getPower();
+extern mower_msgs::HwStatus getStatus();
+extern mower_msgs::HwPower getPower();
 extern mower_logic::MowerLogicConfig getConfig();
 extern void setConfig(mower_logic::MowerLogicConfig);
 extern ll::PowerConfig getPowerConfig();
@@ -38,7 +36,6 @@ extern dynamic_reconfigure::Server<mower_logic::MowerLogicConfig>* reconfigServe
 extern bool isGpsGood();
 
 extern ros::ServiceClient mapClient;
-extern ros::ServiceClient dockingPointClient;
 
 IdleBehavior IdleBehavior::INSTANCE(false);
 IdleBehavior IdleBehavior::DOCKED_INSTANCE(true);
@@ -67,12 +64,6 @@ Behavior* IdleBehavior::execute() {
   // does not trip over a stale "last good GPS" window while xbot_positioning
   // re-accepts RTK updates. Only the docked idle variant should disable GPS.
   setGPS(!stay_docked);
-  geometry_msgs::PoseStamped docking_pose_stamped;
-  if (has_docking_point) {
-    docking_pose_stamped.pose = get_docking_point_srv.response.docking_pose;
-    docking_pose_stamped.header.frame_id = "map";
-    docking_pose_stamped.header.stamp = ros::Time::now();
-  }
 
   ros::Rate r(25);
   while (ros::ok()) {
@@ -83,8 +74,9 @@ Behavior* IdleBehavior::execute() {
     const auto last_status = getStatus();
     const auto last_power = getPower();
     const bool gps_ready_for_mowing = last_config.ignore_gps_errors || isGpsGood();
-    const bool can_start_from_charge = has_docking_point || last_power.v_charge <= 5.0;
-    const bool start_mowing_enabled = gps_ready_for_mowing && can_start_from_charge;
+    const bool battery_ready =
+        last_power.battery_voltage_valid && last_power.v_battery > last_power_config.battery_empty_voltage;
+    const bool start_mowing_enabled = gps_ready_for_mowing && battery_ready;
 
     if (actions[0].enabled != start_mowing_enabled || !actions[1].enabled) {
       actions[0].enabled = start_mowing_enabled;
@@ -95,13 +87,9 @@ Behavior* IdleBehavior::execute() {
     const bool automatic_mode = last_config.automatic_mode == eAutoMode::AUTO;
     const bool active_semiautomatic_task =
         last_config.automatic_mode == eAutoMode::SEMIAUTO && shared_state->active_semiautomatic_task;
-    const bool rain_delay = last_config.rain_mode == 2 && ros::Time::now() < rain_resume;
-    if (rain_delay) {
-      ROS_INFO_STREAM_THROTTLE(300, "Rain delay: " << int((rain_resume - ros::Time::now()).toSec() / 60) << " minutes");
-    }
-    const bool mower_ready = last_power.v_battery > last_power_config.battery_full_voltage &&
+    const bool mower_ready = battery_ready &&
                              last_status.mower_motor_temperature < last_config.motor_cold_temperature &&
-                             !last_config.manual_pause_mowing && !rain_delay;
+                             !last_config.manual_pause_mowing;
 
     if (manual_start_mowing.load() || ((automatic_mode || active_semiautomatic_task) && mower_ready)) {
       if (!gps_ready_for_mowing) {
@@ -110,20 +98,12 @@ Behavior* IdleBehavior::execute() {
         r.sleep();
         continue;
       }
-      // set the robot's position to the dock if we're actually docked
-      if (last_power.v_charge > 5.0) {
-        if (!has_docking_point) {
-          ROS_ERROR_THROTTLE(5, "Cannot start mowing from charge without a configured docking point.");
-          manual_start_mowing.store(false);
-          r.sleep();
-          continue;
-        }
-        if (PerimeterUndockingBehavior::configured(config)) return &PerimeterUndockingBehavior::INSTANCE;
-        ROS_INFO_STREAM("Currently inside the docking station, we set the robot's pose to the docks pose.");
-        setRobotPose(docking_pose_stamped.pose);
-        return &UndockingBehavior::INSTANCE;
+      if (!battery_ready) {
+        ROS_WARN_THROTTLE(5, "Cannot start mowing: battery voltage is below the configured parking threshold or invalid.");
+        manual_start_mowing.store(false);
+        r.sleep();
+        continue;
       }
-      // Not docked, so just mow
       if (manual_start_mowing.exchange(false)) {
         MowingBehavior::INSTANCE.start_new_session();
       }
@@ -138,11 +118,6 @@ Behavior* IdleBehavior::execute() {
     // This gets called if we need to refresh, e.g. on clearing maps
     if (aborted) {
       return &IdleBehavior::INSTANCE;
-    }
-
-    if (last_config.docking_redock && stay_docked && last_power.v_charge < 5.0) {
-      ROS_WARN("We docked but seem to have lost contact with the charger.  Undocking and trying again!");
-      return &UndockingBehavior::RETRY_INSTANCE;
     }
 
     r.sleep();
