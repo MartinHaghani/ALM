@@ -23,6 +23,7 @@ For a fast orientation pass, read in this order:
 - [../config/AGENTS.md](../config/AGENTS.md): config source-of-truth and sync rules.
 - [../docker/AGENTS.md](../docker/AGENTS.md): runtime image and entrypoint guardrails.
 - [../web/AGENTS.md](../web/AGENTS.md): generated-web guidance.
+- [../webui/AGENTS.md](../webui/AGENTS.md): React `/next/` WebUI guidance.
 - [../.claude/rules/ros-workspace.md](../.claude/rules/ros-workspace.md): scoped ROS workspace rule.
 - [../.claude/rules/config-and-env.md](../.claude/rules/config-and-env.md): scoped config rule.
 - [../.claude/rules/generated-and-external.md](../.claude/rules/generated-and-external.md): external/generated rule.

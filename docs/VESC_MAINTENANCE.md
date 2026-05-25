@@ -19,13 +19,13 @@ This is the supported way for agents and contributors to inspect or change VESC 
   - `main.cpp` exposes the CLI flags `--offscreen`, `--vescPort`, `--getMcConf`, `--setMcConf`, `--getAppConf`, and `--setAppConf`
 - Runtime-verified on the rover Pi:
   - the mower runtime can be stopped cleanly before maintenance
-  - the official VESC Tool was installed and built on `rpi4.local`
+  - the official VESC Tool was installed and built on `mowrator.local`
   - headless motor-config reads succeeded on all three mower UARTs:
     - `/dev/ttyAMA5` left drive
     - `/dev/ttyAMA3` right drive
     - `/dev/ttyAMA4` mower blade
   - a headless app-config read succeeded on the right drive ESC over `/dev/ttyAMA3`
-  - April 2, 2026 firmware readback on `rpi4.local` showed:
+  - April 2, 2026 firmware readback on `mowrator.local` showed:
     - left drive `/dev/ttyAMA5`: `FW: V6.02 (no_hw_limits), Hw: 75_300_R2`
     - right drive `/dev/ttyAMA3`: `FW: V6.02 (no_hw_limits), Hw: 75_300_R2`
     - mower blade `/dev/ttyAMA4`: `FW: V6.06 (no_hw_limits), Hw: 75_300_R2`

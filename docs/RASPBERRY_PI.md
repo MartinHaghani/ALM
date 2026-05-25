@@ -12,7 +12,7 @@ This guide targets:
 - manual `git pull` plus rebuild and restart
 - the repo’s legacy-style container startup path, because a plain Pi does not provide the OSv2 web and MQTT services expected by `docker/Dockerfile`
 
-In the current Pi-dev workflow, the main container provides `nginx` and `rosbridge`, and the startup script launches a host-networked `eclipse-mosquitto` sidecar so the rover can expose the checked-in web bundle directly from the Pi.
+In the current Pi-dev workflow, the main container provides `nginx` and `rosbridge`, and the startup script launches a host-networked `eclipse-mosquitto` sidecar so the rover can expose the checked-in web bundle directly from the Pi. The `/next/` React UI is built on the Pi from `webui/` before runtime restart.
 
 This guide does not assume OpenMower OS v2 is already installed on the Pi.
 
@@ -129,6 +129,18 @@ export OM_RTCM_TCP_PORT=5016
 
 For a normal NTRIP source, leave `OM_USE_RTCM_TCP` unset or false and configure the `OM_NTRIP_*` values instead.
 
+## Optional Slamtec C1 scan bring-up
+
+The C1 driver is default-off. To start it in this first visualization slice, add this to `~/mower_config.sh`:
+
+```bash
+export OM_USE_C1_LIDAR=True
+```
+
+Defaults are `/dev/ttyUSB0`, `460800` baud, frame `lidar`, scan topic `/ll/lidar`, scan mode `Standard`, and scan frequency `10.0` Hz. The static transform is `base_link -> lidar` with zero xyz/rpy offsets until the physical mount is measured.
+
+This does not change localization, mapping, planning, navigation, costmaps, or mowing behavior. It only publishes `sensor_msgs/LaserScan` for ROS inspection and the `/next/` sensor viewer.
+
 ## Supported startup scripts
 
 The supported Pi workflow scripts live under `utils/scripts/startup/`:
@@ -139,6 +151,10 @@ The supported Pi workflow scripts live under `utils/scripts/startup/`:
 - `logs_open_mower_local.sh`
 - `pull_build_restart_open_mower.sh`
 - `docker_shell.sh`
+
+The React `/next/` UI build script lives at:
+
+- `utils/scripts/web/build_next_webui.sh`
 
 ## Script contract
 
@@ -161,6 +177,9 @@ These scripts support the same environment variables:
   - default: `open_mower_local`
 - `OPEN_MOWER_MQTT_CONTAINER_NAME`
   - default: `open_mower_mosquitto`
+- `OPEN_MOWER_WEBUI_NODE_IMAGE`
+  - default: `node:22-bookworm-slim`
+  - used by `utils/scripts/web/build_next_webui.sh`
 
 They also intentionally:
 
@@ -171,6 +190,7 @@ They also intentionally:
 - start the local-checkout runtime through `docker/openmower_entrypoint.pi.sh` from the mounted repo
 - let `docker/openmower_entrypoint.pi.sh` install small missing runtime libraries before delegating to `docker/openmower_entrypoint.legacy.sh`
 - serve the checked-in `web/` bundle through nginx on port `8080`
+- serve the generated React WebUI from `web/next/` at `/next/`
 - start an `eclipse-mosquitto` sidecar with host networking so MQTT is available on port `1883` and MQTT-over-WebSockets is available on port `9001`
 - start `rosbridge` by default through `open_mower.launch` unless `OM_NO_ROSBRIDGE=True`
 - generate a local `version_info.env` in the repo root when the bind-mounted checkout does not already have one
@@ -181,6 +201,7 @@ From the repo root or any shell:
 
 ```bash
 ~/open_mower_ros/utils/scripts/startup/build_open_mower_pi_image.sh
+~/open_mower_ros/utils/scripts/web/build_next_webui.sh
 ~/open_mower_ros/utils/scripts/startup/compile_open_mower.sh
 ~/open_mower_ros/utils/scripts/startup/start_open_mower_local.sh
 ```
@@ -199,15 +220,17 @@ If you want logs from an already running container:
 
 Expected service endpoints after startup:
 
-- `http://rpi4.local:8080/` for the checked-in web bundle
-- `ws://rpi4.local:9090/` for rosbridge
-- `ws://rpi4.local:9002/` for `xbot_remote`
-- `mqtt://rpi4.local:1883` for MQTT
-- `ws://rpi4.local:9001/` for MQTT-over-WebSockets
+- `http://mowrator.local:8080/` for the checked-in web bundle
+- `http://mowrator.local:8080/next/` for the React GPS map and sensor viewer
+- `ws://mowrator.local:9090/` for rosbridge
+- `ws://mowrator.local:9002/` for `xbot_remote`
+- `mqtt://mowrator.local:1883` for MQTT
+- `ws://mowrator.local:9001/` for MQTT-over-WebSockets
 
 Current `Mowrator` web/gamepad mapping:
 
-- the editable source of the served UI lives in the separate `OpenMowerApp` Flutter repository; do not hand-edit the compiled `web/` bundle for feature work
+- the editable source of the existing root Flutter UI lives in the separate `OpenMowerApp` repository; do not hand-edit the compiled root `web/` bundle for feature work
+- the editable source of the new `/next/` React UI lives in this repo under `webui/`, and generated output lands in `web/next/`
 - in `AREA_RECORDING`, the left stick drives without a gamepad deadman
 - the remote-control screen exposes a press-and-hold blade button
 - holding `L1 + R1` also runs the blade while held
@@ -249,8 +272,17 @@ Observed behavior:
 - it refuses to pull if tracked files or submodules have local modifications
 - it runs `git pull --ff-only`
 - it refreshes submodules
+- it builds the React `/next/` UI through `utils/scripts/web/build_next_webui.sh`
 - it rebuilds in the container
 - it restarts the runtime container
+
+Useful C1 checks after restart:
+
+```bash
+rostopic echo -n 1 /ll/lidar
+rostopic hz /ll/lidar
+rosrun tf tf_echo base_link lidar
+```
 
 This is intentionally manual. There is no unattended background `git pull`.
 

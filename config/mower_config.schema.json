@@ -307,6 +307,117 @@
         }
       ]
     },
+    "lidar_settings": {
+      "title": "LIDAR Settings",
+      "type": "object",
+      "properties": {
+        "OM_USE_C1_LIDAR": {
+          "type": "boolean",
+          "default": false,
+          "title": "Use Slamtec C1 LIDAR",
+          "description": "Start the optional Slamtec C1 ROS driver and publish LaserScan data for visualization.",
+          "x-environment-variable": "OM_USE_C1_LIDAR"
+        },
+        "OM_C1_SERIAL_PORT": {
+          "type": "string",
+          "default": "/dev/ttyUSB0",
+          "title": "C1 serial port",
+          "description": "Serial device used by the Slamtec C1.",
+          "x-environment-variable": "OM_C1_SERIAL_PORT"
+        },
+        "OM_C1_SERIAL_BAUDRATE": {
+          "type": "integer",
+          "default": 460800,
+          "title": "C1 serial baudrate",
+          "description": "Serial baudrate used by the Slamtec C1.",
+          "x-environment-variable": "OM_C1_SERIAL_BAUDRATE"
+        },
+        "OM_C1_FRAME_ID": {
+          "type": "string",
+          "default": "lidar",
+          "title": "C1 frame id",
+          "description": "TF child frame and LaserScan frame_id for the Slamtec C1.",
+          "x-environment-variable": "OM_C1_FRAME_ID"
+        },
+        "OM_C1_SCAN_TOPIC": {
+          "type": "string",
+          "default": "/ll/lidar",
+          "title": "C1 scan topic",
+          "description": "ROS topic where C1 LaserScan messages are published.",
+          "x-environment-variable": "OM_C1_SCAN_TOPIC"
+        },
+        "OM_C1_SCAN_FREQUENCY": {
+          "type": "number",
+          "default": 10.0,
+          "title": "C1 scan frequency",
+          "description": "Requested C1 scan frequency in Hz.",
+          "x-environment-variable": "OM_C1_SCAN_FREQUENCY"
+        },
+        "OM_C1_SCAN_MODE": {
+          "type": "string",
+          "default": "Standard",
+          "title": "C1 scan mode",
+          "description": "Slamtec scan mode passed to the rplidar_ros driver.",
+          "x-environment-variable": "OM_C1_SCAN_MODE"
+        },
+        "OM_C1_INVERTED": {
+          "type": "boolean",
+          "default": false,
+          "title": "C1 inverted",
+          "description": "Set true if the C1 is mounted inverted and the driver should invert scan angles.",
+          "x-environment-variable": "OM_C1_INVERTED"
+        },
+        "OM_C1_ANGLE_COMPENSATE": {
+          "type": "boolean",
+          "default": true,
+          "title": "C1 angle compensation",
+          "description": "Enable angle compensation in the rplidar_ros driver.",
+          "x-environment-variable": "OM_C1_ANGLE_COMPENSATE"
+        },
+        "OM_C1_X": {
+          "type": "number",
+          "default": 0.0,
+          "title": "C1 X offset",
+          "description": "C1 x offset from base_link in meters.",
+          "x-environment-variable": "OM_C1_X"
+        },
+        "OM_C1_Y": {
+          "type": "number",
+          "default": 0.0,
+          "title": "C1 Y offset",
+          "description": "C1 y offset from base_link in meters.",
+          "x-environment-variable": "OM_C1_Y"
+        },
+        "OM_C1_Z": {
+          "type": "number",
+          "default": 0.0,
+          "title": "C1 Z offset",
+          "description": "C1 z offset from base_link in meters.",
+          "x-environment-variable": "OM_C1_Z"
+        },
+        "OM_C1_ROLL": {
+          "type": "number",
+          "default": 0.0,
+          "title": "C1 roll",
+          "description": "C1 roll from base_link in radians.",
+          "x-environment-variable": "OM_C1_ROLL"
+        },
+        "OM_C1_PITCH": {
+          "type": "number",
+          "default": 0.0,
+          "title": "C1 pitch",
+          "description": "C1 pitch from base_link in radians.",
+          "x-environment-variable": "OM_C1_PITCH"
+        },
+        "OM_C1_YAW": {
+          "type": "number",
+          "default": 0.0,
+          "title": "C1 yaw",
+          "description": "C1 yaw from base_link in radians.",
+          "x-environment-variable": "OM_C1_YAW"
+        }
+      }
+    },
     "imu_settings": {
       "title": "IMU Settings",
       "type": "object",

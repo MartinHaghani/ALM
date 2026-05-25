@@ -115,6 +115,7 @@ For a plain Raspberry Pi OS bring-up with a local checkout on the Pi, use [RASPB
 
 The supported Pi scripts are:
 
+- `utils/scripts/web/build_next_webui.sh`
 - `utils/scripts/startup/build_open_mower_pi_image.sh`
 - `utils/scripts/startup/compile_open_mower.sh`
 - `utils/scripts/startup/start_open_mower_local.sh`
@@ -125,12 +126,14 @@ The supported Pi scripts are:
 
 Observed plain-Pi detail:
 
+- `build_next_webui.sh` runs `npm ci`, `npm run typecheck`, and `npm run build` inside `node:22-bookworm-slim`, generating `web/next/` from the React source under `webui/`.
 - `build_open_mower_pi_image.sh` builds the local `open_mower_ros:pi-dev` image from `docker/Dockerfile.PiDev`.
 - `docker/Dockerfile.PiDev` derives from `ros:noetic-ros-base-focal`, installs this repo's apt-level ROS dependencies, and includes `nginx` for the plain-Pi workflow.
 - `start_open_mower_local.sh` launches through the repo's `docker/openmower_entrypoint.pi.sh` inside the bind-mounted checkout.
 - `docker/openmower_entrypoint.pi.sh` installs small missing runtime libraries when needed, starts `nginx`, then delegates to `docker/openmower_entrypoint.legacy.sh` so legacy `mower_config.sh` values become the `MOWER`, `ESC_TYPE`, and related runtime environment expected by `open_mower.launch`.
 - `start_open_mower_local.sh` also starts an `eclipse-mosquitto:latest` sidecar with host networking and `docker/assets/mosquitto.conf`.
 - `open_mower.launch` now includes `rosbridge` by default in this workflow unless `OM_NO_ROSBRIDGE=True`.
+- `docker/assets/nginx.conf` serves the existing Flutter UI at `/` and the generated React UI at `/next/`.
 
 ## Development companion services under `docker/`
 

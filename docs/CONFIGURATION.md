@@ -20,6 +20,7 @@ Purpose: explain the repo’s actual configuration model, sources of truth, and 
 - The observed top-level groups are:
   - `important_settings` with title `Hardware Settings`
   - `gps_settings` with title `GPS Settings`
+  - `lidar_settings` with title `LIDAR Settings`
   - `imu_settings` with title `IMU Settings`
   - `mower_logic_settings` with title `Mower Logic Settings`
   - `external_mqtt_broker` with title `External MQTT Broker`
@@ -121,6 +122,24 @@ Observed examples:
 - `OM_LSM6DSO_FRAME_ID`
 
 These settings are for the current Raspberry Pi I2C SparkFun LSM6DSO replacement path. For `Mowrator`, the IMU publisher is default-on and publishes under `/hw/imu/data_raw`.
+
+### LIDAR settings
+
+Observed examples:
+
+- `OM_USE_C1_LIDAR`
+- `OM_C1_SERIAL_PORT`
+- `OM_C1_SERIAL_BAUDRATE`
+- `OM_C1_FRAME_ID`
+- `OM_C1_SCAN_TOPIC`
+- `OM_C1_SCAN_FREQUENCY`
+- `OM_C1_SCAN_MODE`
+- `OM_C1_INVERTED`
+- `OM_C1_ANGLE_COMPENSATE`
+- `OM_C1_X`, `OM_C1_Y`, and `OM_C1_Z`
+- `OM_C1_ROLL`, `OM_C1_PITCH`, and `OM_C1_YAW`
+
+These settings start the optional Slamtec C1 driver and static `base_link` to LIDAR transform. Offsets are meters and angles are radians. The `/next/` sensor viewer can display this LaserScan alongside raw IMU output; it does not change localization, mapping, planning, or navigation authority.
 
 ### Mower logic settings
 

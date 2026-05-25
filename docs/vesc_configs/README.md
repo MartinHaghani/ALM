@@ -34,7 +34,7 @@ At minimum:
 
 ```bash
 rsync -av \
-  mowrator@rpi4.local:/home/mowrator/vesc-config-dumps/current/ \
+  mowrator@mowrator.local:/home/mowrator/vesc-config-dumps/current/ \
   /Users/martinhaghani/Code/open_mower_ros/docs/vesc_configs/
 ```
 

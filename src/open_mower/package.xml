@@ -43,6 +43,8 @@
   <exec_depend>twist_mux</exec_depend>
   <exec_depend>rtcm_msgs</exec_depend>
   <exec_depend>rosbag_snapshot</exec_depend>
+  <exec_depend>rplidar_ros</exec_depend>
+  <exec_depend>tf</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->

@@ -2,7 +2,7 @@
 
 Purpose: operational guidance for Codex and other repo-aware agents working in this `open_mower_ros` fork.
 
-This repository is a ROS Noetic catkin workspace for OpenMower. It combines launch/orchestration under `src/open_mower`, first-party mower packages under `src/`, external libraries and submodules under `src/lib/`, runtime and development container assets under `docker/`, `devenv/`, and `.devcontainer/`, config artifacts under `config/`, shared xBot service-definition JSON under `services/`, and an observed built web bundle under `web/`.
+This repository is a ROS Noetic catkin workspace for OpenMower. It combines launch/orchestration under `src/open_mower`, first-party mower packages under `src/`, external libraries and submodules under `src/lib/`, runtime and development container assets under `docker/`, `devenv/`, and `.devcontainer/`, config artifacts under `config/`, shared xBot service-definition JSON under `services/`, React WebUI source under `webui/`, and built web output under `web/`.
 
 ## Repo map
 
@@ -18,7 +18,8 @@ This repository is a ROS Noetic catkin workspace for OpenMower. It combines laun
 - `config`: config schema and deprecated shell example. `config/mower_config.schema.json` is the structured source of truth.
 - `docker`: runtime images and entrypoints.
 - `devenv` and `.devcontainer`: development-only container setup.
-- `web`: observed compiled web bundle. Avoid hand-editing unless the change is intentional and documented.
+- `webui`: Vite + React + TypeScript source for the `/next/` WebUI.
+- `web`: built web output. Avoid hand-editing unless the change is intentional and documented.
 - `utils`: helper scripts for startup, debugging, firmware upload, and button actions.
 
 ## Verified commands
@@ -47,7 +48,7 @@ roslaunch open_mower open_mower.launch
 
 - Verify from repo files before assuming behavior, paths, or commands.
 - Keep ROS package boundaries intact. Do not introduce a different build system or flatten package ownership.
-- Treat `src/lib/ntrip_client`, `src/lib/xbot_driver_gps`, `src/lib/xbot_framework`, and `services` as submodule/external boundaries unless the task explicitly targets them.
+- Treat `src/lib/ntrip_client`, `src/lib/rplidar_ros`, `src/lib/xbot_driver_gps`, `src/lib/xbot_framework`, and `services` as submodule/vendored/external boundaries unless the task explicitly targets them.
 - Treat nested `src/lib/xbot_framework/ext/cpputest` and `src/lib/xbot_framework/ext/ulog` as nested submodules.
 - Do not do broad formatting or cleanup edits in `src/lib/`, `services/`, or `web/`.
 - Treat `web/` as generated/build output unless direct evidence in the repo says otherwise.
@@ -81,7 +82,13 @@ roslaunch open_mower open_mower.launch
 ### `web/`
 
 - Start with [web/AGENTS.md](web/AGENTS.md).
-- The directory currently contains compiled Flutter-style assets such as `main.dart.js`, `flutter.js`, and asset manifests.
+- The directory contains compiled Flutter-style assets such as `main.dart.js`, `flutter.js`, and asset manifests.
+- `web/next/` is generated from `webui/`; do not hand-edit it.
+
+### `webui/`
+
+- This is the source for the React `/next/` UI.
+- Build with `utils/scripts/web/build_next_webui.sh`; the generated output lands in `web/next/`.
 
 ## Verification checklist
 

@@ -21,6 +21,7 @@ This summary is grounded in:
 
 - `_params.launch`: loads parameters from YAML and or environment variables, depending on legacy mode and hardware platform.
 - `_comms.launch`: starts `mower_hardware` for the supported `Mowrator` direct-Pi hardware path, starts the separate Mowrator battery-voltage CSV logger unless disabled, keeps `mower_comms_v1` available only for legacy non-Mowrator `HARDWARE_PLATFORM=1` presets, or starts `mower_comms_v2` for `HARDWARE_PLATFORM=2`. It also starts the Raspberry Pi I2C LSM6DSO IMU publisher and chooses either the built-in NTRIP client or the raw TCP RTCM bridge for correction input.
+- `_c1_lidar.launch`: optionally starts the vendored Slamtec C1 driver and publishes a static `base_link` to LIDAR transform when `OM_USE_C1_LIDAR=True`.
 - `_move_base.launch`: starts `mbf_costmap_nav` plus the legacy relay shim, loading costmap and planner YAML from `src/open_mower/params/`.
 - `_localization.launch`: starts `xbot_positioning`.
 - `_teleop.launch`: starts joystick input and teleop mapping based on the selected gamepad.
@@ -44,11 +45,11 @@ This summary is grounded in:
 4. `mower_map_service` provides map storage, occupancy-grid publication, docking and mowing-area services, and an RPC method named `map.replace`.
 5. `mower_logic` coordinates mower behaviors such as idle, mowing, parking at the recorded docking point, and area recording, using `mower_map`, `slic3r_coverage_planner`, MBF actions, and `/hw` services.
 6. Navigation runs through `mbf_costmap_nav` with configuration loaded from `src/open_mower/params/`.
-7. Operator and UI-facing pieces include teleop input, `xbot_monitoring`, `xbot_remote`, and optional heatmap generation.
+7. Operator and UI-facing pieces include teleop input, `xbot_monitoring`, `xbot_remote`, optional heatmap generation, rosbridge, the existing Flutter UI at `/`, and the React GPS map plus sensor viewer at `/next/`.
 
 ## Package role split
 
-- `open_mower`: orchestration package. It provides launch, params, RViz assets, a small Python RTCM bridge script for raw TCP correction sources, a small Python LSM6DSO IMU publisher for the current Pi-I2C bench hardware path, and the separate battery-voltage CSV logger.
+- `open_mower`: orchestration package. It provides launch, params, RViz assets, a small Python RTCM bridge script for raw TCP correction sources, a small Python LSM6DSO IMU publisher for the current Pi-I2C bench hardware path, the separate battery-voltage CSV logger, and optional C1 LIDAR launch wiring.
 - `mower_hardware`: supported Mowrator direct hardware bridge. It drives left/right/blade ESCs through the xESC driver and publishes `/hw/status`, `/hw/power`, `/hw/emergency`, measured drive telemetry, and per-ESC battery voltage without the OpenMower low-level-board protocol.
 - `mower_logic`: high-level decision-making and mower state transitions.
 - `mower_map`: map storage and retrieval plus occupancy-grid and marker publication.

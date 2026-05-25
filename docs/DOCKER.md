@@ -120,8 +120,10 @@ Observed from `docker/Dockerfile.PiDev` and `docker/openmower_entrypoint.pi.sh`:
 - The Pi-dev image installs `nginx` directly.
 - The Pi-dev entrypoint starts nginx before launching `open_mower`.
 - `utils/scripts/startup/start_open_mower_local.sh` also starts an `eclipse-mosquitto:latest` sidecar using `docker/assets/mosquitto.conf`.
-- The checked-in `web/` bundle is therefore reachable from the Pi-dev runtime through nginx on port `8080`.
+- The checked-in `web/` bundle is therefore reachable from the Pi-dev runtime through nginx on port `8080`, with the existing Flutter UI at `/` and the generated React UI at `/next/`.
 - `docker/assets/nginx.conf` also needs to serve Flutter `.wasm` assets with `application/wasm`; newer Flutter web bundles under `web/canvaskit/` will blank-screen in the browser if nginx falls back to a generic MIME type.
+- `docker/assets/nginx.conf` routes `/next/` to `web/next/index.html` so React routes resolve without interfering with the root Flutter fallback.
+- `utils/scripts/web/build_next_webui.sh` builds `webui/` into `web/next/` inside `node:22-bookworm-slim`.
 - MQTT is available from the sidecar on port `1883`, and MQTT-over-WebSockets is available from the sidecar on port `9001`.
 - `open_mower.launch` also conditionally includes `rosbridge` unless `OM_NO_ROSBRIDGE=True`.
 

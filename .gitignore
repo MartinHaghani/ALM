@@ -63,3 +63,9 @@ cmake-build-debug/
 src/cmake-build-debug-ros
 .DS_Store
 /version_info.env
+
+# Next-generation React WebUI
+/web/next/
+/webui/node_modules/
+/webui/.vite/
+/webui/dist/

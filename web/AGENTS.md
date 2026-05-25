@@ -5,6 +5,7 @@ Purpose: guidance for the checked-in `web/` directory.
 ## What this directory looks like
 
 - The directory contains compiled Flutter web assets such as `main.dart.js`, `flutter.js`, `flutter_bootstrap.js`, and asset manifests.
+- `web/next/` is generated output from the in-repo React replacement UI source under `webui/`; build it with `utils/scripts/web/build_next_webui.sh`.
 - `docker/development/docker-compose.yaml` mounts this directory read-only into nginx.
 - The editable source for this bundle lives in the separate `OpenMowerApp` Flutter repository, not in this directory.
 - The upstream history in this repo and the sibling build script both point to `OpenMowerApp` as the source of truth for UI changes.
@@ -13,6 +14,7 @@ Purpose: guidance for the checked-in `web/` directory.
 
 - Treat `web/` as generated or built output by default.
 - Do not hand-edit compiled assets unless the change is intentional, narrowly scoped, and called out in your summary.
+- Do not hand-edit `web/next/`; change `webui/` and rebuild it instead.
 - Make feature changes in the Flutter source repo, then rebuild and deploy the bundle back into `web/`.
 - The current gamepad behavior for the served mower UI is implemented in the Flutter source repo. As of the `Mowrator` fork flow, gamepad mapping is:
   - left stick drives in `AREA_RECORDING`

@@ -1,0 +1,18 @@
+<launch>
+    <arg name="frame_id" default="$(optenv OM_C1_FRAME_ID lidar)"/>
+    <arg name="scan_topic" default="$(optenv OM_C1_SCAN_TOPIC /ll/lidar)"/>
+
+    <node pkg="tf" type="static_transform_publisher" name="c1_lidar_static_tf" output="screen"
+          args="$(optenv OM_C1_X 0.0) $(optenv OM_C1_Y 0.0) $(optenv OM_C1_Z 0.0) $(optenv OM_C1_YAW 0.0) $(optenv OM_C1_PITCH 0.0) $(optenv OM_C1_ROLL 0.0) base_link $(arg frame_id) 100"/>
+
+    <node pkg="rplidar_ros" type="rplidarNode" name="c1_lidar" output="screen" respawn="true" respawn_delay="5">
+        <param name="serial_port" type="string" value="$(optenv OM_C1_SERIAL_PORT /dev/ttyUSB0)"/>
+        <param name="serial_baudrate" type="int" value="$(optenv OM_C1_SERIAL_BAUDRATE 460800)"/>
+        <param name="frame_id" type="string" value="$(arg frame_id)"/>
+        <param name="inverted" type="bool" value="$(optenv OM_C1_INVERTED false)"/>
+        <param name="angle_compensate" type="bool" value="$(optenv OM_C1_ANGLE_COMPENSATE true)"/>
+        <param name="scan_frequency" type="double" value="$(optenv OM_C1_SCAN_FREQUENCY 10.0)"/>
+        <param name="scan_mode" type="string" value="$(optenv OM_C1_SCAN_MODE Standard)"/>
+        <remap from="scan" to="$(arg scan_topic)"/>
+    </node>
+</launch>

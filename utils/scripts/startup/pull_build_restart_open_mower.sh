@@ -29,6 +29,7 @@ fi
 git -C "$OPEN_MOWER_REPO_DIR" pull --ff-only
 git -C "$OPEN_MOWER_REPO_DIR" submodule update --init --recursive
 
+"$OPEN_MOWER_REPO_DIR/utils/scripts/web/build_next_webui.sh"
 "$SCRIPT_DIR/compile_open_mower.sh"
 "$SCRIPT_DIR/stop_open_mower_local.sh"
 "$SCRIPT_DIR/start_open_mower_local.sh"

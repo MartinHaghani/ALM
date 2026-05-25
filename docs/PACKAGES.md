@@ -4,7 +4,7 @@ Purpose: inventory the workspace packages and clarify which ones are first-party
 
 ## Direct packages under `src/`
 
-- `src/open_mower`: orchestration package. It provides launch files, parameter YAML, hardware-specific presets, RViz configs, the raw TCP RTCM bridge script, the Mowrator battery-voltage CSV logger, and the optional Raspberry Pi I2C LSM6DSO IMU publisher used by the main comms launch flow.
+- `src/open_mower`: orchestration package. It provides launch files, parameter YAML, hardware-specific presets, RViz configs, the raw TCP RTCM bridge script, the Mowrator battery-voltage CSV logger, optional C1 LIDAR launch wiring, and the optional Raspberry Pi I2C LSM6DSO IMU publisher used by the main comms launch flow.
 - `src/mower_hardware`: supported Mowrator direct hardware bridge. It owns the `/hw` runtime namespace, drives left/right/blade ESCs with the xESC driver, and publishes clean hardware status/power/emergency telemetry, including per-ESC battery voltage, without the OpenMower low-level-board serial protocol.
 - `src/mower_comms_v1`: legacy v1 low-level-board mower comms executable for non-Mowrator `HARDWARE_PLATFORM=1` presets.
 - `src/mower_comms_v2`: legacy/simulation v2 ROS bridge built on xBot service interfaces. It consumes the shared JSON definitions under `services/`.
@@ -23,7 +23,8 @@ Purpose: inventory the workspace packages and clarify which ones are first-party
 
 ### Positioning, monitoring, and remote control
 
-- `src/lib/xbot_driver_gps`: External/Submodule. High-performance u-blox GPS driver with RTCM, IMU, and wheel-tick support, based on its README.
+- `src/lib/rplidar_ros`: Vendored/External. Slamtec ROS driver version 2.1.5 with RPLIDAR C1 support, used by optional C1 LIDAR launch wiring.
+- `src/lib/xbot_driver_gps`: External/Submodule. High-performance u-blox GPS driver with RTCM, IMU, and wheel-tick support, based on its README. This fork also publishes a raw `sensor_msgs/NavSatFix` topic beside the existing xBot absolute-pose topic so `/next/` can display the GPS antenna on a satellite map without inverse datum conversion.
 - `src/lib/xbot_monitoring`: monitoring package providing `xbot_monitoring`, `heatmap_generator`, and an example sensor node. Its teleop bridge now suppresses redundant neutral `Twist` frames so an idle connected client does not keep `twist_mux` pinned away from autonomous navigation.
 - `src/lib/xbot_msgs`: shared xBot message and service package.
 - `src/lib/xbot_positioning`: localization package providing the `xbot_positioning` executable and pose-related services.

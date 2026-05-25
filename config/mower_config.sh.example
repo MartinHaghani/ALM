@@ -148,6 +148,29 @@ export OM_USE_F9R_SENSOR_FUSION=False
 
 
 ################################
+##       LIDAR Settings       ##
+################################
+# Optional Slamtec C1 bring-up. This publishes LaserScan data for visualization on the
+# new /next/ WebUI. It does not change localization, mapping, planning, or navigation authority.
+# export OM_USE_C1_LIDAR=False
+# export OM_C1_SERIAL_PORT=/dev/ttyUSB0
+# export OM_C1_SERIAL_BAUDRATE=460800
+# export OM_C1_FRAME_ID=lidar
+# export OM_C1_SCAN_TOPIC=/ll/lidar
+# export OM_C1_SCAN_FREQUENCY=10.0
+# export OM_C1_SCAN_MODE=Standard
+# export OM_C1_INVERTED=false
+# export OM_C1_ANGLE_COMPENSATE=true
+# C1 pose relative to base_link. Offsets are meters; angles are radians.
+# export OM_C1_X=0.0
+# export OM_C1_Y=0.0
+# export OM_C1_Z=0.0
+# export OM_C1_ROLL=0.0
+# export OM_C1_PITCH=0.0
+# export OM_C1_YAW=0.0
+
+
+################################
 ##    Mower Logic Settings    ##
 ################################
 

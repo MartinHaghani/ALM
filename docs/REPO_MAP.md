@@ -13,7 +13,8 @@ Purpose: explain the directory tree, ownership boundaries, and which areas are s
 - `services/`: xBot service-definition JSON files such as `diff_drive_service.json` and `gps_service.json`. External/Submodule.
 - `src/`: catkin workspace packages and supporting libraries.
 - `utils/`: startup, debugging, firmware, and helper scripts.
-- `web/`: observed compiled web bundle with `main.dart.js`, `flutter*.js`, asset manifests, and icons. Generated or built output.
+- `web/`: built web output. The root contains the observed Flutter bundle, and `web/next/` is generated from `webui/`.
+- `webui/`: Vite + React + TypeScript source for the `/next/` WebUI.
 
 ## Important files at the root
 
@@ -40,6 +41,7 @@ Purpose: explain the directory tree, ownership boundaries, and which areas are s
 ## `src/lib/` ownership notes
 
 - `src/lib/ntrip_client/`: External/Submodule.
+- `src/lib/rplidar_ros/`: Vendored/External Slamtec ROS driver used for optional C1 LIDAR bring-up.
 - `src/lib/xbot_driver_gps/`: External/Submodule.
 - `src/lib/xbot_framework/`: External/Submodule. Also contains nested submodules under `ext/`.
 - `src/lib/ftc_local_planner/`, `src/lib/slic3r_coverage_planner/`, `src/lib/xbot_monitoring/`, `src/lib/xbot_msgs/`, `src/lib/xbot_positioning/`, `src/lib/xbot_remote/`, `src/lib/xbot_rpc/`, and `src/lib/xesc_ros/`: repo-local library packages shipped inside this workspace, but still not the place for casual broad formatting.
@@ -54,8 +56,9 @@ Purpose: explain the directory tree, ownership boundaries, and which areas are s
 
 ## Generated, external, and deprecated areas
 
-- Generated: `web/`.
+- Generated: `web/`, including `web/next/`.
 - External/Submodule: `services/`, `src/lib/ntrip_client/`, `src/lib/xbot_driver_gps/`, `src/lib/xbot_framework/`, plus nested submodules inside `src/lib/xbot_framework/ext/`.
+- Vendored/External: `src/lib/rplidar_ros/`.
 - Deprecated: `config/mower_config.sh.example` and the stub `src/open_mower/config/mower_config.sh.example`.
 - Source of truth: `config/mower_config.schema.json` for structured config, and the launch plus param files under `src/open_mower/` for runtime composition.
 

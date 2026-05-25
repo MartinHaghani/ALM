@@ -11,13 +11,14 @@ Purpose: guidance for editing the catkin workspace under `src/`.
 - `mower_msgs`: shared mower messages and services.
 - `mower_simulation`: simulator-side low-level services.
 - `mower_utils`: helper binaries and test-style launch assets.
-- `lib/`: mixed external, vendored, and shared library packages.
+- `lib/`: mixed external, vendored, and shared library packages, including the vendored Slamtec `rplidar_ros` driver.
 
 ## Working rules
 
 - Respect ROS package boundaries. Prefer local package changes over cross-package rewrites.
 - Verify launch and package usage before moving interfaces or renaming nodes.
 - Treat `lib/` as mixed external territory. Do not do broad formatting or cleanup there.
+- Treat `lib/rplidar_ros` as vendored third-party source unless a task explicitly targets the C1 driver itself.
 - Treat `mower_logic`, `mower_comms_*`, and `open_mower/launch` as safety-sensitive.
 
 ## Documentation rule
