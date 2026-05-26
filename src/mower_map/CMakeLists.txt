@@ -60,6 +60,7 @@ find_package(catkin REQUIRED
 ## Generate messages in the 'msg' folder
 add_message_files(
         FILES
+        BoundarySample.msg
         MapArea.msg
 )
 
@@ -121,7 +122,7 @@ generate_messages(
 catkin_package(
         #  INCLUDE_DIRS include
         #  LIBRARIES mower_map
-        #  CATKIN_DEPENDS other_catkin_pkg
+        CATKIN_DEPENDS message_runtime std_msgs geometry_msgs
         #  DEPENDS system_lib
 )
 

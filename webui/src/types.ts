@@ -119,6 +119,36 @@ export interface StringMessage {
   data: string;
 }
 
+export interface MapPoint {
+  x: number;
+  y: number;
+}
+
+export interface MowerMapArea {
+  id: string;
+  outline: MapPoint[];
+  properties?: {
+    active?: boolean;
+    name?: string;
+    type?: "draft" | "mow" | "nav" | "obstacle" | string;
+  };
+}
+
+export interface MowerDockingStation {
+  heading: number;
+  id: string;
+  position: MapPoint;
+  properties?: {
+    active?: boolean;
+    name?: string;
+  };
+}
+
+export interface MowerMapData {
+  areas: MowerMapArea[];
+  docking_stations: MowerDockingStation[];
+}
+
 export interface SlamManagerStatus {
   base_frame: string;
   last_error: string;
@@ -132,6 +162,66 @@ export interface SlamManagerStatus {
   publish_origin_transform?: boolean;
   slam_node: string;
   slam_running: boolean;
+}
+
+export interface SlamAlignmentPose {
+  x: number;
+  y: number;
+  yaw: number;
+}
+
+export interface SlamAlignmentPoint {
+  x: number;
+  y: number;
+}
+
+export interface SlamAlignmentBoundaryPair {
+  gps: SlamAlignmentPoint;
+  lidar: SlamAlignmentPoint;
+  residual_m: number;
+}
+
+export interface SlamAlignmentStatus {
+  aligned: boolean;
+  alignment_source?: string;
+  base_frame: string;
+  boundary_pairs?: SlamAlignmentBoundaryPair[];
+  boundary_path_length_m?: number;
+  boundary_sample_count?: number;
+  drift_warning?: boolean;
+  gps_accuracy_m: number | null;
+  gps_age: number | null;
+  gps_pose: SlamAlignmentPose | null;
+  gps_record_point?: SlamAlignmentPoint | null;
+  last_error: string;
+  lidar_pose: SlamAlignmentPose | null;
+  lidar_record_point?: SlamAlignmentPoint | null;
+  map_frame: string;
+  mapping_enabled: boolean;
+  max_residual_m: number;
+  min_travel_m: number;
+  outlier_count?: number;
+  path_length_m: number;
+  pose_sync_age?: number | null;
+  pose_sync_lag?: number | null;
+  residual_m: number | null;
+  residual_max_m?: number | null;
+  residual_p95_m?: number | null;
+  rtk_fixed: boolean;
+  sample_count: number;
+  scale_diagnostic?: number | null;
+  separation_m: number | null;
+  slam_base_frame: string;
+  slam_footprint_center?: SlamAlignmentPoint;
+  slam_lidar_frame?: string;
+  slam_map_frame: string;
+  slam_record_offset?: SlamAlignmentPoint;
+  slam_pose: SlamAlignmentPose | null;
+  slam_running: boolean;
+  state: string;
+  tf_health?: Record<string, string>;
+  transform: SlamAlignmentPose | null;
+  yaw_offset_rad?: number | null;
 }
 
 export interface SensorStats {

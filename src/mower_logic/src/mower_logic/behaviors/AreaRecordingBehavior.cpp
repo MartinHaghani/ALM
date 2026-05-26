@@ -14,7 +14,12 @@
 //
 #include "AreaRecordingBehavior.h"
 
+#include <XmlRpcValue.h>
+
+#include <algorithm>
 #include <atomic>
+#include <cmath>
+#include <limits>
 
 extern ros::ServiceClient dockingPointClient;
 extern ros::ServiceClient emergencyClient;
@@ -34,6 +39,24 @@ AreaRecordingBehavior AreaRecordingBehavior::INSTANCE;
 namespace {
 constexpr double kManualMowingStopGuardSec = 0.2;
 constexpr double kAreaRecordingLoopPeriodSec = 0.05;
+constexpr double kGpsPoseFreshSec = 2.0;
+
+geometry_msgs::Point32 makePoint(double x, double y) {
+  geometry_msgs::Point32 point;
+  point.x = x;
+  point.y = y;
+  point.z = 0.0;
+  return point;
+}
+
+double yawFromPose(const geometry_msgs::Pose& pose) {
+  tf2::Quaternion q;
+  tf2::fromMsg(pose.orientation, q);
+  tf2::Matrix3x3 m(q);
+  double roll, pitch, yaw;
+  m.getRPY(roll, pitch, yaw);
+  return yaw;
+}
 
 void applyManualMowingState(bool manual_mowing) {
   setMowerEnabled(mowerAllowed.load() && manual_mowing);
@@ -44,6 +67,29 @@ void stopManualMowing(bool& manual_mowing, ros::Time& manual_mowing_stop_guard_u
   manual_mowing_stop_guard_until = ros::Time(0);
   manual_mowing_stop_pending = false;
   applyManualMowingState(false);
+}
+
+bool footprintPointFromXml(XmlRpc::XmlRpcValue& entry, double& x, double& y) {
+  if (entry.getType() != XmlRpc::XmlRpcValue::TypeArray || entry.size() < 2) {
+    return false;
+  }
+
+  const auto value_to_double = [](XmlRpc::XmlRpcValue& value, double& result) {
+    if (value.getType() == XmlRpc::XmlRpcValue::TypeDouble) {
+      result = static_cast<double>(value);
+      return true;
+    }
+    if (value.getType() == XmlRpc::XmlRpcValue::TypeInt) {
+      result = static_cast<int>(value);
+      return true;
+    }
+    return false;
+  };
+
+  if (!value_to_double(entry[0], x) || !value_to_double(entry[1], y)) {
+    return false;
+  }
+  return std::isfinite(x) && std::isfinite(y);
 }
 }
 
@@ -58,6 +104,8 @@ Behavior* AreaRecordingBehavior::execute() {
 
   while (ros::ok() && !aborted) {
     mower_map::MapArea result;
+    RecordedPolygon recorded_outline;
+    std::vector<RecordedPolygon> recorded_obstacles;
     xbot_msgs::MapOverlay result_overlay;
 
     // clear overlay
@@ -91,20 +139,24 @@ Behavior* AreaRecordingBehavior::execute() {
 
       if (poly_recording_enabled) {
         update_actions();
-        geometry_msgs::Polygon poly;
+        RecordedPolygon poly;
+        const bool recording_obstacle = has_outline;
+        const uint8_t preview_point_mode =
+            recording_obstacle ? mower_map::BoundarySample::POINT_FRONT_LEFT : mower_map::BoundarySample::POINT_FRONT_RIGHT;
         // record poly
         if (has_outline) {
           sub_state = 1;
         } else {
           sub_state = 2;
         }
-        bool success = recordNewPolygon(poly, result_overlay);
+        bool success = recordNewPolygon(poly, result_overlay, preview_point_mode);
         sub_state = 0;
         if (success) {
           if (!has_outline) {
             // first polygon is outline
             has_outline = true;
-            result.area = poly;
+            recorded_outline = poly;
+            result.area = poly.front_right;
 
             std_msgs::ColorRGBA color;
             color.r = 0.0f;
@@ -118,7 +170,8 @@ Behavior* AreaRecordingBehavior::execute() {
             markers.markers.push_back(marker);
           } else {
             // we already have an outline, add obstacles
-            result.obstacles.push_back(poly);
+            recorded_obstacles.push_back(poly);
+            result.obstacles.push_back(poly.front_left);
 
             std_msgs::ColorRGBA color;
             color.r = 1.0f;
@@ -146,14 +199,28 @@ Behavior* AreaRecordingBehavior::execute() {
     if (!error && has_outline && (is_mowing_area || is_navigation_area)) {
       if (is_mowing_area) {
         ROS_INFO_STREAM("Area recording completed. Adding mowing area.");
+        result.area = recorded_outline.front_right;
       } else if (is_navigation_area) {
         ROS_INFO_STREAM("Area recording completed. Adding navigation area.");
+        result.area = recorded_outline.base;
+      }
+      result.obstacles.clear();
+      for (const auto& obstacle : recorded_obstacles) {
+        result.obstacles.push_back(obstacle.front_left);
       }
       mower_map::AddMowingAreaSrv srv;
       srv.request.isNavigationArea = !is_mowing_area;
       srv.request.area = result;
       if (add_mowing_area_client.call(srv)) {
         ROS_INFO_STREAM("Area added successfully");
+        if (is_mowing_area) {
+          publishBoundarySamples(recorded_outline.front_right_samples, mower_map::BoundarySample::AREA_MOW);
+        } else {
+          publishBoundarySamples(recorded_outline.base_samples, mower_map::BoundarySample::AREA_NAV);
+        }
+        for (const auto& obstacle : recorded_obstacles) {
+          publishBoundarySamples(obstacle.front_left_samples, mower_map::BoundarySample::AREA_OBSTACLE);
+        }
       } else {
         ROS_ERROR_STREAM("error adding area");
       }
@@ -189,9 +256,12 @@ void AreaRecordingBehavior::enter() {
   markers = visualization_msgs::MarkerArray();
   paused = aborted = false;
 
+  loadFootprintRecordingPoints();
+
   add_mowing_area_client = n->serviceClient<mower_map::AddMowingAreaSrv>("mower_map_service/add_mowing_area");
   set_docking_point_client = n->serviceClient<mower_map::SetDockingPointSrv>("mower_map_service/set_docking_point");
 
+  boundary_sample_pub = n->advertise<mower_map::BoundarySample>("area_recorder/boundary_samples", 1000);
   marker_pub = n->advertise<visualization_msgs::Marker>("area_recorder/progress_visualization", 10);
   map_overlay_pub = n->advertise<xbot_msgs::MapOverlay>("xbot_monitoring/map_overlay", 10);
   marker_array_pub = n->advertise<visualization_msgs::MarkerArray>("area_recorder/progress_visualization_array", 10);
@@ -212,6 +282,7 @@ void AreaRecordingBehavior::enter() {
   collect_point_sub = n->subscribe("/record_collect_point", 100, &AreaRecordingBehavior::record_collect_point, this);
 
   pose_sub = n->subscribe("/xbot_positioning/xb_pose", 100, &AreaRecordingBehavior::pose_received, this);
+  gps_pose_sub = n->subscribe("/hw/position/gps", 100, &AreaRecordingBehavior::gps_pose_received, this);
 }
 
 void AreaRecordingBehavior::exit() {
@@ -225,7 +296,9 @@ void AreaRecordingBehavior::exit() {
   map_overlay_pub.shutdown();
   marker_pub.shutdown();
   marker_array_pub.shutdown();
+  boundary_sample_pub.shutdown();
   joy_sub.shutdown();
+  gps_pose_sub.shutdown();
   dock_sub.shutdown();
   polygon_sub.shutdown();
   mow_area_sub.shutdown();
@@ -255,6 +328,122 @@ bool AreaRecordingBehavior::is_manual_mowing_stop_guard_active() const {
 void AreaRecordingBehavior::pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg) {
   last_pose = *msg;
   has_odom = true;
+}
+
+void AreaRecordingBehavior::gps_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg) {
+  last_gps_pose = *msg;
+  last_gps_pose_time = ros::Time::now();
+  has_gps_pose = true;
+}
+
+geometry_msgs::Point32 AreaRecordingBehavior::projectPoint(const geometry_msgs::Pose& pose,
+                                                           const geometry_msgs::Point32& offset) const {
+  const double yaw = yawFromPose(pose);
+  const double cos_yaw = std::cos(yaw);
+  const double sin_yaw = std::sin(yaw);
+  return makePoint(
+      pose.position.x + cos_yaw * offset.x - sin_yaw * offset.y,
+      pose.position.y + sin_yaw * offset.x + cos_yaw * offset.y);
+}
+
+void AreaRecordingBehavior::loadFootprintRecordingPoints() {
+  footprint_front_left = makePoint(0.82, 0.34);
+  footprint_front_right = makePoint(0.82, -0.34);
+
+  XmlRpc::XmlRpcValue footprint;
+  if (!ros::param::get("/move_base_flex/global_costmap/footprint", footprint) &&
+      !ros::param::get("/global_costmap/footprint", footprint) && !ros::param::get("/footprint", footprint)) {
+    ROS_WARN_STREAM("Area recorder could not find costmap footprint; using Mowrator fallback corners.");
+    return;
+  }
+
+  if (footprint.getType() != XmlRpc::XmlRpcValue::TypeArray || footprint.size() < 3) {
+    ROS_WARN_STREAM("Area recorder footprint parameter is invalid; using Mowrator fallback corners.");
+    return;
+  }
+
+  bool found = false;
+  double max_x = -std::numeric_limits<double>::infinity();
+  double front_left_y = -std::numeric_limits<double>::infinity();
+  double front_right_y = std::numeric_limits<double>::infinity();
+  for (int i = 0; i < footprint.size(); ++i) {
+    double x = 0.0;
+    double y = 0.0;
+    if (!footprintPointFromXml(footprint[i], x, y)) {
+      continue;
+    }
+
+    if (!found || x > max_x + 1e-6) {
+      max_x = x;
+      front_left_y = y;
+      front_right_y = y;
+      found = true;
+    } else if (std::abs(x - max_x) <= 1e-6) {
+      front_left_y = std::max(front_left_y, y);
+      front_right_y = std::min(front_right_y, y);
+    }
+  }
+
+  if (!found) {
+    ROS_WARN_STREAM("Area recorder could not parse any footprint points; using Mowrator fallback corners.");
+    return;
+  }
+
+  footprint_front_left = makePoint(max_x, front_left_y);
+  footprint_front_right = makePoint(max_x, front_right_y);
+  ROS_INFO_STREAM("Area recorder footprint points: front-left=(" << footprint_front_left.x << ", "
+                                                                << footprint_front_left.y << "), front-right=("
+                                                                << footprint_front_right.x << ", "
+                                                                << footprint_front_right.y << ")");
+}
+
+void AreaRecordingBehavior::addRecordedPoint(RecordedPolygon& polygon,
+                                             const xbot_msgs::AbsolutePose& pose,
+                                             uint32_t index,
+                                             bool auto_collected) {
+  const auto base_point = makePoint(pose.pose.pose.position.x, pose.pose.pose.position.y);
+  const auto front_left_point = projectPoint(pose.pose.pose, footprint_front_left);
+  const auto front_right_point = projectPoint(pose.pose.pose, footprint_front_right);
+
+  polygon.base.points.push_back(base_point);
+  polygon.front_left.points.push_back(front_left_point);
+  polygon.front_right.points.push_back(front_right_point);
+
+  auto make_sample = [&](uint8_t point_mode, const geometry_msgs::Point32& point) {
+    mower_map::BoundarySample sample;
+    sample.header = pose.header;
+    if (sample.header.stamp == ros::Time()) {
+      sample.header.stamp = ros::Time::now();
+    }
+    sample.header.frame_id = "map";
+    sample.point_mode = point_mode;
+    sample.point_index = index;
+    sample.fused_pose = pose.pose.pose;
+    sample.gps_point = point;
+    sample.gps_flags = pose.flags;
+    sample.gps_accuracy = pose.position_accuracy;
+    sample.rtk_fixed = (sample.gps_flags & xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED) != 0;
+    sample.auto_collected = auto_collected;
+
+    if (has_gps_pose && (ros::Time::now() - last_gps_pose_time).toSec() <= kGpsPoseFreshSec) {
+      sample.gps_flags = last_gps_pose.flags;
+      sample.gps_accuracy = last_gps_pose.position_accuracy;
+      sample.rtk_fixed = (sample.gps_flags & xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED) != 0;
+    }
+    return sample;
+  };
+
+  polygon.base_samples.push_back(make_sample(mower_map::BoundarySample::POINT_BASE, base_point));
+  polygon.front_left_samples.push_back(make_sample(mower_map::BoundarySample::POINT_FRONT_LEFT, front_left_point));
+  polygon.front_right_samples.push_back(make_sample(mower_map::BoundarySample::POINT_FRONT_RIGHT, front_right_point));
+}
+
+void AreaRecordingBehavior::publishBoundarySamples(const std::vector<mower_map::BoundarySample>& samples,
+                                                   uint8_t area_type) {
+  for (auto sample : samples) {
+    sample.area_type = area_type;
+    boundary_sample_pub.publish(sample);
+  }
 }
 
 void AreaRecordingBehavior::joy_received(const sensor_msgs::Joy& joy_msg) {
@@ -349,7 +538,9 @@ void AreaRecordingBehavior::record_mowing_received(std_msgs::Bool state_msg) {
   }
 }
 
-bool AreaRecordingBehavior::recordNewPolygon(geometry_msgs::Polygon& polygon, xbot_msgs::MapOverlay& resultOverlay) {
+bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
+                                             xbot_msgs::MapOverlay& resultOverlay,
+                                             uint8_t preview_point_mode) {
   ROS_INFO_STREAM("recordNewPolygon");
 
   bool success = true;
@@ -396,16 +587,21 @@ bool AreaRecordingBehavior::recordNewPolygon(geometry_msgs::Polygon& polygon, xb
 
     if (!has_odom) continue;
 
-    auto pose_in_map = last_pose.pose.pose;
-    if (polygon.points.empty()) {
+    const auto pose_snapshot = last_pose;
+    const auto pose_in_map = pose_snapshot.pose.pose;
+    const auto preview_point =
+        preview_point_mode == mower_map::BoundarySample::POINT_FRONT_LEFT
+            ? projectPoint(pose_in_map, footprint_front_left)
+            : preview_point_mode == mower_map::BoundarySample::POINT_FRONT_RIGHT
+                  ? projectPoint(pose_in_map, footprint_front_right)
+                  : makePoint(pose_in_map.position.x, pose_in_map.position.y);
+
+    if (polygon.base.points.empty()) {
       // add the first point
-      geometry_msgs::Point32 pt;
-      pt.x = pose_in_map.position.x;
-      pt.y = pose_in_map.position.y;
-      pt.z = 0.0;
+      geometry_msgs::Point32 pt = preview_point;
       //                ROS_INFO_STREAM("Adding First Point: " << pt);
 
-      polygon.points.push_back(pt);
+      addRecordedPoint(polygon, pose_snapshot, 0, auto_point_collecting);
       {
         geometry_msgs::Point vpt;
         vpt.x = pt.x;
@@ -419,25 +615,21 @@ bool AreaRecordingBehavior::recordNewPolygon(geometry_msgs::Polygon& polygon, xb
 
       marker_pub.publish(marker);
 
-      polygon.points.push_back(pt);
       poly_viz.polygon.points.push_back(pt);
       map_overlay_pub.publish(resultOverlay);
     } else {
-      auto last = polygon.points.back();
+      auto last = poly_viz.polygon.points.back();
       tf2::Vector3 last_point(last.x, last.y, 0.0);
-      tf2::Vector3 current_point(pose_in_map.position.x, pose_in_map.position.y, 0.0);
+      tf2::Vector3 current_point(preview_point.x, preview_point.y, 0.0);
 
       bool is_new_point_far_enough = (current_point - last_point).length() > NEW_POINT_MIN_DISTANCE;
       bool is_point_auto_collected = auto_point_collecting && is_new_point_far_enough;
       bool is_point_manual_collected = !auto_point_collecting && collect_point && is_new_point_far_enough;
 
       if (is_point_auto_collected || is_point_manual_collected) {
-        geometry_msgs::Point32 pt;
-        pt.x = pose_in_map.position.x;
-        pt.y = pose_in_map.position.y;
-        pt.z = 0.0;
+        geometry_msgs::Point32 pt = preview_point;
         //                    ROS_INFO_STREAM("Adding Point: " << pt);
-        polygon.points.push_back(pt);
+        addRecordedPoint(polygon, pose_snapshot, polygon.base.points.size(), is_point_auto_collected);
         {
           geometry_msgs::Point vpt;
           vpt.x = pt.x;
@@ -461,9 +653,11 @@ bool AreaRecordingBehavior::recordNewPolygon(geometry_msgs::Polygon& polygon, xb
     }
 
     if (!poly_recording_enabled) {
-      if (polygon.points.size() > 2) {
+      if (polygon.base.points.size() > 2) {
         // add first point to close the poly
-        polygon.points.push_back(polygon.points.front());
+        polygon.base.points.push_back(polygon.base.points.front());
+        polygon.front_left.points.push_back(polygon.front_left.points.front());
+        polygon.front_right.points.push_back(polygon.front_right.points.front());
       } else {
         success = false;
       }

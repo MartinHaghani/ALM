@@ -378,14 +378,14 @@
           "type": "number",
           "default": 0.0,
           "title": "C1 X offset",
-          "description": "C1 x offset from base_link in meters.",
+          "description": "C1 x offset from base_link in meters. The Mowrator hardware default sets this to the footprint center at 0.41 m unless overridden.",
           "x-environment-variable": "OM_C1_X"
         },
         "OM_C1_Y": {
           "type": "number",
           "default": 0.0,
           "title": "C1 Y offset",
-          "description": "C1 y offset from base_link in meters.",
+          "description": "C1 y offset from base_link in meters. The Mowrator hardware default sets this to the footprint centerline at 0.0 m unless overridden.",
           "x-environment-variable": "OM_C1_Y"
         },
         "OM_C1_Z": {
@@ -540,6 +540,76 @@
           "title": "Start passive SLAM mapping on launch",
           "description": "If true, the passive SLAM manager starts mapping immediately on launch. Leave false to make the WebUI Start button choose the first map origin.",
           "x-environment-variable": "OM_SLAM_START_ENABLED"
+        },
+        "OM_SLAM_ALIGNMENT_STATUS_TOPIC": {
+          "type": "string",
+          "default": "/slam_toolbox_alignment/status",
+          "title": "SLAM alignment status topic",
+          "description": "JSON std_msgs/String topic published by the passive SLAM alignment helper for the combined GPS/LIDAR map.",
+          "x-environment-variable": "OM_SLAM_ALIGNMENT_STATUS_TOPIC"
+        },
+        "OM_SLAM_ALIGNMENT_GPS_TOPIC": {
+          "type": "string",
+          "default": "/hw/position/gps",
+          "title": "SLAM alignment GPS pose topic",
+          "description": "Raw xbot_msgs/AbsolutePose topic used by the passive SLAM alignment helper to check RTK state and GPS accuracy.",
+          "x-environment-variable": "OM_SLAM_ALIGNMENT_GPS_TOPIC"
+        },
+        "OM_SLAM_ALIGNMENT_NAVSAT_TOPIC": {
+          "type": "string",
+          "default": "/hw/position/gps/fix",
+          "title": "SLAM alignment NavSatFix topic",
+          "description": "Raw sensor_msgs/NavSatFix topic paired with the GPS pose topic for RTK/fix freshness checks.",
+          "x-environment-variable": "OM_SLAM_ALIGNMENT_NAVSAT_TOPIC"
+        },
+        "OM_SLAM_ALIGNMENT_BOUNDARY_SAMPLE_TOPIC": {
+          "type": "string",
+          "default": "/area_recorder/boundary_samples",
+          "title": "SLAM alignment boundary sample topic",
+          "description": "mower_map/BoundarySample topic published by area recording. Boundary samples are preferred over generic motion samples for GPS/LIDAR map alignment.",
+          "x-environment-variable": "OM_SLAM_ALIGNMENT_BOUNDARY_SAMPLE_TOPIC"
+        },
+        "OM_SLAM_ALIGNMENT_MIN_TRAVEL_M": {
+          "type": "number",
+          "default": 2.0,
+          "title": "SLAM alignment minimum travel",
+          "description": "Minimum RTK-fixed travel distance required before the passive SLAM alignment is marked aligned. Boundary samples use the recorded mowing front-right corner.",
+          "x-environment-variable": "OM_SLAM_ALIGNMENT_MIN_TRAVEL_M"
+        },
+        "OM_SLAM_ALIGNMENT_MAX_RESIDUAL_M": {
+          "type": "number",
+          "default": 0.35,
+          "title": "SLAM alignment max residual",
+          "description": "Maximum RMS residual in meters allowed for the passive SLAM map-to-GPS alignment before status is marked degraded.",
+          "x-environment-variable": "OM_SLAM_ALIGNMENT_MAX_RESIDUAL_M"
+        },
+        "OM_SLAM_ALIGNMENT_TF_BUFFER_DURATION": {
+          "type": "number",
+          "default": 900.0,
+          "title": "SLAM alignment TF buffer duration",
+          "description": "Seconds of TF history retained so saved boundary samples can be paired with historical SLAM LIDAR poses.",
+          "x-environment-variable": "OM_SLAM_ALIGNMENT_TF_BUFFER_DURATION"
+        },
+        "OM_SLAM_ALIGNMENT_MAX_BOUNDARY_SAMPLES": {
+          "type": "integer",
+          "default": 5000,
+          "title": "SLAM alignment max boundary samples",
+          "description": "Maximum accepted mowing-boundary GPS/LIDAR sample pairs retained for alignment. Increase this for very long or very dense boundary recordings.",
+          "x-environment-variable": "OM_SLAM_ALIGNMENT_MAX_BOUNDARY_SAMPLES"
+        },
+        "OM_SLAM_ALIGNMENT_MAX_STATUS_BOUNDARY_PAIRS": {
+          "type": "integer",
+          "default": 600,
+          "title": "SLAM alignment status boundary pairs",
+          "description": "Maximum decimated boundary calibration pairs included in the JSON status for WebUI calibration trace display.",
+          "x-environment-variable": "OM_SLAM_ALIGNMENT_MAX_STATUS_BOUNDARY_PAIRS"
+        },
+        "OM_SLAM_ALIGNMENT_POSE_SYNC_MAX_LAG": {
+          "type": "number",
+          "default": 1.5,
+          "title": "SLAM alignment pose sync max lag",
+          "description": "Maximum timestamp difference in seconds for time-synchronizing live GPS and SLAM robot markers before falling back to latest poses.",
+          "x-environment-variable": "OM_SLAM_ALIGNMENT_POSE_SYNC_MAX_LAG"
         },
         "OM_ENABLE_SLAM_RECORDING": {
           "type": "boolean",

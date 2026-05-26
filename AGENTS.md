@@ -130,5 +130,6 @@ roslaunch open_mower open_mower.launch
 - [docs/DOCKER.md](docs/DOCKER.md): runtime versus development container guidance.
 - [docs/SIMULATION.md](docs/SIMULATION.md): simulation entrypoints and observed behavior.
 - [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md): fork maintenance guidance.
+- [docs/TODO.md](docs/TODO.md): deferred fork-specific implementation ideas.
 - [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md): review checklist.
 - [docs/DOCS_MAINTENANCE.md](docs/DOCS_MAINTENANCE.md): how to keep the documentation layer aligned.

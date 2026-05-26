@@ -133,6 +133,7 @@ Observed plain-Pi detail:
 - `docker/openmower_entrypoint.pi.sh` installs small missing runtime libraries when needed, starts `nginx`, then delegates to `docker/openmower_entrypoint.legacy.sh` so legacy `mower_config.sh` values become the `MOWER`, `ESC_TYPE`, and related runtime environment expected by `open_mower.launch`.
 - `start_open_mower_local.sh` also starts an `eclipse-mosquitto:latest` sidecar with host networking and `docker/assets/mosquitto.conf`.
 - `open_mower.launch` now includes `rosbridge` by default in this workflow unless `OM_NO_ROSBRIDGE=True`.
+- `open_mower.launch` includes passive C1 SLAM only when `OM_USE_PASSIVE_SLAM=True`; that launch path now starts the passive SLAM manager, SLAM-only odometry helper, and GPS/LIDAR alignment helper for `/next/` visualization. For best alignment, clear old mower/SLAM maps after deploying boundary-based recording and rerecord mowing outlines with the mower's front-right corner following the boundary CCW.
 - `docker/assets/nginx.conf` serves the existing Flutter UI at `/` and the generated React UI at `/next/`.
 
 ## Development companion services under `docker/`

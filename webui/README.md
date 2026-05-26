@@ -1,17 +1,20 @@
 # Open Mower Next WebUI
 
 This is the source for the new Vite + React + TypeScript WebUI served under `/next/`.
-It defaults to an OpenLayers GPS map that displays the raw GNSS antenna fix from `/hw/position/gps/fix`
-with RTK status from `/hw/position/gps`, keeps the C1 LIDAR/IMU sensor viewer behind the Sensors tab,
-and adds a passive SLAM view for `/slam_toolbox/scan` plus `/slam_toolbox/map` with start/stop and clear controls
-for the shadow mapper only.
+It defaults to an OpenLayers combined map that can overlay optional satellite imagery, stored mower map JSON from
+`/mower_map_service/json_map`, passive SLAM occupied cells from `/slam_toolbox/map`, optional live scan points from
+`/slam_toolbox/scan`, and separate GPS/fused versus LIDAR/SLAM robot markers. The C1 LIDAR/IMU sensor viewer remains
+behind the Sensors tab. Passive SLAM controls are visualization-only and do not change mower localization, planning,
+costmaps, or control.
 
 Runtime map settings can be overridden in `/next/config.js` via `window.OPEN_MOWER_NEXT_CONFIG`.
 The default basemap is York Region's 2023 10 cm orthophoto ArcGIS REST service. Supported keys include
 `satelliteSourceType`, `satelliteArcGisRestUrl`, `satelliteArcGisLayers`, `satelliteArcGisFormat`,
-`satelliteTileUrl`, `satelliteAttribution`, `satelliteMaxZoom`, `gpsFixTopic`, `gpsStatusTopic`,
-`scanTopic`, `slamScanTopic`, `slamMapTopic`, `slamMapFrame`, `slamOdomFrame`, `slamOriginFrame`, `slamBaseFrame`,
-`slamManagerStatusTopic`, `slamSetMappingService`, `slamClearMapService`, `tfTopic`, and `tfStaticTopic`.
+`satelliteTileUrl`, `satelliteAttribution`, `satelliteMaxZoom`, `gpsFixTopic`, `gpsStatusTopic`, `gpsRawPoseTopic`,
+`gpsFusedPoseTopic`, `mowerMapTopic`, `scanTopic`, `slamScanTopic`, `slamMapTopic`, `slamMapFrame`, `slamOdomFrame`,
+`slamOriginFrame`, `slamBaseFrame`, `slamAlignmentStatusTopic`, `slamManagerStatusTopic`, `slamSetMappingService`,
+`slamClearMapService`, `tfTopic`, `tfStaticTopic`, and the `defaultLayer*` layer toggles. Satellite reference imagery and
+boundary-calibration traces are optional layers so alignment can be judged against the mower-local GPS outline and SLAM map instead of imagery tiles.
 
 Build it from the repo root with:
 

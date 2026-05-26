@@ -137,7 +137,7 @@ The C1 driver is default-off. To start it in this first visualization slice, add
 export OM_USE_C1_LIDAR=True
 ```
 
-Defaults are `/dev/ttyUSB0`, `460800` baud, frame `lidar`, scan topic `/hw/lidar`, scan mode `Standard`, and scan frequency `10.0` Hz. The static transform is `base_link -> lidar` with zero xyz/rpy offsets until the physical mount is measured.
+Defaults are `/dev/ttyUSB0`, `460800` baud, frame `lidar`, scan topic `/hw/lidar`, scan mode `Standard`, and scan frequency `10.0` Hz. On the Mowrator preset the C1 transform defaults to `base_link -> lidar` with `x=0.41`, `y=0.0`, and zero z/rpy offsets, matching the footprint center assumption used by boundary-based SLAM alignment.
 
 This does not change localization, mapping, planning, navigation, costmaps, or mowing behavior. It only publishes `sensor_msgs/LaserScan` for ROS inspection and the `/next/` sensor viewer.
 

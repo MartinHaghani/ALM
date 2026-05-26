@@ -21,6 +21,7 @@ Purpose: explain the repo’s actual configuration model, sources of truth, and 
   - `important_settings` with title `Hardware Settings`
   - `gps_settings` with title `GPS Settings`
   - `lidar_settings` with title `LIDAR Settings`
+  - `slam_settings` with title `Passive SLAM Settings`
   - `imu_settings` with title `IMU Settings`
   - `mower_logic_settings` with title `Mower Logic Settings`
   - `external_mqtt_broker` with title `External MQTT Broker`
@@ -141,7 +142,7 @@ Observed examples:
 
 These settings start the optional Slamtec C1 driver and static `base_link` to LIDAR transform. Offsets are meters and angles are radians. The `/next/` sensor viewer can display this LaserScan alongside raw IMU output; it does not change localization, mapping, planning, or navigation authority.
 
-The supported Mowrator C1 scan topic default is `/hw/lidar`.
+The supported Mowrator C1 scan topic default is `/hw/lidar`. The Mowrator default environment places the C1 at the footprint center, `OM_C1_X=0.41` and `OM_C1_Y=0.0`, unless those values are explicitly overridden.
 
 ### Passive SLAM settings
 
@@ -164,9 +165,21 @@ Observed examples:
 - `OM_SLAM_MAP_RESOLUTION`
 - `OM_SLAM_MAX_LASER_RANGE`
 - `OM_SLAM_START_ENABLED`
+- `OM_SLAM_ALIGNMENT_STATUS_TOPIC`
+- `OM_SLAM_ALIGNMENT_GPS_TOPIC`
+- `OM_SLAM_ALIGNMENT_NAVSAT_TOPIC`
+- `OM_SLAM_ALIGNMENT_BOUNDARY_SAMPLE_TOPIC`
+- `OM_SLAM_ALIGNMENT_MIN_TRAVEL_M`
+- `OM_SLAM_ALIGNMENT_MAX_RESIDUAL_M`
+- `OM_SLAM_ALIGNMENT_TF_BUFFER_DURATION`
+- `OM_SLAM_ALIGNMENT_MAX_BOUNDARY_SAMPLES`
+- `OM_SLAM_ALIGNMENT_MAX_STATUS_BOUNDARY_PAIRS`
+- `OM_SLAM_ALIGNMENT_POSE_SYNC_MAX_LAG`
 - `OM_ENABLE_SLAM_RECORDING`
 
-These settings start the passive SLAM manager plus a SLAM-only local odometry helper. Mapping starts stopped by default so the operator can choose the first map origin from the `/next/` SLAM tab. When mapping is started, the manager resets the SLAM-only odometry origin and starts `slam_toolbox`. The default passive tree while mapping is `slam_map -> slam_odom -> slam_base_link -> slam_lidar`; the raw C1 scan from `/hw/lidar` is republished as `/slam_toolbox/scan` in `slam_lidar`. The mower's existing `map -> base_link -> lidar` localization remains separate and authoritative for normal mower behavior, so passive SLAM does not feed costmaps, planning, or control.
+These settings start the passive SLAM manager, a SLAM-only local odometry helper, and the passive alignment helper used by the combined `/next/` map. Mapping starts stopped by default so the operator can choose the first map origin from the WebUI. When mapping is started, the manager resets the SLAM-only odometry origin and starts `slam_toolbox`; the alignment helper clears old samples and learns a visualization-only `map -> slam_map` transform. It prefers saved mowing-boundary samples from `/area_recorder/boundary_samples`, then falls back to synchronized RTK-fixed `map -> base_link` and `slam_map -> slam_base_link` motion samples if no usable boundary path exists. Boundary samples default to a larger retention window than generic motion samples so long yard recordings are not truncated, and the status topic sends a decimated calibration trace for the WebUI. Live GPS and SLAM robot status poses are time-synchronized when their TF stamps are close enough, reducing motion-only marker separation caused by GPS/fusion latency. The default passive tree while mapping is `map -> slam_map -> slam_odom -> slam_base_link -> slam_lidar`; the raw C1 scan from `/hw/lidar` is republished as `/slam_toolbox/scan` in `slam_lidar`. The mower's existing `map -> base_link -> lidar` localization remains separate and authoritative for normal mower behavior, so passive SLAM does not feed costmaps, planning, or control.
+
+Area recording uses the costmap footprint for boundary reference points. Mowing outlines are stored from the front-right footprint corner, navigation outlines stay at `base_link`, and obstacle outlines are stored from the front-left footprint corner. Existing maps should be cleared and rerecorded after enabling the boundary-based GPS/LIDAR alignment path.
 
 ### Mower logic settings
 

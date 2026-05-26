@@ -162,7 +162,9 @@ export OM_USE_F9R_SENSOR_FUSION=False
 # export OM_C1_INVERTED=false
 # export OM_C1_ANGLE_COMPENSATE=true
 # C1 pose relative to base_link. Offsets are meters; angles are radians.
-# export OM_C1_X=0.0
+# Mowrator's hardware defaults place the C1 at the footprint center (x=0.41, y=0.0)
+# unless these values are explicitly overridden.
+# export OM_C1_X=0.41
 # export OM_C1_Y=0.0
 # export OM_C1_Z=0.0
 # export OM_C1_ROLL=0.0
@@ -193,7 +195,22 @@ export OM_USE_F9R_SENSOR_FUSION=False
 # export OM_SLAM_MAP_RESOLUTION=0.05
 # export OM_SLAM_MAX_LASER_RANGE=12.0
 # export OM_SLAM_START_ENABLED=False
+# export OM_SLAM_ALIGNMENT_STATUS_TOPIC=/slam_toolbox_alignment/status
+# export OM_SLAM_ALIGNMENT_GPS_TOPIC=/hw/position/gps
+# export OM_SLAM_ALIGNMENT_NAVSAT_TOPIC=/hw/position/gps/fix
+# export OM_SLAM_ALIGNMENT_BOUNDARY_SAMPLE_TOPIC=/area_recorder/boundary_samples
+# export OM_SLAM_ALIGNMENT_MIN_TRAVEL_M=2.0
+# export OM_SLAM_ALIGNMENT_MAX_RESIDUAL_M=0.35
+# export OM_SLAM_ALIGNMENT_TF_BUFFER_DURATION=900.0
+# export OM_SLAM_ALIGNMENT_MAX_BOUNDARY_SAMPLES=5000
+# export OM_SLAM_ALIGNMENT_MAX_STATUS_BOUNDARY_PAIRS=600
+# export OM_SLAM_ALIGNMENT_POSE_SYNC_MAX_LAG=1.5
 # export OM_ENABLE_SLAM_RECORDING=False
+
+# Area recording stores mowing outlines from the mower front-right footprint corner,
+# navigation outlines from base_link, and obstacle outlines from the front-left
+# footprint corner. Existing maps should be cleared and rerecorded after enabling
+# boundary-based GPS/LIDAR alignment.
 
 
 ################################

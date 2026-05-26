@@ -1,13 +1,12 @@
-import { Activity, Layers, Map as MapIcon, Pause, Play, Radar, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { Activity, Map as MapIcon, Pause, Play, Radar, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Ros } from "roslib";
 
-import { GpsMapView } from "./GpsMapView";
+import { CombinedMapView } from "./CombinedMapView";
 import { ImuPanel } from "./ImuPanel";
 import { ScanCanvas } from "./ScanCanvas";
 import { getNextWebUiConfig, type NextWebUiConfig } from "./config";
 import { isImuSampleValid } from "./imuMath";
-import { SlamView } from "./SlamView";
 import type { Imu, ImuStats, LaserScan } from "./types";
 import { useImu } from "./useImu";
 import { useLaserScan } from "./useLaserScan";
@@ -17,7 +16,7 @@ const DEFAULT_IMU_TOPIC = "/hw/imu/data_raw";
 const IMU_STALE_MS = 1500;
 
 type ImuStatus = "functioning" | "offline" | "waiting";
-type ViewMode = "map" | "sensors" | "slam";
+type ViewMode = "map" | "sensors";
 
 interface SensorViewerProps {
   config: NextWebUiConfig;
@@ -264,14 +263,6 @@ export default function App() {
               <Activity size={17} aria-hidden="true" />
               <span>Sensors</span>
             </button>
-            <button
-              className={viewMode === "slam" ? "is-active" : ""}
-              type="button"
-              onClick={() => setViewMode("slam")}
-            >
-              <Layers size={17} aria-hidden="true" />
-              <span>SLAM</span>
-            </button>
           </div>
           <div className={`connection-pill ${connected ? "is-connected" : "is-offline"}`}>
             {connected ? <Wifi size={18} aria-hidden="true" /> : <WifiOff size={18} aria-hidden="true" />}
@@ -281,13 +272,10 @@ export default function App() {
       </header>
 
       {viewMode === "map" && (
-        <GpsMapView config={config} connected={connected} now={now} ros={ros} />
+        <CombinedMapView config={config} connected={connected} error={error} now={now} ros={ros} url={url} />
       )}
       {viewMode === "sensors" && (
         <SensorViewer config={config} connected={connected} error={error} now={now} ros={ros} url={url} />
-      )}
-      {viewMode === "slam" && (
-        <SlamView config={config} connected={connected} error={error} now={now} ros={ros} url={url} />
       )}
     </div>
   );

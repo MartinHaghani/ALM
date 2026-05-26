@@ -11,6 +11,16 @@
     <arg name="odom_topic" default="$(optenv OM_SLAM_ODOM_TOPIC /slam_toolbox/local_odom)"/>
     <arg name="twist_topic" default="$(optenv OM_SLAM_TWIST_TOPIC /hw/diff_drive/measured_twist)"/>
     <arg name="imu_topic" default="$(optenv OM_SLAM_IMU_TOPIC /hw/imu/data_raw)"/>
+    <arg name="gps_topic" default="$(optenv OM_SLAM_ALIGNMENT_GPS_TOPIC /hw/position/gps)"/>
+    <arg name="navsat_topic" default="$(optenv OM_SLAM_ALIGNMENT_NAVSAT_TOPIC /hw/position/gps/fix)"/>
+    <arg name="alignment_boundary_sample_topic" default="$(optenv OM_SLAM_ALIGNMENT_BOUNDARY_SAMPLE_TOPIC /area_recorder/boundary_samples)"/>
+    <arg name="alignment_status_topic" default="$(optenv OM_SLAM_ALIGNMENT_STATUS_TOPIC /slam_toolbox_alignment/status)"/>
+    <arg name="alignment_min_travel_m" default="$(optenv OM_SLAM_ALIGNMENT_MIN_TRAVEL_M 2.0)"/>
+    <arg name="alignment_max_residual_m" default="$(optenv OM_SLAM_ALIGNMENT_MAX_RESIDUAL_M 0.35)"/>
+    <arg name="alignment_tf_buffer_duration" default="$(optenv OM_SLAM_ALIGNMENT_TF_BUFFER_DURATION 900.0)"/>
+    <arg name="alignment_max_boundary_samples" default="$(optenv OM_SLAM_ALIGNMENT_MAX_BOUNDARY_SAMPLES 5000)"/>
+    <arg name="alignment_max_status_boundary_pairs" default="$(optenv OM_SLAM_ALIGNMENT_MAX_STATUS_BOUNDARY_PAIRS 600)"/>
+    <arg name="alignment_pose_sync_max_lag" default="$(optenv OM_SLAM_ALIGNMENT_POSE_SYNC_MAX_LAG 1.5)"/>
     <arg name="map_resolution" default="$(optenv OM_SLAM_MAP_RESOLUTION 0.05)"/>
     <arg name="max_laser_range" default="$(optenv OM_SLAM_MAX_LASER_RANGE 12.0)"/>
     <arg name="gyro_calibration_seconds" default="$(optenv OM_SLAM_ODOM_GYRO_CALIBRATION_SECONDS 5.0)"/>
@@ -52,5 +62,24 @@
         <param name="publish_origin_transform" type="bool" value="false"/>
         <param name="reset_odom_service" type="string" value="/passive_slam_odom/reset"/>
         <param name="start_enabled" type="bool" value="$(arg start_enabled)"/>
+    </node>
+
+    <node pkg="open_mower" type="passive_slam_alignment.py" name="$(arg slam_namespace)_alignment" output="screen" respawn="true" respawn_delay="5">
+        <param name="map_frame" type="string" value="$(arg origin_frame)"/>
+        <param name="base_frame" type="string" value="base_link"/>
+        <param name="slam_map_frame" type="string" value="$(arg map_frame)"/>
+        <param name="slam_base_frame" type="string" value="$(arg base_frame)"/>
+        <param name="slam_lidar_frame" type="string" value="$(arg lidar_frame)"/>
+        <param name="gps_topic" type="string" value="$(arg gps_topic)"/>
+        <param name="navsat_topic" type="string" value="$(arg navsat_topic)"/>
+        <param name="boundary_sample_topic" type="string" value="$(arg alignment_boundary_sample_topic)"/>
+        <param name="manager_status_topic" type="string" value="/$(arg slam_namespace)_manager/status"/>
+        <param name="status_topic" type="string" value="$(arg alignment_status_topic)"/>
+        <param name="min_travel_m" type="double" value="$(arg alignment_min_travel_m)"/>
+        <param name="max_residual_m" type="double" value="$(arg alignment_max_residual_m)"/>
+        <param name="tf_buffer_duration" type="double" value="$(arg alignment_tf_buffer_duration)"/>
+        <param name="max_boundary_samples" type="int" value="$(arg alignment_max_boundary_samples)"/>
+        <param name="max_status_boundary_pairs" type="int" value="$(arg alignment_max_status_boundary_pairs)"/>
+        <param name="pose_sync_max_lag" type="double" value="$(arg alignment_pose_sync_max_lag)"/>
     </node>
 </launch>

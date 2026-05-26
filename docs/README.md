@@ -46,4 +46,5 @@ For a fast orientation pass, read in this order:
 - [SIMULATION.md](SIMULATION.md): simulation entrypoints and observed runtime shape.
 - [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md): fork maintenance guidance.
 - [CODE_REVIEW.md](CODE_REVIEW.md): reusable review checklist.
+- [TODO.md](TODO.md): deferred fork-specific implementation ideas.
 - [DOCS_MAINTENANCE.md](DOCS_MAINTENANCE.md): how to keep this doc layer aligned.

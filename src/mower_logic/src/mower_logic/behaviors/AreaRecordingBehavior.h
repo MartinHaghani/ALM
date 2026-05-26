@@ -26,6 +26,7 @@
 #include "IdleBehavior.h"
 #include "geometry_msgs/Twist.h"
 #include "mower_map/AddMowingAreaSrv.h"
+#include "mower_map/BoundarySample.h"
 #include "mower_map/MapArea.h"
 #include "mower_map/SetDockingPointSrv.h"
 #include "mower_msgs/EmergencyStopSrv.h"
@@ -48,18 +49,31 @@ class AreaRecordingBehavior : public Behavior {
   AreaRecordingBehavior();
 
  private:
+  struct RecordedPolygon {
+    geometry_msgs::Polygon base;
+    geometry_msgs::Polygon front_left;
+    geometry_msgs::Polygon front_right;
+    std::vector<mower_map::BoundarySample> base_samples;
+    std::vector<mower_map::BoundarySample> front_left_samples;
+    std::vector<mower_map::BoundarySample> front_right_samples;
+  };
+
   bool has_odom = false;
+  bool has_gps_pose = false;
 
   std::vector<xbot_msgs::ActionInfo> actions;
 
   sensor_msgs::Joy last_joy;
   xbot_msgs::AbsolutePose last_pose;
+  xbot_msgs::AbsolutePose last_gps_pose;
+  ros::Time last_gps_pose_time = ros::Time(0);
 
+  ros::Publisher boundary_sample_pub;
   ros::Publisher map_overlay_pub;
   ros::Publisher marker_pub;
   ros::Publisher marker_array_pub;
 
-  ros::Subscriber joy_sub, pose_sub;
+  ros::Subscriber joy_sub, pose_sub, gps_pose_sub;
 
   ros::Subscriber dock_sub, polygon_sub, mow_area_sub, nav_area_sub, auto_point_collecting_sub, collect_point_sub;
 
@@ -90,10 +104,17 @@ class AreaRecordingBehavior : public Behavior {
 
   visualization_msgs::MarkerArray markers;
   visualization_msgs::Marker marker;
+  geometry_msgs::Point32 footprint_front_left;
+  geometry_msgs::Point32 footprint_front_right;
 
  private:
-  bool recordNewPolygon(geometry_msgs::Polygon& polygon, xbot_msgs::MapOverlay& resultOverlay);
+  bool recordNewPolygon(RecordedPolygon& polygon, xbot_msgs::MapOverlay& resultOverlay, uint8_t preview_point_mode);
   bool getDockingPosition(geometry_msgs::Pose& pos);
+  geometry_msgs::Point32 projectPoint(const geometry_msgs::Pose& pose, const geometry_msgs::Point32& offset) const;
+  void addRecordedPoint(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose, uint32_t index, bool auto_collected);
+  void gps_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);
+  void loadFootprintRecordingPoints();
+  void publishBoundarySamples(const std::vector<mower_map::BoundarySample>& samples, uint8_t area_type);
   void pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);
   void joy_received(const sensor_msgs::Joy& joy_msg);
   void record_dock_received(std_msgs::Bool state_msg);

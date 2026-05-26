@@ -4,7 +4,7 @@ Purpose: inventory the workspace packages and clarify which ones are first-party
 
 ## Direct packages under `src/`
 
-- `src/open_mower`: orchestration package. It provides launch files, parameter YAML, hardware-specific presets, RViz configs, the raw TCP RTCM bridge script, the Mowrator battery-voltage CSV logger, optional C1 LIDAR launch wiring, optional passive `slam_toolbox` manager/launch wiring, and the optional Raspberry Pi I2C LSM6DSO IMU publisher used by the main comms launch flow.
+- `src/open_mower`: orchestration package. It provides launch files, parameter YAML, hardware-specific presets, RViz configs, the raw TCP RTCM bridge script, the Mowrator battery-voltage CSV logger, optional C1 LIDAR launch wiring, optional passive `slam_toolbox` manager/alignment launch wiring, and the optional Raspberry Pi I2C LSM6DSO IMU publisher used by the main comms launch flow.
 - `src/mower_hardware`: supported Mowrator direct hardware bridge. It owns the `/hw` runtime namespace, drives left/right/blade ESCs with the xESC driver, and publishes clean hardware status/power/emergency telemetry, including per-ESC battery voltage, without the OpenMower low-level-board serial protocol.
 - `src/mower_comms_v1`: legacy v1 low-level-board mower comms executable for non-Mowrator `HARDWARE_PLATFORM=1` presets.
 - `src/mower_comms_v2`: legacy/simulation v2 ROS bridge built on xBot service interfaces. It consumes the shared JSON definitions under `services/`.
@@ -25,6 +25,7 @@ Purpose: inventory the workspace packages and clarify which ones are first-party
 
 - `src/lib/rplidar_ros`: Vendored/External. Slamtec ROS driver version 2.1.5 with RPLIDAR C1 support, used by optional C1 LIDAR launch wiring.
 - `src/open_mower/scripts/passive_slam_odom.py`: first-party helper for passive SLAM only. It republishes the raw C1 scan into `slam_lidar` and integrates measured twist plus IMU yaw rate into `slam_odom -> slam_base_link`, keeping SLAM independent from RTK heading jumps.
+- `src/open_mower/scripts/passive_slam_alignment.py`: first-party helper for passive SLAM visualization only. It estimates and publishes `map -> slam_map`, preferring saved mowing-boundary front-right corner samples before falling back to synchronized RTK-fixed GPS/fused and SLAM pose pairs, so `/next/` can overlay the SLAM map without feeding mower localization or navigation.
 - `src/lib/xbot_driver_gps`: External/Submodule. High-performance u-blox GPS driver with RTCM, IMU, and wheel-tick support, based on its README. This fork also publishes a raw `sensor_msgs/NavSatFix` topic beside the existing xBot absolute-pose topic so `/next/` can display the GPS antenna on a satellite map without inverse datum conversion.
 - `src/lib/xbot_monitoring`: monitoring package providing `xbot_monitoring`, `heatmap_generator`, and an example sensor node. Its teleop bridge now suppresses redundant neutral `Twist` frames so an idle connected client does not keep `twist_mux` pinned away from autonomous navigation.
 - `src/lib/xbot_msgs`: shared xBot message and service package.

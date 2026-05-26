@@ -6,6 +6,11 @@ export OM_WHEEL_DISTANCE_M=${OM_WHEEL_DISTANCE_M:-0.58}
 export OM_WHEEL_TICKS_PER_M=${OM_WHEEL_TICKS_PER_M:-374.1}
 export OM_TOOL_WIDTH=${OM_TOOL_WIDTH:-0.4}
 
+# The Slamtec C1 is assumed to sit at the center of the measured Mowrator footprint.
+# The operational base_link remains at the rear-center footprint corner convention used by the costmap.
+export OM_C1_X=${OM_C1_X:-0.41}
+export OM_C1_Y=${OM_C1_Y:-0.0}
+
 # Keep the verified current UART layout for the Flipsky ESCs and Pi-wired GPS/IMU.
 export OM_XESC_LEFT_PORT=${OM_XESC_LEFT_PORT:-/dev/ttyAMA5}
 export OM_XESC_RIGHT_PORT=${OM_XESC_RIGHT_PORT:-/dev/ttyAMA3}
