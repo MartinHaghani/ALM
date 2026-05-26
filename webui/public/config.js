@@ -10,4 +10,16 @@ window.OPEN_MOWER_NEXT_CONFIG = {
   satelliteSourceType: "arcgis-rest",
   satelliteTileUrl:
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  scanTopic: "/hw/lidar",
+  slamBaseFrame: "slam_base_link",
+  slamClearMapService: "/slam_toolbox_manager/clear_map",
+  slamManagerStatusTopic: "/slam_toolbox_manager/status",
+  slamMapFrame: "slam_map",
+  slamMapTopic: "/slam_toolbox/map",
+  slamOdomFrame: "slam_odom",
+  slamScanTopic: "/slam_toolbox/scan",
+  slamOriginFrame: "map",
+  slamSetMappingService: "/slam_toolbox_manager/set_mapping_enabled",
+  tfStaticTopic: "/tf_static",
+  tfTopic: "/tf",
 };

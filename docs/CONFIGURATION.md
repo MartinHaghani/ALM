@@ -141,6 +141,33 @@ Observed examples:
 
 These settings start the optional Slamtec C1 driver and static `base_link` to LIDAR transform. Offsets are meters and angles are radians. The `/next/` sensor viewer can display this LaserScan alongside raw IMU output; it does not change localization, mapping, planning, or navigation authority.
 
+The supported Mowrator C1 scan topic default is `/hw/lidar`.
+
+### Passive SLAM settings
+
+Observed examples:
+
+- `OM_USE_PASSIVE_SLAM`
+- `OM_SLAM_RAW_SCAN_TOPIC`
+- `OM_SLAM_SCAN_TOPIC`
+- `OM_SLAM_NAMESPACE`
+- `OM_SLAM_MAP_FRAME`
+- `OM_SLAM_ODOM_FRAME`
+- `OM_SLAM_ORIGIN_FRAME`
+- `OM_SLAM_BASE_FRAME`
+- `OM_SLAM_LIDAR_FRAME`
+- `OM_SLAM_MAP_TOPIC`
+- `OM_SLAM_ODOM_TOPIC`
+- `OM_SLAM_TWIST_TOPIC`
+- `OM_SLAM_IMU_TOPIC`
+- `OM_SLAM_ODOM_GYRO_CALIBRATION_SECONDS`
+- `OM_SLAM_MAP_RESOLUTION`
+- `OM_SLAM_MAX_LASER_RANGE`
+- `OM_SLAM_START_ENABLED`
+- `OM_ENABLE_SLAM_RECORDING`
+
+These settings start the passive SLAM manager plus a SLAM-only local odometry helper. Mapping starts stopped by default so the operator can choose the first map origin from the `/next/` SLAM tab. When mapping is started, the manager resets the SLAM-only odometry origin and starts `slam_toolbox`. The default passive tree while mapping is `slam_map -> slam_odom -> slam_base_link -> slam_lidar`; the raw C1 scan from `/hw/lidar` is republished as `/slam_toolbox/scan` in `slam_lidar`. The mower's existing `map -> base_link -> lidar` localization remains separate and authoritative for normal mower behavior, so passive SLAM does not feed costmaps, planning, or control.
+
 ### Mower logic settings
 
 Observed examples:

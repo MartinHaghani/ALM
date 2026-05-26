@@ -31,8 +31,9 @@ export function useGpsFix({ ros, topicName }: UseGpsFixOptions): UseGpsFixResult
     const topic = new Topic<NavSatFix>({
       messageType: "sensor_msgs/NavSatFix",
       name: topicName,
+      queue_length: 1,
       ros,
-      throttle_rate: 0,
+      throttle_rate: 250,
     });
 
     topic.subscribe((message: NavSatFix) => {

@@ -137,9 +137,40 @@ The C1 driver is default-off. To start it in this first visualization slice, add
 export OM_USE_C1_LIDAR=True
 ```
 
-Defaults are `/dev/ttyUSB0`, `460800` baud, frame `lidar`, scan topic `/ll/lidar`, scan mode `Standard`, and scan frequency `10.0` Hz. The static transform is `base_link -> lidar` with zero xyz/rpy offsets until the physical mount is measured.
+Defaults are `/dev/ttyUSB0`, `460800` baud, frame `lidar`, scan topic `/hw/lidar`, scan mode `Standard`, and scan frequency `10.0` Hz. The static transform is `base_link -> lidar` with zero xyz/rpy offsets until the physical mount is measured.
 
 This does not change localization, mapping, planning, navigation, costmaps, or mowing behavior. It only publishes `sensor_msgs/LaserScan` for ROS inspection and the `/next/` sensor viewer.
+
+## Optional passive SLAM shadow mode
+
+Passive SLAM is default-off. To start the passive SLAM manager, add this to `~/mower_config.sh`:
+
+```bash
+export OM_USE_PASSIVE_SLAM=True
+```
+
+Mapping itself starts stopped unless `OM_SLAM_START_ENABLED=True`. The `/next/` SLAM tab can start mapping, stop mapping, and clear the current passive map. Starting mapping resets the SLAM-only local odometry origin, then starts `slam_toolbox`; clearing the map stops `slam_toolbox` and resets that local odometry again so the next start begins fresh.
+
+Defaults are raw scan topic `/hw/lidar`, SLAM scan topic `/slam_toolbox/scan`, SLAM map topic `/slam_toolbox/map`, SLAM map frame `slam_map`, odom input frame `slam_odom`, base frame `slam_base_link`, and lidar frame `slam_lidar`. The passive odom helper integrates `/hw/diff_drive/measured_twist` with `/hw/imu/data_raw` yaw rate and publishes `slam_odom -> slam_base_link`; the raw C1 scan is republished in `slam_lidar`. On the current Mowrator runtime, `xbot_positioning` remains responsible for operational `map -> base_link`, so RTK heading corrections do not rotate the passive SLAM odometry chain.
+
+Focused SLAM bags can be enabled with:
+
+```bash
+export OM_ENABLE_SLAM_RECORDING=True
+```
+
+Useful passive SLAM checks after restart:
+
+```bash
+rostopic echo -n 1 /slam_toolbox_manager/status
+rosservice call /slam_toolbox_manager/set_mapping_enabled "data: true"
+rostopic echo -n 1 /slam_toolbox/map
+rostopic echo -n 1 /slam_toolbox/local_odom
+rostopic echo -n 1 /slam_toolbox/scan
+rosrun tf tf_echo slam_map slam_odom
+rosrun tf tf_echo slam_odom slam_base_link
+rosrun tf tf_echo slam_base_link slam_lidar
+```
 
 ## Supported startup scripts
 
@@ -279,8 +310,8 @@ Observed behavior:
 Useful C1 checks after restart:
 
 ```bash
-rostopic echo -n 1 /ll/lidar
-rostopic hz /ll/lidar
+rostopic echo -n 1 /hw/lidar
+rostopic hz /hw/lidar
 rosrun tf tf_echo base_link lidar
 ```
 

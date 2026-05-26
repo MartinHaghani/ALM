@@ -22,6 +22,20 @@
     <node if="$(optenv OM_ENABLE_RECORDING_ALL False)" pkg="rosbag" type="record" name="rosbag_record_diag_alle"
           args="record -o $(env RECORDINGS_PATH)/all_$(arg prefix) -a" />
 
+    <node if="$(optenv OM_ENABLE_SLAM_RECORDING False)" pkg="rosbag" type="record" name="rosbag_record_slam"
+          args="record -o $(env RECORDINGS_PATH)/slam_$(arg prefix)
+/hw/lidar
+/slam_toolbox/scan
+/slam_toolbox/local_odom
+/tf
+/tf_static
+/xbot_positioning/odom_out
+/hw/imu/data_raw
+/hw/diff_drive/measured_twist
+/mower/wheel_ticks
+/hw/position/gps
+/hw/position/gps/fix " />
+
     <arg name="snapshot_duration" value="$(optenv OM_SNAPSHOT_DURATION 1200)" />
     <arg name="snapshot_memory" value="$(optenv OM_SNAPSHOT_MEMORY_PER_TOPIC 0.0)" />
 

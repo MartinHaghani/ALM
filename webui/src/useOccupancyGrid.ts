@@ -1,25 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { Ros, Topic } from "roslib";
 
-import type { LaserScan, ScanStats } from "./types";
 import { emptyStats, estimateHz } from "./rosStats";
+import type { MapStats, OccupancyGrid } from "./types";
 
-interface UseLaserScanOptions {
+interface UseOccupancyGridOptions {
   paused: boolean;
+  resetKey?: number;
   ros: Ros | null;
   throttleMs?: number;
   topicName: string;
 }
 
-interface UseLaserScanResult {
-  scan: LaserScan | null;
-  stats: ScanStats;
+interface UseOccupancyGridResult {
+  grid: OccupancyGrid | null;
+  stats: MapStats;
 }
 
-export function useLaserScan({ paused, ros, throttleMs = 100, topicName }: UseLaserScanOptions): UseLaserScanResult {
-  const [scan, setScan] = useState<LaserScan | null>(null);
-  const [stats, setStats] = useState<ScanStats>(emptyStats);
-
+export function useOccupancyGrid({
+  paused,
+  resetKey = 0,
+  ros,
+  throttleMs = 1000,
+  topicName,
+}: UseOccupancyGridOptions): UseOccupancyGridResult {
+  const [grid, setGrid] = useState<OccupancyGrid | null>(null);
+  const [stats, setStats] = useState<MapStats>(emptyStats);
   const arrivalsRef = useRef<number[]>([]);
   const pausedRef = useRef(paused);
 
@@ -29,22 +35,22 @@ export function useLaserScan({ paused, ros, throttleMs = 100, topicName }: UseLa
 
   useEffect(() => {
     arrivalsRef.current = [];
-    setScan(null);
+    setGrid(null);
     setStats(emptyStats());
 
     if (!ros) {
       return undefined;
     }
 
-    const topic = new Topic<LaserScan>({
-      messageType: "sensor_msgs/LaserScan",
+    const topic = new Topic<OccupancyGrid>({
+      messageType: "nav_msgs/OccupancyGrid",
       name: topicName,
       queue_length: 1,
       ros,
       throttle_rate: throttleMs,
     });
 
-    topic.subscribe((message: LaserScan) => {
+    topic.subscribe((message: OccupancyGrid) => {
       const now = Date.now();
       arrivalsRef.current = [...arrivalsRef.current, now].filter((stamp) => now - stamp <= 5000);
       const hz = estimateHz(arrivalsRef.current);
@@ -56,17 +62,17 @@ export function useLaserScan({ paused, ros, throttleMs = 100, topicName }: UseLa
       }));
 
       if (!pausedRef.current) {
-        setScan(message);
+        setGrid(message);
       }
     });
 
     return () => {
       topic.unsubscribe();
     };
-  }, [ros, throttleMs, topicName]);
+  }, [resetKey, ros, throttleMs, topicName]);
 
   return {
-    scan,
+    grid,
     stats,
   };
 }

@@ -1,50 +1,55 @@
 import { useEffect, useRef, useState } from "react";
 import { Ros, Topic } from "roslib";
 
-import type { LaserScan, ScanStats } from "./types";
 import { emptyStats, estimateHz } from "./rosStats";
+import type { SensorStats, SlamManagerStatus, StringMessage } from "./types";
 
-interface UseLaserScanOptions {
-  paused: boolean;
+interface UseSlamManagerStatusOptions {
   ros: Ros | null;
   throttleMs?: number;
   topicName: string;
 }
 
-interface UseLaserScanResult {
-  scan: LaserScan | null;
-  stats: ScanStats;
+interface UseSlamManagerStatusResult {
+  stats: SensorStats;
+  status: SlamManagerStatus | null;
 }
 
-export function useLaserScan({ paused, ros, throttleMs = 100, topicName }: UseLaserScanOptions): UseLaserScanResult {
-  const [scan, setScan] = useState<LaserScan | null>(null);
-  const [stats, setStats] = useState<ScanStats>(emptyStats);
+function parseStatus(message: StringMessage): SlamManagerStatus | null {
+  try {
+    return JSON.parse(message.data) as SlamManagerStatus;
+  } catch {
+    return null;
+  }
+}
 
+export function useSlamManagerStatus({
+  ros,
+  throttleMs = 250,
+  topicName,
+}: UseSlamManagerStatusOptions): UseSlamManagerStatusResult {
+  const [status, setStatus] = useState<SlamManagerStatus | null>(null);
+  const [stats, setStats] = useState<SensorStats>(emptyStats);
   const arrivalsRef = useRef<number[]>([]);
-  const pausedRef = useRef(paused);
-
-  useEffect(() => {
-    pausedRef.current = paused;
-  }, [paused]);
 
   useEffect(() => {
     arrivalsRef.current = [];
-    setScan(null);
+    setStatus(null);
     setStats(emptyStats());
 
     if (!ros) {
       return undefined;
     }
 
-    const topic = new Topic<LaserScan>({
-      messageType: "sensor_msgs/LaserScan",
+    const topic = new Topic<StringMessage>({
+      messageType: "std_msgs/String",
       name: topicName,
       queue_length: 1,
       ros,
       throttle_rate: throttleMs,
     });
 
-    topic.subscribe((message: LaserScan) => {
+    topic.subscribe((message: StringMessage) => {
       const now = Date.now();
       arrivalsRef.current = [...arrivalsRef.current, now].filter((stamp) => now - stamp <= 5000);
       const hz = estimateHz(arrivalsRef.current);
@@ -54,10 +59,7 @@ export function useLaserScan({ paused, ros, throttleMs = 100, topicName }: UseLa
         lastMessageAt: now,
         messageCount: current.messageCount + 1,
       }));
-
-      if (!pausedRef.current) {
-        setScan(message);
-      }
+      setStatus(parseStatus(message));
     });
 
     return () => {
@@ -65,8 +67,5 @@ export function useLaserScan({ paused, ros, throttleMs = 100, topicName }: UseLa
     };
   }, [ros, throttleMs, topicName]);
 
-  return {
-    scan,
-    stats,
-  };
+  return { stats, status };
 }

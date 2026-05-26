@@ -341,7 +341,7 @@
         },
         "OM_C1_SCAN_TOPIC": {
           "type": "string",
-          "default": "/ll/lidar",
+          "default": "/hw/lidar",
           "title": "C1 scan topic",
           "description": "ROS topic where C1 LaserScan messages are published.",
           "x-environment-variable": "OM_C1_SCAN_TOPIC"
@@ -415,6 +415,138 @@
           "title": "C1 yaw",
           "description": "C1 yaw from base_link in radians.",
           "x-environment-variable": "OM_C1_YAW"
+        }
+      }
+    },
+    "slam_settings": {
+      "title": "Passive SLAM Settings",
+      "type": "object",
+      "properties": {
+        "OM_USE_PASSIVE_SLAM": {
+          "type": "boolean",
+          "default": false,
+          "title": "Use passive SLAM",
+          "description": "Start the passive SLAM manager for observation only. Mapping itself starts disabled unless OM_SLAM_START_ENABLED is true.",
+          "x-environment-variable": "OM_USE_PASSIVE_SLAM"
+        },
+        "OM_SLAM_SCAN_TOPIC": {
+          "type": "string",
+          "default": "/slam_toolbox/scan",
+          "title": "SLAM scan topic",
+          "description": "Shadow LaserScan topic consumed by passive SLAM. The passive odom helper republishes the raw C1 scan here using the SLAM-only lidar frame.",
+          "x-environment-variable": "OM_SLAM_SCAN_TOPIC"
+        },
+        "OM_SLAM_RAW_SCAN_TOPIC": {
+          "type": "string",
+          "default": "/hw/lidar",
+          "title": "SLAM raw scan topic",
+          "description": "Raw C1 LaserScan topic republished into the passive SLAM frame tree.",
+          "x-environment-variable": "OM_SLAM_RAW_SCAN_TOPIC"
+        },
+        "OM_SLAM_NAMESPACE": {
+          "type": "string",
+          "default": "slam_toolbox",
+          "title": "SLAM namespace",
+          "description": "Node/private namespace used by passive slam_toolbox.",
+          "x-environment-variable": "OM_SLAM_NAMESPACE"
+        },
+        "OM_SLAM_MAP_FRAME": {
+          "type": "string",
+          "default": "slam_map",
+          "title": "SLAM map frame",
+          "description": "Passive SLAM map frame. Keep this separate from the mower's operational map frame.",
+          "x-environment-variable": "OM_SLAM_MAP_FRAME"
+        },
+        "OM_SLAM_ODOM_FRAME": {
+          "type": "string",
+          "default": "slam_odom",
+          "title": "SLAM odom frame",
+          "description": "Local odometry frame used only by passive SLAM. It is driven from wheel/twist velocity and IMU yaw rate, not RTK heading.",
+          "x-environment-variable": "OM_SLAM_ODOM_FRAME"
+        },
+        "OM_SLAM_ORIGIN_FRAME": {
+          "type": "string",
+          "default": "map",
+          "title": "SLAM origin source frame",
+          "description": "Legacy origin source frame. The default passive SLAM path no longer publishes an odom-to-map origin transform.",
+          "x-environment-variable": "OM_SLAM_ORIGIN_FRAME"
+        },
+        "OM_SLAM_BASE_FRAME": {
+          "type": "string",
+          "default": "slam_base_link",
+          "title": "SLAM base frame",
+          "description": "Robot base frame used only by passive SLAM, isolated from the mower's operational base_link TF parent.",
+          "x-environment-variable": "OM_SLAM_BASE_FRAME"
+        },
+        "OM_SLAM_LIDAR_FRAME": {
+          "type": "string",
+          "default": "slam_lidar",
+          "title": "SLAM LIDAR frame",
+          "description": "LIDAR frame used only by passive SLAM. The raw C1 scan is republished with this frame id.",
+          "x-environment-variable": "OM_SLAM_LIDAR_FRAME"
+        },
+        "OM_SLAM_MAP_TOPIC": {
+          "type": "string",
+          "default": "/slam_toolbox/map",
+          "title": "SLAM map topic",
+          "description": "OccupancyGrid topic published by passive SLAM.",
+          "x-environment-variable": "OM_SLAM_MAP_TOPIC"
+        },
+        "OM_SLAM_ODOM_TOPIC": {
+          "type": "string",
+          "default": "/slam_toolbox/local_odom",
+          "title": "SLAM local odom topic",
+          "description": "nav_msgs/Odometry topic published by the passive SLAM odom helper.",
+          "x-environment-variable": "OM_SLAM_ODOM_TOPIC"
+        },
+        "OM_SLAM_TWIST_TOPIC": {
+          "type": "string",
+          "default": "/hw/diff_drive/measured_twist",
+          "title": "SLAM twist input topic",
+          "description": "Measured wheel/diff-drive twist input used for passive SLAM local odometry.",
+          "x-environment-variable": "OM_SLAM_TWIST_TOPIC"
+        },
+        "OM_SLAM_IMU_TOPIC": {
+          "type": "string",
+          "default": "/hw/imu/data_raw",
+          "title": "SLAM IMU input topic",
+          "description": "Raw IMU topic used for passive SLAM local odometry yaw rate.",
+          "x-environment-variable": "OM_SLAM_IMU_TOPIC"
+        },
+        "OM_SLAM_ODOM_GYRO_CALIBRATION_SECONDS": {
+          "type": "number",
+          "default": 5.0,
+          "title": "SLAM odom gyro calibration seconds",
+          "description": "Seconds spent estimating the IMU yaw-rate offset for passive SLAM local odometry on startup.",
+          "x-environment-variable": "OM_SLAM_ODOM_GYRO_CALIBRATION_SECONDS"
+        },
+        "OM_SLAM_MAP_RESOLUTION": {
+          "type": "number",
+          "default": 0.05,
+          "title": "SLAM map resolution",
+          "description": "Passive SLAM occupancy grid resolution in meters per cell.",
+          "x-environment-variable": "OM_SLAM_MAP_RESOLUTION"
+        },
+        "OM_SLAM_MAX_LASER_RANGE": {
+          "type": "number",
+          "default": 12.0,
+          "title": "SLAM max laser range",
+          "description": "Maximum laser range used by passive SLAM.",
+          "x-environment-variable": "OM_SLAM_MAX_LASER_RANGE"
+        },
+        "OM_SLAM_START_ENABLED": {
+          "type": "boolean",
+          "default": false,
+          "title": "Start passive SLAM mapping on launch",
+          "description": "If true, the passive SLAM manager starts mapping immediately on launch. Leave false to make the WebUI Start button choose the first map origin.",
+          "x-environment-variable": "OM_SLAM_START_ENABLED"
+        },
+        "OM_ENABLE_SLAM_RECORDING": {
+          "type": "boolean",
+          "default": false,
+          "title": "Enable SLAM recording",
+          "description": "Record the focused passive-SLAM bag topic set for replay and tuning.",
+          "x-environment-variable": "OM_ENABLE_SLAM_RECORDING"
         }
       }
     },

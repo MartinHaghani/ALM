@@ -22,6 +22,7 @@ This summary is grounded in:
 - `_params.launch`: loads parameters from YAML and or environment variables, depending on legacy mode and hardware platform.
 - `_comms.launch`: starts `mower_hardware` for the supported `Mowrator` direct-Pi hardware path, starts the separate Mowrator battery-voltage CSV logger unless disabled, keeps `mower_comms_v1` available only for legacy non-Mowrator `HARDWARE_PLATFORM=1` presets, or starts `mower_comms_v2` for `HARDWARE_PLATFORM=2`. It also starts the Raspberry Pi I2C LSM6DSO IMU publisher and chooses either the built-in NTRIP client or the raw TCP RTCM bridge for correction input.
 - `_c1_lidar.launch`: optionally starts the vendored Slamtec C1 driver and publishes a static `base_link` to LIDAR transform when `OM_USE_C1_LIDAR=True`.
+- `_passive_slam.launch`: optionally starts the passive SLAM manager and SLAM-only odometry helper when `OM_USE_PASSIVE_SLAM=True`. The manager starts mapping disabled by default, resets the local `slam_odom -> slam_base_link` odometry origin when mapping is started, then runs `slam_toolbox` under `/slam_toolbox` without changing mower localization or navigation authority.
 - `_move_base.launch`: starts `mbf_costmap_nav` plus the legacy relay shim, loading costmap and planner YAML from `src/open_mower/params/`.
 - `_localization.launch`: starts `xbot_positioning`.
 - `_teleop.launch`: starts joystick input and teleop mapping based on the selected gamepad.

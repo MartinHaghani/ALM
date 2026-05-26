@@ -39,6 +39,7 @@ export function useImu({ ros, topicName }: UseImuOptions): UseImuResult {
     const topic = new Topic<Imu>({
       messageType: "sensor_msgs/Imu",
       name: topicName,
+      queue_length: 1,
       ros,
       throttle_rate: Math.round(IMU_UI_UPDATE_MS),
     });

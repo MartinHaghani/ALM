@@ -156,7 +156,7 @@ export OM_USE_F9R_SENSOR_FUSION=False
 # export OM_C1_SERIAL_PORT=/dev/ttyUSB0
 # export OM_C1_SERIAL_BAUDRATE=460800
 # export OM_C1_FRAME_ID=lidar
-# export OM_C1_SCAN_TOPIC=/ll/lidar
+# export OM_C1_SCAN_TOPIC=/hw/lidar
 # export OM_C1_SCAN_FREQUENCY=10.0
 # export OM_C1_SCAN_MODE=Standard
 # export OM_C1_INVERTED=false
@@ -168,6 +168,32 @@ export OM_USE_F9R_SENSOR_FUSION=False
 # export OM_C1_ROLL=0.0
 # export OM_C1_PITCH=0.0
 # export OM_C1_YAW=0.0
+
+
+################################
+## Passive SLAM Settings      ##
+################################
+# Optional shadow SLAM. This republishes /hw/lidar into a SLAM-only frame tree
+# and publishes under /slam_toolbox without changing mower localization,
+# costmaps, planning, or control.
+# export OM_USE_PASSIVE_SLAM=False
+# export OM_SLAM_RAW_SCAN_TOPIC=/hw/lidar
+# export OM_SLAM_SCAN_TOPIC=/slam_toolbox/scan
+# export OM_SLAM_NAMESPACE=slam_toolbox
+# export OM_SLAM_MAP_FRAME=slam_map
+# export OM_SLAM_ODOM_FRAME=slam_odom
+# export OM_SLAM_ORIGIN_FRAME=map
+# export OM_SLAM_BASE_FRAME=slam_base_link
+# export OM_SLAM_LIDAR_FRAME=slam_lidar
+# export OM_SLAM_MAP_TOPIC=/slam_toolbox/map
+# export OM_SLAM_ODOM_TOPIC=/slam_toolbox/local_odom
+# export OM_SLAM_TWIST_TOPIC=/hw/diff_drive/measured_twist
+# export OM_SLAM_IMU_TOPIC=/hw/imu/data_raw
+# export OM_SLAM_ODOM_GYRO_CALIBRATION_SECONDS=5.0
+# export OM_SLAM_MAP_RESOLUTION=0.05
+# export OM_SLAM_MAX_LASER_RANGE=12.0
+# export OM_SLAM_START_ENABLED=False
+# export OM_ENABLE_SLAM_RECORDING=False
 
 
 ################################

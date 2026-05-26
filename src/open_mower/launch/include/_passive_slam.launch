@@ -1,0 +1,56 @@
+<launch>
+    <arg name="slam_namespace" default="$(optenv OM_SLAM_NAMESPACE slam_toolbox)"/>
+    <arg name="raw_scan_topic" default="$(optenv OM_SLAM_RAW_SCAN_TOPIC /hw/lidar)"/>
+    <arg name="scan_topic" default="$(optenv OM_SLAM_SCAN_TOPIC /slam_toolbox/scan)"/>
+    <arg name="map_frame" default="$(optenv OM_SLAM_MAP_FRAME slam_map)"/>
+    <arg name="odom_frame" default="$(optenv OM_SLAM_ODOM_FRAME slam_odom)"/>
+    <arg name="origin_frame" default="$(optenv OM_SLAM_ORIGIN_FRAME map)"/>
+    <arg name="base_frame" default="$(optenv OM_SLAM_BASE_FRAME slam_base_link)"/>
+    <arg name="lidar_frame" default="$(optenv OM_SLAM_LIDAR_FRAME slam_lidar)"/>
+    <arg name="map_topic" default="$(optenv OM_SLAM_MAP_TOPIC /slam_toolbox/map)"/>
+    <arg name="odom_topic" default="$(optenv OM_SLAM_ODOM_TOPIC /slam_toolbox/local_odom)"/>
+    <arg name="twist_topic" default="$(optenv OM_SLAM_TWIST_TOPIC /hw/diff_drive/measured_twist)"/>
+    <arg name="imu_topic" default="$(optenv OM_SLAM_IMU_TOPIC /hw/imu/data_raw)"/>
+    <arg name="map_resolution" default="$(optenv OM_SLAM_MAP_RESOLUTION 0.05)"/>
+    <arg name="max_laser_range" default="$(optenv OM_SLAM_MAX_LASER_RANGE 12.0)"/>
+    <arg name="gyro_calibration_seconds" default="$(optenv OM_SLAM_ODOM_GYRO_CALIBRATION_SECONDS 5.0)"/>
+    <arg name="start_enabled" default="$(optenv OM_SLAM_START_ENABLED False)"/>
+
+    <node pkg="tf" type="static_transform_publisher" name="passive_slam_lidar_static_tf" output="screen"
+          args="$(optenv OM_C1_X 0.0) $(optenv OM_C1_Y 0.0) $(optenv OM_C1_Z 0.0) $(optenv OM_C1_YAW 0.0) $(optenv OM_C1_PITCH 0.0) $(optenv OM_C1_ROLL 0.0) $(arg base_frame) $(arg lidar_frame) 100"/>
+
+    <node pkg="open_mower" type="passive_slam_odom.py" name="passive_slam_odom" output="screen" respawn="true" respawn_delay="5">
+        <param name="odom_frame" type="string" value="$(arg odom_frame)"/>
+        <param name="base_frame" type="string" value="$(arg base_frame)"/>
+        <param name="scan_frame" type="string" value="$(arg lidar_frame)"/>
+        <param name="odom_topic" type="string" value="$(arg odom_topic)"/>
+        <param name="scan_out_topic" type="string" value="$(arg scan_topic)"/>
+        <param name="gyro_calibration_seconds" type="double" value="$(arg gyro_calibration_seconds)"/>
+        <remap from="~imu_in" to="$(arg imu_topic)"/>
+        <remap from="~twist_in" to="$(arg twist_topic)"/>
+        <remap from="~scan_in" to="$(arg raw_scan_topic)"/>
+    </node>
+
+    <group ns="$(arg slam_namespace)">
+        <rosparam file="$(find open_mower)/params/slam_toolbox_passive.yaml" command="load"/>
+        <param name="mode" type="string" value="mapping"/>
+        <param name="scan_topic" type="string" value="$(arg scan_topic)"/>
+        <param name="map_frame" type="string" value="$(arg map_frame)"/>
+        <param name="odom_frame" type="string" value="$(arg odom_frame)"/>
+        <param name="base_frame" type="string" value="$(arg base_frame)"/>
+        <param name="map_name" type="string" value="$(arg map_topic)"/>
+        <param name="resolution" type="double" value="$(arg map_resolution)"/>
+        <param name="max_laser_range" type="double" value="$(arg max_laser_range)"/>
+    </group>
+
+    <node pkg="open_mower" type="passive_slam_manager.py" name="$(arg slam_namespace)_manager" output="screen" respawn="true" respawn_delay="5">
+        <param name="slam_namespace" type="string" value="$(arg slam_namespace)"/>
+        <param name="slam_node_name" type="string" value="$(arg slam_namespace)"/>
+        <param name="odom_frame" type="string" value="$(arg odom_frame)"/>
+        <param name="origin_frame" type="string" value="$(arg origin_frame)"/>
+        <param name="base_frame" type="string" value="$(arg base_frame)"/>
+        <param name="publish_origin_transform" type="bool" value="false"/>
+        <param name="reset_odom_service" type="string" value="/passive_slam_odom/reset"/>
+        <param name="start_enabled" type="bool" value="$(arg start_enabled)"/>
+    </node>
+</launch>

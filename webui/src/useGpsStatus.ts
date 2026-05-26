@@ -31,8 +31,9 @@ export function useGpsStatus({ ros, topicName }: UseGpsStatusOptions): UseGpsSta
     const topic = new Topic<AbsolutePose>({
       messageType: "xbot_msgs/AbsolutePose",
       name: topicName,
+      queue_length: 1,
       ros,
-      throttle_rate: 0,
+      throttle_rate: 250,
     });
 
     topic.subscribe((message: AbsolutePose) => {

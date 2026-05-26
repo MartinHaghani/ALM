@@ -1,6 +1,6 @@
 <launch>
     <arg name="frame_id" default="$(optenv OM_C1_FRAME_ID lidar)"/>
-    <arg name="scan_topic" default="$(optenv OM_C1_SCAN_TOPIC /ll/lidar)"/>
+    <arg name="scan_topic" default="$(optenv OM_C1_SCAN_TOPIC /hw/lidar)"/>
 
     <node pkg="tf" type="static_transform_publisher" name="c1_lidar_static_tf" output="screen"
           args="$(optenv OM_C1_X 0.0) $(optenv OM_C1_Y 0.0) $(optenv OM_C1_Z 0.0) $(optenv OM_C1_YAW 0.0) $(optenv OM_C1_PITCH 0.0) $(optenv OM_C1_ROLL 0.0) base_link $(arg frame_id) 100"/>

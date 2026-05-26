@@ -37,6 +37,14 @@ export interface PoseWithCovariance {
   covariance: number[];
 }
 
+export interface MapMetaData {
+  map_load_time: RosTime;
+  resolution: number;
+  width: number;
+  height: number;
+  origin: Pose;
+}
+
 export interface NavSatFix {
   header: RosHeader;
   status: NavSatStatus;
@@ -86,6 +94,46 @@ export interface Imu {
   linear_acceleration_covariance: number[];
 }
 
+export interface OccupancyGrid {
+  header: RosHeader;
+  info: MapMetaData;
+  data: number[];
+}
+
+export interface Transform {
+  translation: Vector3;
+  rotation: Quaternion;
+}
+
+export interface TransformStamped {
+  header: RosHeader;
+  child_frame_id: string;
+  transform: Transform;
+}
+
+export interface TfMessage {
+  transforms: TransformStamped[];
+}
+
+export interface StringMessage {
+  data: string;
+}
+
+export interface SlamManagerStatus {
+  base_frame: string;
+  last_error: string;
+  last_exit_code: number | null;
+  last_odom_reset_at?: number | null;
+  last_odom_reset_message?: string;
+  mapping_enabled: boolean;
+  odom_frame: string;
+  origin_captured: boolean;
+  origin_frame: string;
+  publish_origin_transform?: boolean;
+  slam_node: string;
+  slam_running: boolean;
+}
+
 export interface SensorStats {
   hz: number;
   lastMessageAt: number | null;
@@ -96,3 +144,5 @@ export type ScanStats = SensorStats;
 export type ImuStats = SensorStats;
 export type GpsFixStats = SensorStats;
 export type GpsStatusStats = SensorStats;
+export type MapStats = SensorStats;
+export type TfStats = SensorStats;

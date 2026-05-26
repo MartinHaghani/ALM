@@ -26,8 +26,11 @@
   <exec_depend>mower_hardware</exec_depend>
   <exec_depend>mower_simulation</exec_depend>
   <exec_depend>rospy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
   <exec_depend>joy</exec_depend>
   <exec_depend>joy_teleop</exec_depend>
   <exec_depend>teleop_twist_joy</exec_depend>
@@ -44,7 +47,9 @@
   <exec_depend>rtcm_msgs</exec_depend>
   <exec_depend>rosbag_snapshot</exec_depend>
   <exec_depend>rplidar_ros</exec_depend>
+  <exec_depend>slam_toolbox</exec_depend>
   <exec_depend>tf</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->
