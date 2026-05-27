@@ -256,6 +256,7 @@ void AreaRecordingBehavior::enter() {
   markers = visualization_msgs::MarkerArray();
   paused = aborted = false;
 
+  ros::param::param<double>("/xbot_positioning/max_gps_accuracy", max_recording_gps_accuracy, 0.2);
   loadFootprintRecordingPoints();
 
   add_mowing_area_client = n->serviceClient<mower_map::AddMowingAreaSrv>("mower_map_service/add_mowing_area");
@@ -334,6 +335,32 @@ void AreaRecordingBehavior::gps_pose_received(const xbot_msgs::AbsolutePose::Con
   last_gps_pose = *msg;
   last_gps_pose_time = ros::Time::now();
   has_gps_pose = true;
+}
+
+bool AreaRecordingBehavior::recordingGpsQualityOk(const xbot_msgs::AbsolutePose& pose, std::string& reason) const {
+  auto flags = pose.flags;
+  double accuracy = pose.position_accuracy;
+
+  if (has_gps_pose && (ros::Time::now() - last_gps_pose_time).toSec() <= kGpsPoseFreshSec) {
+    flags = last_gps_pose.flags;
+    accuracy = last_gps_pose.position_accuracy;
+  }
+
+  if ((flags & xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED) == 0) {
+    reason = "RTK fixed GPS is required for area recording";
+    return false;
+  }
+  if (!std::isfinite(accuracy)) {
+    reason = "GPS accuracy is unavailable";
+    return false;
+  }
+  if (accuracy > max_recording_gps_accuracy) {
+    reason = "GPS accuracy is above the recording limit";
+    return false;
+  }
+
+  reason.clear();
+  return true;
 }
 
 geometry_msgs::Point32 AreaRecordingBehavior::projectPoint(const geometry_msgs::Pose& pose,
@@ -595,6 +622,12 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
             : preview_point_mode == mower_map::BoundarySample::POINT_FRONT_RIGHT
                   ? projectPoint(pose_in_map, footprint_front_right)
                   : makePoint(pose_in_map.position.x, pose_in_map.position.y);
+
+    std::string gps_quality_reason;
+    if (!recordingGpsQualityOk(pose_snapshot, gps_quality_reason)) {
+      ROS_WARN_THROTTLE(2.0, "Area recorder skipping polygon point: %s", gps_quality_reason.c_str());
+      continue;
+    }
 
     if (polygon.base.points.empty()) {
       // add the first point

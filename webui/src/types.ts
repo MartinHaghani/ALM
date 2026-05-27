@@ -188,6 +188,8 @@ export interface SlamAlignmentStatus {
   boundary_pairs?: SlamAlignmentBoundaryPair[];
   boundary_path_length_m?: number;
   boundary_sample_count?: number;
+  boundary_sample_received_count?: number;
+  boundary_sample_skip_counts?: Record<string, number>;
   drift_warning?: boolean;
   gps_accuracy_m: number | null;
   gps_age: number | null;
@@ -201,10 +203,14 @@ export interface SlamAlignmentStatus {
   max_residual_m: number;
   min_travel_m: number;
   outlier_count?: number;
+  outlier_residual_max_m?: number | null;
+  outlier_warning?: boolean;
   path_length_m: number;
   pose_sync_age?: number | null;
   pose_sync_lag?: number | null;
   residual_m: number | null;
+  residual_all_max_m?: number | null;
+  residual_all_p95_m?: number | null;
   residual_max_m?: number | null;
   residual_p95_m?: number | null;
   rtk_fixed: boolean;
@@ -222,6 +228,57 @@ export interface SlamAlignmentStatus {
   tf_health?: Record<string, string>;
   transform: SlamAlignmentPose | null;
   yaw_offset_rad?: number | null;
+}
+
+export interface ConfidenceScoreBlock {
+  components: Record<string, number>;
+  raw: Record<string, unknown>;
+  reasons: string[];
+  state: string;
+}
+
+export interface LocalizationGpsConfidence extends ConfidenceScoreBlock {
+  confidence: number;
+  heading_confidence: number;
+  position_confidence: number;
+  position_sigma_m: number | null;
+  yaw_sigma_rad: number | null;
+}
+
+export interface LocalizationLidarConfidence extends ConfidenceScoreBlock {
+  global_confidence: number;
+  local_confidence: number;
+  position_sigma_local_m: number | null;
+  yaw_sigma_local_rad: number | null;
+}
+
+export interface LocalizationAlignmentConfidence {
+  components?: Record<string, number>;
+  confidence: number;
+  drift_warning: boolean;
+  outlier_warning?: boolean;
+  p95_m: number | null;
+  reasons?: string[];
+  residual_m: number | null;
+  scale_diagnostic: number | null;
+  source: string;
+}
+
+export interface LocalizationAgreementStatus {
+  consistency_score: number | null;
+  note?: string;
+  separation_m: number | null;
+  timestamp_lag_s: number | null;
+}
+
+export interface LocalizationConfidenceStatus {
+  agreement: LocalizationAgreementStatus;
+  alignment: LocalizationAlignmentConfidence;
+  gps: LocalizationGpsConfidence;
+  lidar: LocalizationLidarConfidence;
+  read_only: boolean;
+  stamp: number;
+  version: number;
 }
 
 export interface SensorStats {

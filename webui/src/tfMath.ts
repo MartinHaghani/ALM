@@ -15,6 +15,7 @@ export interface StampedTransform2D extends Transform2D {
 }
 
 export type TransformMap = Map<string, StampedTransform2D>;
+export type TransformHistoryMap = Map<string, StampedTransform2D[]>;
 
 function normalizeFrame(frame: string): string {
   return frame.replace(/^\/+/, "");
@@ -50,6 +51,34 @@ function transformIsFresh(transform: StampedTransform2D, nowMs?: number, maxAgeM
     return true;
   }
   return nowMs - transform.receivedAt <= maxAgeMs;
+}
+
+function bestTransformAt(
+  transforms: TransformMap,
+  history: TransformHistoryMap,
+  key: string,
+  stampMs: number,
+  maxStampDeltaMs: number,
+): StampedTransform2D | null {
+  const latest = transforms.get(key);
+  if (latest?.isStatic) {
+    return latest;
+  }
+
+  const candidates = history.get(key) ?? (latest ? [latest] : []);
+  let best: StampedTransform2D | null = null;
+  let bestDelta = Number.POSITIVE_INFINITY;
+  for (const transform of candidates) {
+    if (transform.isStatic) {
+      return transform;
+    }
+    const delta = Math.abs(transform.stampMs - stampMs);
+    if (delta <= maxStampDeltaMs && delta < bestDelta) {
+      best = transform;
+      bestDelta = delta;
+    }
+  }
+  return best;
 }
 
 export function composeTransform(a: Transform2D, b: Transform2D): Transform2D {
@@ -117,6 +146,77 @@ export function lookupTransform2D(
         continue;
       }
 
+      const edges = [
+        {
+          frame: transform.childFrame,
+          transform,
+        },
+        {
+          frame: transform.parentFrame,
+          transform: invertTransform(transform),
+        },
+      ];
+
+      for (const edge of edges) {
+        const isForward = edge.frame === transform.childFrame;
+        const sourceFrame = isForward ? transform.parentFrame : transform.childFrame;
+        if (sourceFrame !== current.frame || visited.has(edge.frame)) {
+          continue;
+        }
+
+        const nextTransform = composeTransform(current.transform, edge.transform);
+        if (edge.frame === child) {
+          return nextTransform;
+        }
+
+        visited.add(edge.frame);
+        queue.push({ frame: edge.frame, transform: nextTransform });
+      }
+    }
+  }
+
+  return null;
+}
+
+export function lookupTransform2DAt(
+  transforms: TransformMap,
+  history: TransformHistoryMap,
+  parentFrame: string,
+  childFrame: string,
+  stampMs: number,
+  options: { maxStampDeltaMs?: number } = {},
+): Transform2D | null {
+  if (!Number.isFinite(stampMs) || stampMs <= 0) {
+    return null;
+  }
+
+  const parent = normalizeFrame(parentFrame);
+  const child = normalizeFrame(childFrame);
+  const maxStampDeltaMs = options.maxStampDeltaMs ?? 300;
+
+  if (parent === child) {
+    return { x: 0, y: 0, yaw: 0 };
+  }
+
+  const keys = new Set<string>([...transforms.keys(), ...history.keys()]);
+  const snapshot: StampedTransform2D[] = [];
+  for (const key of keys) {
+    const transform = bestTransformAt(transforms, history, key, stampMs, maxStampDeltaMs);
+    if (transform) {
+      snapshot.push(transform);
+    }
+  }
+
+  const queue: Array<{ frame: string; transform: Transform2D }> = [{ frame: parent, transform: { x: 0, y: 0, yaw: 0 } }];
+  const visited = new Set<string>([parent]);
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) {
+      break;
+    }
+
+    for (const transform of snapshot) {
       const edges = [
         {
           frame: transform.childFrame,

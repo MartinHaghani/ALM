@@ -153,6 +153,8 @@ Mapping itself starts stopped unless `OM_SLAM_START_ENABLED=True`. The `/next/` 
 
 Defaults are raw scan topic `/hw/lidar`, SLAM scan topic `/slam_toolbox/scan`, SLAM map topic `/slam_toolbox/map`, SLAM map frame `slam_map`, odom input frame `slam_odom`, base frame `slam_base_link`, and lidar frame `slam_lidar`. The passive odom helper integrates `/hw/diff_drive/measured_twist` with `/hw/imu/data_raw` yaw rate and publishes `slam_odom -> slam_base_link`; the raw C1 scan is republished in `slam_lidar`. On the current Mowrator runtime, `xbot_positioning` remains responsible for operational `map -> base_link`, so RTK heading corrections do not rotate the passive SLAM odometry chain.
 
+The read-only localization confidence monitor starts by default and publishes `/localization_confidence/status` for the `/next/` confidence panel. It uses GPS receiver-quality telemetry, receiver-only GPS motion self-consistency, passive SLAM scan-to-map fit, scan pose-correction estimates, scan motion-distortion estimates, and passive alignment quality. It does not change localization, planning, costmaps, or control.
+
 Focused SLAM bags can be enabled with:
 
 ```bash
@@ -167,6 +169,8 @@ rosservice call /slam_toolbox_manager/set_mapping_enabled "data: true"
 rostopic echo -n 1 /slam_toolbox/map
 rostopic echo -n 1 /slam_toolbox/local_odom
 rostopic echo -n 1 /slam_toolbox/scan
+rostopic echo -n 1 /hw/position/gps/quality
+rostopic echo -n 1 /localization_confidence/status
 rosrun tf tf_echo slam_map slam_odom
 rosrun tf tf_echo slam_odom slam_base_link
 rosrun tf tf_echo slam_base_link slam_lidar

@@ -19,6 +19,7 @@
 #include <mbf_msgs/ExePathAction.h>
 #include <mbf_msgs/MoveBaseAction.h>
 #include <mower_map/GetDockingPointSrv.h>
+#include <string>
 #include <tf2/LinearMath/Transform.h>
 
 #include "Behavior.h"
@@ -101,6 +102,7 @@ class AreaRecordingBehavior : public Behavior {
   bool manual_mowing = false;
   ros::Time manual_mowing_stop_guard_until = ros::Time(0);
   bool manual_mowing_stop_pending = false;
+  double max_recording_gps_accuracy = 0.2;
 
   visualization_msgs::MarkerArray markers;
   visualization_msgs::Marker marker;
@@ -110,6 +112,7 @@ class AreaRecordingBehavior : public Behavior {
  private:
   bool recordNewPolygon(RecordedPolygon& polygon, xbot_msgs::MapOverlay& resultOverlay, uint8_t preview_point_mode);
   bool getDockingPosition(geometry_msgs::Pose& pos);
+  bool recordingGpsQualityOk(const xbot_msgs::AbsolutePose& pose, std::string& reason) const;
   geometry_msgs::Point32 projectPoint(const geometry_msgs::Pose& pose, const geometry_msgs::Point32& offset) const;
   void addRecordedPoint(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose, uint32_t index, bool auto_collected);
   void gps_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);

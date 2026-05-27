@@ -647,6 +647,99 @@ button:focus-visible {
   gap: 9px;
 }
 
+.confidence-summary {
+  gap: 12px;
+}
+
+.confidence-list {
+  display: grid;
+  gap: 10px;
+}
+
+.confidence-row {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.confidence-row > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.confidence-row span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.confidence-row strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.confidence-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7edf0;
+}
+
+.confidence-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #8a9299;
+}
+
+.confidence-row.is-good .confidence-track span {
+  background: #168a66;
+}
+
+.confidence-row.is-degraded .confidence-track span {
+  background: #c27a16;
+}
+
+.confidence-row.is-poor .confidence-track span {
+  background: #b42318;
+}
+
+.confidence-detail-stack {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.confidence-detail-stack div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.confidence-detail-stack span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.confidence-detail-stack strong {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
 .metric-grid-compact .metric {
   min-height: 66px;
   padding: 10px;

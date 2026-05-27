@@ -15,6 +15,7 @@ export interface NextWebUiConfig {
   gpsFixTopic: string;
   gpsRawPoseTopic: string;
   gpsStatusTopic: string;
+  localizationConfidenceTopic: string;
   mowerMapTopic: string;
   satelliteAttribution: string;
   satelliteMaxZoom: number;
@@ -51,6 +52,7 @@ const defaultConfig: NextWebUiConfig = {
   gpsFixTopic: "/hw/position/gps/fix",
   gpsRawPoseTopic: "/hw/position/gps",
   gpsStatusTopic: "/hw/position/gps",
+  localizationConfidenceTopic: "/localization_confidence/status",
   mowerMapTopic: "/mower_map_service/json_map",
   satelliteAttribution: "Imagery &copy; The Regional Municipality of York",
   satelliteMaxZoom: 22,

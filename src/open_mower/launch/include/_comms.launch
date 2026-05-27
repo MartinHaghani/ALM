@@ -26,6 +26,7 @@
             <param name="rtcm_topic" value="/hw/position/gps/rtcm"/>
             <param name="nmea_topic" value="/hw/position/gps/nmea"/>
             <param name="xb_pose_topic" value="/hw/position/gps"/>
+            <param name="quality_topic" value="$(optenv OM_GPS_QUALITY_TOPIC /hw/position/gps/quality)"/>
             <param name="wheel_ticks_topic" value="/mower/wheel_ticks"/>
         </node>
     </group>
@@ -44,6 +45,7 @@
             <param name="rtcm_topic" value="/ll/position/gps/rtcm"/>
             <param name="nmea_topic" value="/ll/position/gps/nmea"/>
             <param name="xb_pose_topic" value="/ll/position/gps"/>
+            <param name="quality_topic" value="$(optenv OM_GPS_QUALITY_TOPIC /ll/position/gps/quality)"/>
             <param name="wheel_ticks_topic" value="/mower/wheel_ticks"/>
         </node>
 

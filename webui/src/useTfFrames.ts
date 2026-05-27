@@ -3,7 +3,7 @@ import { Ros, Topic } from "roslib";
 
 import { emptyStats, estimateHz } from "./rosStats";
 import type { TfMessage, TfStats } from "./types";
-import { toTransform2D, transformKey, type TransformMap } from "./tfMath";
+import { toTransform2D, transformKey, type TransformHistoryMap, type TransformMap } from "./tfMath";
 
 interface UseTfFramesOptions {
   ros: Ros | null;
@@ -14,6 +14,7 @@ interface UseTfFramesOptions {
 
 interface UseTfFramesResult {
   stats: TfStats;
+  transformHistory: TransformHistoryMap;
   transforms: TransformMap;
 }
 
@@ -24,11 +25,13 @@ export function useTfFrames({
   throttleMs = 20,
 }: UseTfFramesOptions): UseTfFramesResult {
   const [transforms, setTransforms] = useState<TransformMap>(() => new Map());
+  const [transformHistory, setTransformHistory] = useState<TransformHistoryMap>(() => new Map());
   const [stats, setStats] = useState<TfStats>(emptyStats);
   const arrivalsRef = useRef<number[]>([]);
 
   useEffect(() => {
     arrivalsRef.current = [];
+    setTransformHistory(new Map());
     setTransforms(new Map());
     setStats(emptyStats());
 
@@ -55,6 +58,24 @@ export function useTfFrames({
         }
         return next;
       });
+
+      if (!isStatic) {
+        setTransformHistory((current) => {
+          const next = new Map(current);
+          for (const transform of message.transforms) {
+            const transform2d = toTransform2D(transform, now, false);
+            const key = transformKey(transform2d.parentFrame, transform2d.childFrame);
+            const previous = next.get(key) ?? [];
+            next.set(
+              key,
+              [...previous, transform2d].filter(
+                (entry) => transform2d.stampMs - entry.stampMs <= 5000 && now - entry.receivedAt <= 7000,
+              ),
+            );
+          }
+          return next;
+        });
+      }
     };
 
     const tf = new Topic<TfMessage>({
@@ -84,6 +105,7 @@ export function useTfFrames({
 
   return {
     stats,
+    transformHistory,
     transforms,
   };
 }

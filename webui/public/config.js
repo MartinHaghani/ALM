@@ -14,6 +14,7 @@ window.OPEN_MOWER_NEXT_CONFIG = {
   gpsFixTopic: "/hw/position/gps/fix",
   gpsRawPoseTopic: "/hw/position/gps",
   gpsStatusTopic: "/hw/position/gps",
+  localizationConfidenceTopic: "/localization_confidence/status",
   mowerMapTopic: "/mower_map_service/json_map",
   satelliteAttribution: "Imagery &copy; The Regional Municipality of York",
   satelliteMaxZoom: 22,

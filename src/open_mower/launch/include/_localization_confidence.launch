@@ -1,0 +1,34 @@
+<launch>
+    <arg name="status_topic" default="$(optenv OM_LOCALIZATION_CONFIDENCE_STATUS_TOPIC /localization_confidence/status)"/>
+    <arg name="gps_topic" default="$(optenv OM_SLAM_ALIGNMENT_GPS_TOPIC /hw/position/gps)"/>
+    <arg name="gps_fix_topic" default="$(optenv OM_SLAM_ALIGNMENT_NAVSAT_TOPIC /hw/position/gps/fix)"/>
+    <arg name="gps_quality_topic" default="$(optenv OM_GPS_QUALITY_TOPIC /hw/position/gps/quality)"/>
+    <arg name="fused_pose_topic" default="$(optenv OM_GPS_FUSED_POSE_TOPIC /xbot_positioning/xb_pose)"/>
+    <arg name="scan_topic" default="$(optenv OM_SLAM_SCAN_TOPIC /slam_toolbox/scan)"/>
+    <arg name="map_topic" default="$(optenv OM_SLAM_MAP_TOPIC /slam_toolbox/map)"/>
+    <arg name="slam_map_frame" default="$(optenv OM_SLAM_MAP_FRAME slam_map)"/>
+    <arg name="alignment_status_topic" default="$(optenv OM_SLAM_ALIGNMENT_STATUS_TOPIC /slam_toolbox_alignment/status)"/>
+    <arg name="rate_hz" default="$(optenv OM_LOCALIZATION_CONFIDENCE_RATE_HZ 2.0)"/>
+    <arg name="max_topic_age" default="$(optenv OM_CONFIDENCE_MAX_TOPIC_AGE_SEC 2.0)"/>
+    <arg name="scan_max_points" default="$(optenv OM_CONFIDENCE_SCAN_MAX_POINTS 180)"/>
+    <arg name="scan_match_near" default="$(optenv OM_CONFIDENCE_SCAN_MATCH_NEAR_M 0.15)"/>
+    <arg name="scan_match_far" default="$(optenv OM_CONFIDENCE_SCAN_MATCH_FAR_M 0.35)"/>
+
+    <node pkg="open_mower" type="localization_confidence.py" name="localization_confidence" output="screen" respawn="true" respawn_delay="5">
+        <param name="status_topic" type="string" value="$(arg status_topic)"/>
+        <param name="gps_topic" type="string" value="$(arg gps_topic)"/>
+        <param name="gps_fix_topic" type="string" value="$(arg gps_fix_topic)"/>
+        <param name="gps_quality_topic" type="string" value="$(arg gps_quality_topic)"/>
+        <param name="fused_pose_topic" type="string" value="$(arg fused_pose_topic)"/>
+        <param name="scan_topic" type="string" value="$(arg scan_topic)"/>
+        <param name="map_topic" type="string" value="$(arg map_topic)"/>
+        <param name="passive_odom_status_topic" type="string" value="/passive_slam_odom/status"/>
+        <param name="alignment_status_topic" type="string" value="$(arg alignment_status_topic)"/>
+        <param name="slam_map_frame" type="string" value="$(arg slam_map_frame)"/>
+        <param name="rate_hz" type="double" value="$(arg rate_hz)"/>
+        <param name="max_topic_age_sec" type="double" value="$(arg max_topic_age)"/>
+        <param name="scan_max_points" type="int" value="$(arg scan_max_points)"/>
+        <param name="scan_match_near_m" type="double" value="$(arg scan_match_near)"/>
+        <param name="scan_match_far_m" type="double" value="$(arg scan_match_far)"/>
+    </node>
+</launch>

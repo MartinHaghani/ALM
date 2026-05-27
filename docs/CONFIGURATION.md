@@ -179,7 +179,22 @@ Observed examples:
 
 These settings start the passive SLAM manager, a SLAM-only local odometry helper, and the passive alignment helper used by the combined `/next/` map. Mapping starts stopped by default so the operator can choose the first map origin from the WebUI. When mapping is started, the manager resets the SLAM-only odometry origin and starts `slam_toolbox`; the alignment helper clears old samples and learns a visualization-only `map -> slam_map` transform. It prefers saved mowing-boundary samples from `/area_recorder/boundary_samples`, then falls back to synchronized RTK-fixed `map -> base_link` and `slam_map -> slam_base_link` motion samples if no usable boundary path exists. Boundary samples default to a larger retention window than generic motion samples so long yard recordings are not truncated, and the status topic sends a decimated calibration trace for the WebUI. Live GPS and SLAM robot status poses are time-synchronized when their TF stamps are close enough, reducing motion-only marker separation caused by GPS/fusion latency. The default passive tree while mapping is `map -> slam_map -> slam_odom -> slam_base_link -> slam_lidar`; the raw C1 scan from `/hw/lidar` is republished as `/slam_toolbox/scan` in `slam_lidar`. The mower's existing `map -> base_link -> lidar` localization remains separate and authoritative for normal mower behavior, so passive SLAM does not feed costmaps, planning, or control.
 
-Area recording uses the costmap footprint for boundary reference points. Mowing outlines are stored from the front-right footprint corner, navigation outlines stay at `base_link`, and obstacle outlines are stored from the front-left footprint corner. Existing maps should be cleared and rerecorded after enabling the boundary-based GPS/LIDAR alignment path.
+Area recording uses the costmap footprint for boundary reference points. Mowing outlines are stored from the front-right footprint corner, navigation outlines stay at `base_link`, and obstacle outlines are stored from the front-left footprint corner. Polygon recording now skips new points unless the raw GPS pose is RTK fixed and within `/xbot_positioning/max_gps_accuracy`, so short GPS dropouts do not silently become corrupted mower-map edges. Existing maps should be cleared and rerecorded after enabling the boundary-based GPS/LIDAR alignment path.
+
+### Localization confidence settings
+
+Observed examples:
+
+- `OM_USE_LOCALIZATION_CONFIDENCE`
+- `OM_LOCALIZATION_CONFIDENCE_STATUS_TOPIC`
+- `OM_GPS_QUALITY_TOPIC`
+- `OM_LOCALIZATION_CONFIDENCE_RATE_HZ`
+- `OM_CONFIDENCE_MAX_TOPIC_AGE_SEC`
+- `OM_CONFIDENCE_SCAN_MAX_POINTS`
+- `OM_CONFIDENCE_SCAN_MATCH_NEAR_M`
+- `OM_CONFIDENCE_SCAN_MATCH_FAR_M`
+
+These settings start a read-only confidence monitor. The GPS driver publishes receiver-quality JSON on `/hw/position/gps/quality`, including carrier phase, satellite count, pDOP, reported accuracy, RTCM freshness, and parser health when UBX telemetry is available. The monitor publishes `/localization_confidence/status` with conservative GPS and LIDAR trust scores for display in `/next/`. GPS motion self-consistency uses a rolling receiver-only position/velocity check with receiver speed and timing uncertainty so normal driving does not look like a GPS fault. LIDAR confidence uses scan-to-map fit, estimated scan pose correction, observability, scan motion distortion, and passive alignment quality so rotation/scan-warp conditions can reduce LIDAR trust before fusion. The scores are diagnostics only; they do not affect mower localization, planning, costmaps, or control.
 
 ### Mower logic settings
 

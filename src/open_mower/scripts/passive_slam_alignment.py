@@ -114,6 +114,13 @@ def percentile(values, percent):
     return finite[lower] * (1.0 - ratio) + finite[upper] * ratio
 
 
+def root_mean_square(values):
+    finite = [value for value in values if math.isfinite(value)]
+    if not finite:
+        return None
+    return math.sqrt(sum(value * value for value in finite) / len(finite))
+
+
 def solve_rigid_transform(gps_points, slam_points):
     if len(gps_points) != len(slam_points) or len(gps_points) < 2:
         raise ValueError("at least two matched GPS/SLAM pose pairs are required")
@@ -258,9 +265,20 @@ class PassiveSlamAlignment:
         self.residual_m = None
         self.residual_p95_m = None
         self.residual_max_m = None
+        self.residual_all_p95_m = None
+        self.residual_all_max_m = None
+        self.outlier_residual_max_m = None
         self.scale_diagnostic = None
         self.drift_warning = False
+        self.outlier_warning = False
         self.outlier_count = 0
+        self.boundary_sample_received_count = 0
+        self.boundary_sample_skip_counts = {
+            "low_gps_quality": 0,
+            "not_rtk": 0,
+            "spacing": 0,
+            "tf_missing": 0,
+        }
         self.alignment_source = "none"
         self.current_gps_pose = None
         self.current_slam_pose = None
@@ -343,11 +361,15 @@ class PassiveSlamAlignment:
     def on_boundary_sample(self, msg):
         if msg.area_type != BoundarySample.AREA_MOW or msg.point_mode != BoundarySample.POINT_FRONT_RIGHT:
             return
+        with self.lock:
+            self.boundary_sample_received_count += 1
         if not msg.rtk_fixed:
             self.set_tf_health("boundary", "not_rtk")
+            self.increment_boundary_skip("not_rtk")
             return
         if not math.isfinite(msg.gps_accuracy) or msg.gps_accuracy > self.max_gps_accuracy:
             self.set_tf_health("boundary", "low_gps_quality")
+            self.increment_boundary_skip("low_gps_quality")
             return
 
         try:
@@ -357,6 +379,7 @@ class PassiveSlamAlignment:
             self.set_tf_health("boundary", "ok")
         except Exception as exc:  # pylint: disable=broad-except
             self.set_tf_health("boundary", "missing")
+            self.increment_boundary_skip("tf_missing")
             with self.lock:
                 self.last_error = "boundary sample skipped: {}".format(exc)
             return
@@ -387,9 +410,16 @@ class PassiveSlamAlignment:
         self.residual_m = None
         self.residual_p95_m = None
         self.residual_max_m = None
+        self.residual_all_p95_m = None
+        self.residual_all_max_m = None
+        self.outlier_residual_max_m = None
         self.scale_diagnostic = None
         self.drift_warning = False
+        self.outlier_warning = False
         self.outlier_count = 0
+        self.boundary_sample_received_count = 0
+        for key in self.boundary_sample_skip_counts:
+            self.boundary_sample_skip_counts[key] = 0
         self.current_lidar_pose = None
         self.current_gps_record_point = None
         self.current_lidar_record_point = None
@@ -483,6 +513,7 @@ class PassiveSlamAlignment:
                     distance(previous["gps"], sample["gps"]) < self.min_sample_spacing_m
                     and distance(previous["slam"], sample["slam"]) < self.min_sample_spacing_m
                 ):
+                    self.boundary_sample_skip_counts["spacing"] = self.boundary_sample_skip_counts.get("spacing", 0) + 1
                     return
             self.boundary_samples.append(sample)
             self.current_gps_record_point = dict(sample["gps"])
@@ -565,8 +596,15 @@ class PassiveSlamAlignment:
             self.set_error_state("degraded", str(exc))
             return
 
-        residual_p95 = percentile(residuals, 95.0)
-        residual_max = max(residuals) if residuals else None
+        kept_index_set = set(kept_indices)
+        kept_residuals = [residuals[index] for index in kept_indices if 0 <= index < len(residuals)]
+        rejected_residuals = [value for index, value in enumerate(residuals) if index not in kept_index_set]
+        residual = root_mean_square(kept_residuals) if kept_residuals else residual
+        residual_p95 = percentile(kept_residuals, 95.0)
+        residual_max = max(kept_residuals) if kept_residuals else None
+        residual_all_p95 = percentile(residuals, 95.0)
+        residual_all_max = max(residuals) if residuals else None
+        outlier_residual_max = max(rejected_residuals) if rejected_residuals else None
         drift_warning = bool(
             residual_p95 is not None
             and residual_max is not None
@@ -575,13 +613,22 @@ class PassiveSlamAlignment:
                 or residual_max > self.max_residual_m * self.drift_max_factor
             )
         )
+        outlier_warning = bool(
+            outlier_residual_max is not None
+            and outlier_residual_max > self.max_residual_m * self.drift_max_factor
+            and not drift_warning
+        )
 
         with self.lock:
             self.residual_m = residual
             self.residual_p95_m = residual_p95
             self.residual_max_m = residual_max
+            self.residual_all_p95_m = residual_all_p95
+            self.residual_all_max_m = residual_all_max
+            self.outlier_residual_max_m = outlier_residual_max
             self.scale_diagnostic = scale
             self.drift_warning = drift_warning
+            self.outlier_warning = outlier_warning
             self.outlier_count = max(0, len(samples) - len(kept_indices))
             self.alignment_source = source
 
@@ -614,6 +661,10 @@ class PassiveSlamAlignment:
     def set_tf_health(self, key, value):
         with self.lock:
             self.tf_health[key] = value
+
+    def increment_boundary_skip(self, key):
+        with self.lock:
+            self.boundary_sample_skip_counts[key] = self.boundary_sample_skip_counts.get(key, 0) + 1
 
     def set_state(self, state):
         with self.lock:
@@ -682,9 +733,15 @@ class PassiveSlamAlignment:
             residual_m = self.residual_m
             residual_p95_m = self.residual_p95_m
             residual_max_m = self.residual_max_m
+            residual_all_p95_m = self.residual_all_p95_m
+            residual_all_max_m = self.residual_all_max_m
+            outlier_residual_max_m = self.outlier_residual_max_m
             scale_diagnostic = self.scale_diagnostic
             drift_warning = self.drift_warning
+            outlier_warning = self.outlier_warning
             outlier_count = self.outlier_count
+            boundary_sample_received_count = self.boundary_sample_received_count
+            boundary_sample_skip_counts = dict(self.boundary_sample_skip_counts)
             alignment_source = self.alignment_source
             gps_record_point = None if self.current_gps_record_point is None else dict(self.current_gps_record_point)
             lidar_record_point = None if self.current_lidar_record_point is None else dict(self.current_lidar_record_point)
@@ -714,6 +771,8 @@ class PassiveSlamAlignment:
             "boundary_pairs": self.boundary_pairs_for_status(transform),
             "boundary_path_length_m": path_length(boundary_samples),
             "boundary_sample_count": len(boundary_samples),
+            "boundary_sample_received_count": boundary_sample_received_count,
+            "boundary_sample_skip_counts": boundary_sample_skip_counts,
             "drift_warning": drift_warning,
             "gps_accuracy_m": gps_accuracy,
             "gps_age": None if last_gps_wall_time is None else now - last_gps_wall_time,
@@ -730,10 +789,14 @@ class PassiveSlamAlignment:
             "min_travel_m": self.min_travel_m,
             "navsat_age": None if last_fix_wall_time is None else now - last_fix_wall_time,
             "outlier_count": outlier_count,
+            "outlier_residual_max_m": outlier_residual_max_m,
+            "outlier_warning": outlier_warning,
             "path_length_m": path_length(samples),
             "pose_sync_age": pose_sync_age,
             "pose_sync_lag": pose_sync_lag,
             "residual_m": residual_m,
+            "residual_all_max_m": residual_all_max_m,
+            "residual_all_p95_m": residual_all_p95_m,
             "residual_max_m": residual_max_m,
             "residual_p95_m": residual_p95_m,
             "rtk_fixed": self.gps_is_rtk_fixed(),

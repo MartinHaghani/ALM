@@ -207,6 +207,17 @@ export OM_USE_F9R_SENSOR_FUSION=False
 # export OM_SLAM_ALIGNMENT_POSE_SYNC_MAX_LAG=1.5
 # export OM_ENABLE_SLAM_RECORDING=False
 
+# Read-only confidence monitor. This publishes GPS and LIDAR trust scores for
+# display and future fusion work; it does not affect localization, planning, or control.
+# export OM_USE_LOCALIZATION_CONFIDENCE=True
+# export OM_LOCALIZATION_CONFIDENCE_STATUS_TOPIC=/localization_confidence/status
+# export OM_GPS_QUALITY_TOPIC=/hw/position/gps/quality
+# export OM_LOCALIZATION_CONFIDENCE_RATE_HZ=2.0
+# export OM_CONFIDENCE_MAX_TOPIC_AGE_SEC=2.0
+# export OM_CONFIDENCE_SCAN_MAX_POINTS=180
+# export OM_CONFIDENCE_SCAN_MATCH_NEAR_M=0.15
+# export OM_CONFIDENCE_SCAN_MATCH_FAR_M=0.35
+
 # Area recording stores mowing outlines from the mower front-right footprint corner,
 # navigation outlines from base_link, and obstacle outlines from the front-left
 # footprint corner. Existing maps should be cleared and rerecorded after enabling

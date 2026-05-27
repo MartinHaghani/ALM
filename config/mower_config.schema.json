@@ -620,6 +620,68 @@
         }
       }
     },
+    "localization_confidence_settings": {
+      "title": "Localization Confidence Settings",
+      "type": "object",
+      "properties": {
+        "OM_USE_LOCALIZATION_CONFIDENCE": {
+          "type": "boolean",
+          "default": true,
+          "title": "Use localization confidence monitor",
+          "description": "Start the read-only GPS/LIDAR confidence monitor. It publishes diagnostic trust scores only and does not change localization, planning, costmaps, or control.",
+          "x-environment-variable": "OM_USE_LOCALIZATION_CONFIDENCE"
+        },
+        "OM_LOCALIZATION_CONFIDENCE_STATUS_TOPIC": {
+          "type": "string",
+          "default": "/localization_confidence/status",
+          "title": "Localization confidence status topic",
+          "description": "JSON std_msgs/String topic containing read-only GPS and LIDAR confidence scores.",
+          "x-environment-variable": "OM_LOCALIZATION_CONFIDENCE_STATUS_TOPIC"
+        },
+        "OM_GPS_QUALITY_TOPIC": {
+          "type": "string",
+          "default": "/hw/position/gps/quality",
+          "title": "GPS quality topic",
+          "description": "JSON std_msgs/String topic published by the GPS driver with receiver-quality telemetry used by the confidence monitor.",
+          "x-environment-variable": "OM_GPS_QUALITY_TOPIC"
+        },
+        "OM_LOCALIZATION_CONFIDENCE_RATE_HZ": {
+          "type": "number",
+          "default": 2.0,
+          "title": "Localization confidence rate",
+          "description": "Status publish rate for the read-only localization confidence monitor.",
+          "x-environment-variable": "OM_LOCALIZATION_CONFIDENCE_RATE_HZ"
+        },
+        "OM_CONFIDENCE_MAX_TOPIC_AGE_SEC": {
+          "type": "number",
+          "default": 2.0,
+          "title": "Confidence max topic age",
+          "description": "Maximum topic age in seconds before the confidence monitor treats an input as stale.",
+          "x-environment-variable": "OM_CONFIDENCE_MAX_TOPIC_AGE_SEC"
+        },
+        "OM_CONFIDENCE_SCAN_MAX_POINTS": {
+          "type": "integer",
+          "default": 180,
+          "title": "Confidence scan max points",
+          "description": "Maximum downsampled LaserScan endpoints used for each LIDAR scan-to-map confidence calculation.",
+          "x-environment-variable": "OM_CONFIDENCE_SCAN_MAX_POINTS"
+        },
+        "OM_CONFIDENCE_SCAN_MATCH_NEAR_M": {
+          "type": "number",
+          "default": 0.15,
+          "title": "Confidence scan near match distance",
+          "description": "Endpoint-to-occupied-cell distance in meters considered a strong scan-to-map match.",
+          "x-environment-variable": "OM_CONFIDENCE_SCAN_MATCH_NEAR_M"
+        },
+        "OM_CONFIDENCE_SCAN_MATCH_FAR_M": {
+          "type": "number",
+          "default": 0.35,
+          "title": "Confidence scan far match distance",
+          "description": "Endpoint-to-occupied-cell distance in meters considered a weak but usable scan-to-map match.",
+          "x-environment-variable": "OM_CONFIDENCE_SCAN_MATCH_FAR_M"
+        }
+      }
+    },
     "imu_settings": {
       "title": "IMU Settings",
       "type": "object",

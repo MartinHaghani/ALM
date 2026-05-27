@@ -29,11 +29,12 @@ import type { Ros } from "roslib";
 
 import type { NextWebUiConfig } from "./config";
 import { callSetBoolService, callTriggerService } from "./rosServices";
-import { applyTransform, composeTransform, lookupTransform2D, yawFromQuaternion, type Transform2D } from "./tfMath";
+import { applyTransform, composeTransform, lookupTransform2D, lookupTransform2DAt, yawFromQuaternion, type Transform2D } from "./tfMath";
 import type { AbsolutePose, MapPoint, MowerMapArea, NavSatFix, OccupancyGrid, SlamAlignmentPose } from "./types";
 import { useGpsFix } from "./useGpsFix";
 import { useGpsStatus } from "./useGpsStatus";
 import { useLaserScan } from "./useLaserScan";
+import { useLocalizationConfidenceStatus } from "./useLocalizationConfidenceStatus";
 import { useMowerMap } from "./useMowerMap";
 import { useOccupancyGrid } from "./useOccupancyGrid";
 import { useSlamAlignmentStatus } from "./useSlamAlignmentStatus";
@@ -120,6 +121,17 @@ function formatNumber(value: number | null | undefined, digits = 1): string {
 
 function formatMeters(value: number | null | undefined, digits = 1): string {
   return value === null || value === undefined || !Number.isFinite(value) ? "--" : `${formatNumber(value, digits)} m`;
+}
+
+function formatPercent(value: number | null | undefined): string {
+  return value === null || value === undefined || !Number.isFinite(value) ? "--" : `${Math.round(value * 100)}%`;
+}
+
+function rosStampMs(stamp: { secs: number; nsecs: number } | undefined): number | null {
+  if (!stamp || !Number.isFinite(stamp.secs) || !Number.isFinite(stamp.nsecs)) {
+    return null;
+  }
+  return stamp.secs * 1000 + stamp.nsecs / 1_000_000;
 }
 
 function formatAge(lastMessageAt: number | null, now: number): string {
@@ -489,7 +501,17 @@ function positionFeatureStyle(feature: FeatureLike): Style | Style[] {
   const label = isLidar ? "LIDAR" : "GPS";
   const yaw = Number(feature.get("yaw") ?? 0);
   const showLabel = Boolean(feature.get("showLabel"));
-  return new Style({
+  const confidence = Math.max(0, Math.min(1, Number(feature.get("confidence") ?? 0)));
+  return [
+    new Style({
+      image: new CircleStyle({
+        fill: new Fill({ color: isLidar ? `rgba(91, 75, 183, ${0.08 + confidence * 0.16})` : `rgba(15, 122, 122, ${0.08 + confidence * 0.16})` }),
+        radius: 20 + confidence * 7,
+        stroke: new Stroke({ color: isLidar ? "rgba(91, 75, 183, 0.22)" : "rgba(15, 122, 122, 0.22)", width: 1.5 }),
+      }),
+      zIndex: isLidar ? 40 : 39,
+    }),
+    new Style({
     image: new RegularShape({
       fill: new Fill({ color }),
       points: 3,
@@ -507,7 +529,8 @@ function positionFeatureStyle(feature: FeatureLike): Style | Style[] {
         })
       : undefined,
     zIndex: isLidar ? 42 : 41,
-  });
+    }),
+  ];
 }
 
 function calibrationFeatureStyle(feature: FeatureLike): Style | Style[] {
@@ -547,6 +570,34 @@ const scanStyle = new Style({
 
 function tfState(transform: Transform2D | null): "ok" | "missing" {
   return transform ? "ok" : "missing";
+}
+
+function confidenceClass(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "unknown";
+  }
+  if (value >= 0.7) {
+    return "good";
+  }
+  if (value >= 0.35) {
+    return "degraded";
+  }
+  return "poor";
+}
+
+function componentSummary(components?: Record<string, number>): string {
+  if (!components) {
+    return "--";
+  }
+  const entries = Object.entries(components).filter(([, value]) => Number.isFinite(value));
+  if (entries.length === 0) {
+    return "--";
+  }
+  return entries.map(([key, value]) => `${key.replace(/_/g, " ")} ${Math.round(value * 100)}%`).join(", ");
+}
+
+function reasonSummary(reasons?: string[]): string {
+  return reasons && reasons.length > 0 ? reasons.map((reason) => reason.replace(/_/g, " ")).join(", ") : "none";
 }
 
 export function CombinedMapView({ config, connected, error, now, ros, url }: CombinedMapViewProps) {
@@ -618,7 +669,7 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
     throttleMs: 100,
     topicName: config.slamScanTopic,
   });
-  const { stats: tfStats, transforms } = useTfFrames({
+  const { stats: tfStats, transformHistory, transforms } = useTfFrames({
     ros,
     tfStaticTopic: config.tfStaticTopic,
     tfTopic: config.tfTopic,
@@ -631,8 +682,20 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
     ros,
     topicName: config.slamAlignmentStatusTopic,
   });
+  const { stats: confidenceStats, status: confidenceStatus } = useLocalizationConfidenceStatus({
+    ros,
+    topicName: config.localizationConfidenceTopic,
+  });
 
   const alignmentIsFresh = alignmentStats.lastMessageAt !== null && now - alignmentStats.lastMessageAt <= GPS_STALE_MS;
+  const confidenceIsFresh = confidenceStats.lastMessageAt !== null && now - confidenceStats.lastMessageAt <= GPS_STALE_MS;
+  const gpsConfidence = confidenceIsFresh ? confidenceStatus?.gps.position_confidence : null;
+  const lidarLocalConfidence = confidenceIsFresh ? confidenceStatus?.lidar.local_confidence : null;
+  const lidarGlobalConfidence = confidenceIsFresh ? confidenceStatus?.lidar.global_confidence : null;
+  const boundarySkipCount = Object.values(alignmentStatus?.boundary_sample_skip_counts ?? {}).reduce(
+    (total, value) => total + (Number.isFinite(value) ? Number(value) : 0),
+    0,
+  );
   const statusMapToSlam = alignmentIsFresh ? poseFromAlignmentPose(alignmentStatus?.transform) : null;
   const statusGpsPose = alignmentIsFresh ? poseFromAlignmentPose(alignmentStatus?.gps_pose) : null;
   const statusLidarPose = alignmentIsFresh ? poseFromAlignmentPose(alignmentStatus?.lidar_pose) : null;
@@ -662,15 +725,23 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
   );
   const mapToSlamBase = statusLidarPose ?? tfMapToSlamBase ?? (statusMapToSlam && slamToBase ? composeTransform(statusMapToSlam, slamToBase) : null);
   const scanFrame = scan?.header.frame_id || config.slamScanTopic;
+  const scanStampMs = rosStampMs(scan?.header.stamp);
   const tfScanToMap = useMemo(
     () => lookupTransform2D(transforms, "map", scanFrame, tfLookupOptions),
     [scanFrame, tfLookupOptions, transforms],
+  );
+  const timestampedScanToMap = useMemo(
+    () =>
+      scanStampMs === null
+        ? null
+        : lookupTransform2DAt(transforms, transformHistory, "map", scanFrame, scanStampMs, { maxStampDeltaMs: 450 }),
+    [scanFrame, scanStampMs, transformHistory, transforms],
   );
   const slamToScan = useMemo(
     () => lookupTransform2D(transforms, config.slamMapFrame, scanFrame, tfLookupOptions),
     [config.slamMapFrame, scanFrame, tfLookupOptions, transforms],
   );
-  const scanToMap = tfScanToMap ?? (statusMapToSlam && slamToScan ? composeTransform(statusMapToSlam, slamToScan) : null);
+  const scanToMap = timestampedScanToMap ?? tfScanToMap ?? (statusMapToSlam && slamToScan ? composeTransform(statusMapToSlam, slamToScan) : null);
 
   const rawPoseIsFresh = rawPoseStats.lastMessageAt !== null && now - rawPoseStats.lastMessageAt <= GPS_STALE_MS;
   const freshRawPose = rawPoseIsFresh ? rawPose : null;
@@ -935,6 +1006,7 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
       if (coordinate) {
         features.push(
           new Feature({
+            confidence: gpsConfidence ?? 0,
             geometry: new Point(coordinate),
             kind: "gpsRobot",
             showLabel: layers.labels,
@@ -948,6 +1020,7 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
       if (coordinate) {
         features.push(
           new Feature({
+            confidence: lidarGlobalConfidence ?? lidarLocalConfidence ?? 0,
             geometry: new Point(coordinate),
             kind: "lidarRobot",
             showLabel: layers.labels,
@@ -969,7 +1042,20 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
       centerMapOnLatestFix();
       hasCenteredOnFirstFixRef.current = true;
     }
-  }, [accuracy, centerMapOnLatestFix, gpsPose, layers.gpsAccuracy, layers.labels, lonLat, mapToSlamBase, projectionAnchor, separation]);
+  }, [
+    accuracy,
+    centerMapOnLatestFix,
+    gpsConfidence,
+    gpsPose,
+    layers.gpsAccuracy,
+    layers.labels,
+    lidarGlobalConfidence,
+    lidarLocalConfidence,
+    lonLat,
+    mapToSlamBase,
+    projectionAnchor,
+    separation,
+  ]);
 
   useEffect(() => {
     const source = calibrationSourceRef.current;
@@ -1102,10 +1188,29 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
       alignmentAge: formatAge(alignmentStats.lastMessageAt, now),
       anchor: projectionAnchor ? (projectionAnchor.fixed ? "RTK anchor" : "Approx anchor") : "No anchor",
       boundaryPath: formatMeters(alignmentStatus?.boundary_path_length_m, 1),
-      boundarySamples: String(alignmentStatus?.boundary_sample_count ?? 0),
+      boundarySamples:
+        alignmentStatus?.boundary_sample_received_count && alignmentStatus.boundary_sample_received_count > (alignmentStatus?.boundary_sample_count ?? 0)
+          ? `${alignmentStatus?.boundary_sample_count ?? 0}/${alignmentStatus.boundary_sample_received_count}`
+          : String(alignmentStatus?.boundary_sample_count ?? 0),
+      boundarySkipped: String(boundarySkipCount),
+      confidenceAge: formatAge(confidenceStats.lastMessageAt, now),
       gpsAge: formatAge(fixStats.lastMessageAt, now),
+      gpsConfidence: formatPercent(gpsConfidence),
+      gpsSigma: formatMeters(confidenceStatus?.gps.position_sigma_m, 2),
+      gpsYawSigma:
+        confidenceStatus?.gps.yaw_sigma_rad === null || confidenceStatus?.gps.yaw_sigma_rad === undefined
+          ? "--"
+          : `${formatNumber((confidenceStatus.gps.yaw_sigma_rad * 180) / Math.PI, 1)} deg`,
       lidarAge: formatAge(slamMapStats.lastMessageAt, now),
+      lidarGlobalConfidence: formatPercent(lidarGlobalConfidence),
+      lidarLocalConfidence: formatPercent(lidarLocalConfidence),
+      lidarSigma: formatMeters(confidenceStatus?.lidar.position_sigma_local_m, 2),
+      lidarYawSigma:
+        confidenceStatus?.lidar.yaw_sigma_local_rad === null || confidenceStatus?.lidar.yaw_sigma_local_rad === undefined
+          ? "--"
+          : `${formatNumber((confidenceStatus.lidar.yaw_sigma_local_rad * 180) / Math.PI, 1)} deg`,
       maxResidual: formatMeters(alignmentStatus?.residual_max_m, 2),
+      outliers: String(alignmentStatus?.outlier_count ?? 0),
       p95Residual: formatMeters(alignmentStatus?.residual_p95_m, 2),
       residual: formatMeters(alignmentStatus?.residual_m, 2),
       scale:
@@ -1125,13 +1230,24 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
       alignmentStats.lastMessageAt,
       alignmentStatus?.alignment_source,
       alignmentStatus?.boundary_path_length_m,
+      alignmentStatus?.boundary_sample_received_count,
       alignmentStatus?.boundary_sample_count,
+      alignmentStatus?.outlier_count,
       alignmentStatus?.residual_m,
       alignmentStatus?.residual_max_m,
       alignmentStatus?.residual_p95_m,
       alignmentStatus?.scale_diagnostic,
       alignmentStatus?.yaw_offset_rad,
+      boundarySkipCount,
+      confidenceStats.lastMessageAt,
+      confidenceStatus?.gps.position_sigma_m,
+      confidenceStatus?.gps.yaw_sigma_rad,
+      confidenceStatus?.lidar.position_sigma_local_m,
+      confidenceStatus?.lidar.yaw_sigma_local_rad,
       fixStats.lastMessageAt,
+      gpsConfidence,
+      lidarGlobalConfidence,
+      lidarLocalConfidence,
       now,
       projectionAnchor,
       scanStats.hz,
@@ -1180,6 +1296,42 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
           {(managerStatus?.last_error || alignmentStatus?.last_error) && (
             <div className="error-banner">{managerStatus?.last_error || alignmentStatus?.last_error}</div>
           )}
+        </section>
+
+        <section className="panel-section confidence-summary">
+          <div className="layer-heading">
+            <Activity size={18} aria-hidden="true" />
+            <span>Confidence</span>
+          </div>
+          <div className="confidence-list">
+            <div className={`confidence-row is-${confidenceClass(gpsConfidence)}`}>
+              <div>
+                <span>GPS position</span>
+                <strong>{metricValues.gpsConfidence}</strong>
+              </div>
+              <div className="confidence-track">
+                <span style={{ width: `${Math.max(0, Math.min(1, gpsConfidence ?? 0)) * 100}%` }} />
+              </div>
+            </div>
+            <div className={`confidence-row is-${confidenceClass(lidarLocalConfidence)}`}>
+              <div>
+                <span>LIDAR local</span>
+                <strong>{metricValues.lidarLocalConfidence}</strong>
+              </div>
+              <div className="confidence-track">
+                <span style={{ width: `${Math.max(0, Math.min(1, lidarLocalConfidence ?? 0)) * 100}%` }} />
+              </div>
+            </div>
+            <div className={`confidence-row is-${confidenceClass(lidarGlobalConfidence)}`}>
+              <div>
+                <span>LIDAR on map</span>
+                <strong>{metricValues.lidarGlobalConfidence}</strong>
+              </div>
+              <div className="confidence-track">
+                <span style={{ width: `${Math.max(0, Math.min(1, lidarGlobalConfidence ?? 0)) * 100}%` }} />
+              </div>
+            </div>
+          </div>
         </section>
 
         <section className="panel-section">
@@ -1306,6 +1458,14 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
               <strong>{metricValues.boundaryPath}</strong>
             </div>
             <div>
+              <span>Skipped</span>
+              <strong>{metricValues.boundarySkipped}</strong>
+            </div>
+            <div>
+              <span>Outliers</span>
+              <strong>{metricValues.outliers}</strong>
+            </div>
+            <div>
               <span>P95</span>
               <strong>{metricValues.p95Residual}</strong>
             </div>
@@ -1323,6 +1483,7 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
             </div>
           </div>
           {alignmentStatus?.drift_warning && <div className="warning-banner">SLAM drift likely</div>}
+          {alignmentStatus?.outlier_warning && <div className="warning-banner">Calibration outliers rejected</div>}
         </section>
 
         <details className="advanced-map-details">
@@ -1353,6 +1514,42 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
               <strong>{metricValues.alignmentAge}</strong>
             </div>
             <div>
+              <span>Confidence age</span>
+              <strong>{metricValues.confidenceAge}</strong>
+            </div>
+            <div>
+              <span>GPS confidence state</span>
+              <strong>{confidenceStatus?.gps.state?.replace(/_/g, " ") || "--"}</strong>
+            </div>
+            <div>
+              <span>GPS sigma</span>
+              <strong>{metricValues.gpsSigma}</strong>
+            </div>
+            <div>
+              <span>GPS yaw sigma</span>
+              <strong>{metricValues.gpsYawSigma}</strong>
+            </div>
+            <div>
+              <span>LIDAR confidence state</span>
+              <strong>{confidenceStatus?.lidar.state?.replace(/_/g, " ") || "--"}</strong>
+            </div>
+            <div>
+              <span>LIDAR sigma</span>
+              <strong>{metricValues.lidarSigma}</strong>
+            </div>
+            <div>
+              <span>LIDAR yaw sigma</span>
+              <strong>{metricValues.lidarYawSigma}</strong>
+            </div>
+            <div>
+              <span>Alignment confidence</span>
+              <strong>{formatPercent(confidenceStatus?.alignment.confidence)}</strong>
+            </div>
+            <div>
+              <span>Agreement</span>
+              <strong>{formatPercent(confidenceStatus?.agreement.consistency_score)}</strong>
+            </div>
+            <div>
               <span>TF Hz</span>
               <strong>{formatNumber(tfStats.hz, 1)}</strong>
             </div>
@@ -1361,6 +1558,26 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
               <strong>{mowerMapStats.messageCount}</strong>
             </div>
           </div>
+          {confidenceStatus && (
+            <div className="confidence-detail-stack">
+              <div>
+                <span>GPS components</span>
+                <strong>{componentSummary(confidenceStatus.gps.components)}</strong>
+              </div>
+              <div>
+                <span>GPS reasons</span>
+                <strong>{reasonSummary(confidenceStatus.gps.reasons)}</strong>
+              </div>
+              <div>
+                <span>LIDAR components</span>
+                <strong>{componentSummary(confidenceStatus.lidar.components)}</strong>
+              </div>
+              <div>
+                <span>LIDAR reasons</span>
+                <strong>{reasonSummary(confidenceStatus.lidar.reasons)}</strong>
+              </div>
+            </div>
+          )}
         </details>
 
         {error && <div className="error-banner">{error}</div>}

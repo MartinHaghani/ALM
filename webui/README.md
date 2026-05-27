@@ -13,7 +13,7 @@ The default basemap is York Region's 2023 10 cm orthophoto ArcGIS REST service. 
 `satelliteTileUrl`, `satelliteAttribution`, `satelliteMaxZoom`, `gpsFixTopic`, `gpsStatusTopic`, `gpsRawPoseTopic`,
 `gpsFusedPoseTopic`, `mowerMapTopic`, `scanTopic`, `slamScanTopic`, `slamMapTopic`, `slamMapFrame`, `slamOdomFrame`,
 `slamOriginFrame`, `slamBaseFrame`, `slamAlignmentStatusTopic`, `slamManagerStatusTopic`, `slamSetMappingService`,
-`slamClearMapService`, `tfTopic`, `tfStaticTopic`, and the `defaultLayer*` layer toggles. Satellite reference imagery and
+`slamClearMapService`, `localizationConfidenceTopic`, `tfTopic`, `tfStaticTopic`, and the `defaultLayer*` layer toggles. Satellite reference imagery and
 boundary-calibration traces are optional layers so alignment can be judged against the mower-local GPS outline and SLAM map instead of imagery tiles.
 
 Build it from the repo root with:
