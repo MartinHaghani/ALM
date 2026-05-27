@@ -1,0 +1,33 @@
+{
+  "areas": [
+    {
+      "id": "example-obstacle-mow",
+      "properties": {
+        "name": "Example Lawn With Obstacle",
+        "type": "mow"
+      },
+      "outline": [
+        {"x": 0.0, "y": 0.0},
+        {"x": 16.0, "y": 0.0},
+        {"x": 16.0, "y": 10.0},
+        {"x": 0.0, "y": 10.0},
+        {"x": 0.0, "y": 0.0}
+      ]
+    },
+    {
+      "id": "example-tree-bed",
+      "properties": {
+        "name": "Tree Bed",
+        "type": "obstacle"
+      },
+      "outline": [
+        {"x": 6.0, "y": 4.0},
+        {"x": 9.0, "y": 4.0},
+        {"x": 9.0, "y": 6.5},
+        {"x": 6.0, "y": 6.5},
+        {"x": 6.0, "y": 4.0}
+      ]
+    }
+  ],
+  "docking_stations": []
+}

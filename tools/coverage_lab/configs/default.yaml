@@ -1,0 +1,27 @@
+# Laptop-only coverage planner defaults. These mirror current Mowrator
+# semantics where possible, but they do not affect the mower runtime.
+frame_id: map
+tool_width: 0.4
+outline_count: 3
+outline_offset: 0.0
+
+footprint:
+  - [0.0, 0.34]
+  - [0.82, 0.34]
+  - [0.82, -0.34]
+  - [0.0, -0.34]
+
+fields2cover:
+  route_order: boustrophedon
+  route_variant: 0
+  swath_angle:
+    mode: best_swath_length
+    degrees: 0.0
+  turn_planner: dubins
+  min_turning_radius: 1.0
+  max_diff_curv: 0.1
+
+evaluation:
+  path_sample_step_m: 0.10
+  coverage_sample_resolution_m: 0.10
+  footprint_sample_stride: 1

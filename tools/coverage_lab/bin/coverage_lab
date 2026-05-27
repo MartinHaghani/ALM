@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LAB_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_DIR="$(cd "$LAB_DIR/../.." && pwd)"
+IMAGE="${COVERAGE_LAB_IMAGE:-open_mower_coverage_lab:fields2cover-v2.0.0}"
+
+build_image() {
+  docker build \
+    --build-arg FIELDS2COVER_REF="${FIELDS2COVER_REF:-v2.0.0}" \
+    -t "$IMAGE" \
+    -f "$LAB_DIR/docker/Dockerfile" \
+    "$LAB_DIR/docker"
+}
+
+ensure_image() {
+  if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+    build_image
+  fi
+}
+
+run_lab() {
+  ensure_image
+  docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -e HOME=/tmp/coverage_lab_home \
+    -v "$REPO_DIR:/workspace" \
+    -w /workspace \
+    "$IMAGE" "$@"
+}
+
+host_path() {
+  local path="$1"
+  case "$path" in
+    /workspace/*)
+      printf '%s/%s\n' "$REPO_DIR" "${path#/workspace/}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
+open_report() {
+  if [ "${COVERAGE_LAB_NO_OPEN:-}" = "1" ]; then
+    return
+  fi
+
+  local report_path="$1"
+  local host_report
+  host_report="$(host_path "$report_path")"
+  if [ ! -f "$host_report" ]; then
+    echo "Coverage lab report was not found on the host: $host_report" >&2
+    return
+  fi
+
+  echo "Opening coverage lab report: $host_report"
+  if command -v open >/dev/null 2>&1; then
+    open "$host_report"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$host_report" >/dev/null 2>&1 || true
+  else
+    echo "No opener found. Open this file manually: $host_report" >&2
+  fi
+}
+
+run_lab_and_open_reports() {
+  local log_file status report
+  log_file="$(mktemp -t coverage_lab.XXXXXX)"
+
+  set +e
+  run_lab "$@" 2>&1 | tee "$log_file"
+  status=${PIPESTATUS[0]}
+  set -e
+
+  if [ "$status" -eq 0 ]; then
+    while IFS= read -r report; do
+      [ -n "$report" ] && open_report "$report"
+    done < <(sed -n 's/^Display report: //p' "$log_file")
+  fi
+
+  rm -f "$log_file"
+  return "$status"
+}
+
+cmd="${1:-help}"
+case "$cmd" in
+  build)
+    build_image
+    ;;
+  smoke)
+    ensure_image
+    docker run --rm --entrypoint python3 "$IMAGE" -c "import fields2cover; print('fields2cover import ok')"
+    ;;
+  shell)
+    ensure_image
+    docker run --rm -it \
+      --user "$(id -u):$(id -g)" \
+      -e HOME=/tmp/coverage_lab_home \
+      -v "$REPO_DIR:/workspace" \
+      -w /workspace \
+      --entrypoint bash \
+      "$IMAGE"
+    ;;
+  help|-h|--help)
+    python3 "$LAB_DIR/coverage_lab.py" --help
+    ;;
+  *)
+    run_lab_and_open_reports "$@"
+    ;;
+esac

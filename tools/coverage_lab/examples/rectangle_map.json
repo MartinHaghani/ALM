@@ -1,0 +1,19 @@
+{
+  "areas": [
+    {
+      "id": "example-rectangle-mow",
+      "properties": {
+        "name": "Example Rectangle",
+        "type": "mow"
+      },
+      "outline": [
+        {"x": 0.0, "y": 0.0},
+        {"x": 14.0, "y": 0.0},
+        {"x": 14.0, "y": 7.0},
+        {"x": 0.0, "y": 7.0},
+        {"x": 0.0, "y": 0.0}
+      ]
+    }
+  ],
+  "docking_stations": []
+}

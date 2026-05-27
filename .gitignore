@@ -69,3 +69,12 @@ src/cmake-build-debug-ros
 /webui/node_modules/
 /webui/.vite/
 /webui/dist/
+
+# Laptop-only coverage planner lab data.
+!/tools/coverage_lab/bin/
+!/tools/coverage_lab/bin/coverage_lab
+/tools/coverage_lab/data/maps/**/*.json
+/tools/coverage_lab/data/maps/**/*.bag
+!/tools/coverage_lab/data/maps/**/.gitkeep
+/tools/coverage_lab/runs/**
+!/tools/coverage_lab/runs/.gitkeep
