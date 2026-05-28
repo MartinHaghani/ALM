@@ -25,22 +25,34 @@ These tests motivate the priorities below.
 
 ## Status table
 
-| Priority | Topic | Status | Plan doc | Landed in |
-|---|---|---|---|---|
-| P0 | Footprint-aware headland | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
-| P1 | Obstacle-aware swath bridging | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
-| P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
-| P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot, skip-stripe ordering) | not started | – | – |
-| P4 | FTC-aware execution contract | not started | – | – |
-| P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started | – | – |
-| P6 | Multi-lawn navigation and dock integration | not started | – | – |
-| P7 | Slope and soft-zone awareness | not started | – | – |
-| P8 | Stripe-quality regression suite | not started | – | – |
-| P9 | Path smoothing and FTC-truthful preview | not started | – | – |
+Listed in **execution order** (top = do next). IDs are stable per the "do not renumber" rule, so the ID column may jump around when an entry is reordered.
+
+| Exec | ID | Topic | Status | Plan doc | Landed in |
+|---|---|---|---|---|---|
+| – | P0 | Footprint-aware headland | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
+| – | P1 | Obstacle-aware swath bridging | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
+| 1 | **P10** | Always-connected base-link path (eliminate teleports between paths) | not started — next | – | – |
+| 2 | **P11** | BCD critical-vertex decomposition (split at concave outer-boundary vertices, not just hole x-extents) | not started | – | – |
+| 3 | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot, skip-stripe ordering) | not started | – | – |
+| 4 | P6 | Multi-lawn navigation and dock integration | not started | – | – |
+| 5 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started | – | – |
+| 6 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
+| 7 | P4 | FTC-aware execution contract | not started | – | – |
+| 8 | P9 | Path smoothing and FTC-truthful preview | not started | – | – |
+| 9 | P7 | Slope and soft-zone awareness | not started | – | – |
+| 10 | P8 | Stripe-quality regression suite | not started | – | – |
 
 Statuses: `not started`, `in progress`, `blocked`, `landed`. When marking `landed`, include the commit SHA or PR link in the last column.
 
 When a priority is in progress, the assigned agent must update its row with a one-line note: "in progress — <agent or branch>".
+
+### Reorder rationale (post-P0/P1 review)
+
+After P0/P1 landed, an output review found that the dominant remaining problem on every map (synthetic and real) is **teleports between consecutive path pieces**, not turn quality or coverage. A path-anatomy pass over the post-P0/P1 baseline counted 12–54 chunk-to-chunk jumps per map, with the largest jump on Whitburn at 29.7 m across the property between two separate lawns. Four distinct teleport categories exist (within-cell stripe-to-stripe failure, ring-to-ring, headland-to-fill, cross-lawn), all with the same root cause: nothing forces consecutive `paths[]` entries to share endpoints.
+
+P10 was added because none of the existing priorities directly required consecutive paths to connect; P3 reduces the *count* of stripe-to-stripe failures but does not stop the path from fragmenting. P11 was added because the existing P1 only decomposes around interior holes, but a hole that touches the eroded outer boundary collapses into a notch and Fields2Cover then fragments every stripe that crosses it. The two are independent: P10 owns path topology, P11 owns swath geometry.
+
+P10 was placed at execution slot 1 because it has the largest immediate visual effect, it is a single localized post-processing pass, and it makes every subsequent priority easier to evaluate (remaining problems become visible long transits instead of confusing teleports). P11 at slot 2 because it closes the second-biggest remaining symptom on the synthetic batch. P3 was moved up to slot 3 because turn quality after P10 becomes the dominant remaining visual issue.
 
 ---
 
@@ -88,6 +100,59 @@ Notes:
 - Synthetic example coverage caps at 71–84%. The missing band is the unswept area between the eroded headland boundary and the lawn boundary (the band P0 had to give up to be safe). P5 recovers it.
 - `obstacle_off_center_map` shows 1 cell, 0 transits because the inflated obstacle touches the eroded outer boundary and the hole collapses into a notch — correct geometry, no decomposition needed.
 - Warning counts above zero are not unsafe; they are wheel-anchor turn failures that fall back to a forward U-turn or split the path at a visible gap. Reducing them is P3 territory.
+
+---
+
+## P10 — Always-connected base-link path
+
+**Problem.** After P0/P1 landed, every test map produces a `paths[]` list where consecutive entries do not share endpoints. The simulation preview interprets each gap as a teleport, including 6–14 m jumps within a single cell and 29.7 m cross-property jumps on Whitburn Cres. Four distinct categories of teleport were measured:
+
+1. *Within-cell stripe-to-stripe failure.* When both the wheel-anchor turn and the forward-U-turn fallback fail for a stripe pair, `build_zero_turn_fill_paths` calls `finish_current()` and starts a new `fill` chunk with no connector. The gap is the lawn width.
+2. *Ring-to-ring within a single headland.* The headland builder emits one `path` entry per ring; outer and obstacle-hole rings have no connector between them even though both are footprint-safe by P0 construction.
+3. *Headland → first fill stripe.* The last headland pose and the first fill pose are typically several metres apart.
+4. *Cross-lawn.* Independent mow areas (e.g. Whitburn's three lawns) are planned in isolation; no connector exists between the last pose of one lawn's path and the first pose of the next.
+
+These teleports also explain the "instant 180° turn" symptom: a path-anatomy pass over the post-P0/P1 baseline measured zero instant yaw jumps > 85° between *adjacent* poses, but many of the chunk-to-chunk gaps have Δyaw ≈ 180° because consecutive stripes alternate direction.
+
+**Solution.** After planning, walk the full `paths[]` and insert an explicit transit segment between any two consecutive entries whose endpoints don't match within `path_sample_step_m`. The transit:
+
+- *Within a lawn, both endpoints lie on the eroded headland*: use `lab_geometry.walk_ring_between` on the largest eroded ring (P0 output is already footprint-safe by construction). This covers categories 1, 2, and 3.
+- *Cross-lawn*: emit a straight-line connector tagged with `cross_lawn_transit: true` and a per-segment warning. P6 will replace this with proper nav-polygon routing.
+- All inserted poses are tagged `section: "connector"` with `transit: true` and `cutting_enabled: false`, so coverage and turn metrics are not polluted.
+
+This is the same `build_transit_path` machinery already used for inter-cell transit in P1; the change is to *also* run it as a final post-processing pass over the assembled per-profile `paths[]`.
+
+**Acceptance.**
+
+- For every tracked example map and the Whitburn Cres real-world map, the path-anatomy pass returns **0 chunk-to-chunk jumps > `2 × path_sample_step_m`** within a single lawn (i.e. the within-area path is fully connected).
+- Cross-lawn jumps still exist on Whitburn but are now explicit `cross_lawn_transit` connectors with warnings, not silent teleports.
+- `metrics.json.transit.count` increases (every inserted segment is counted); coverage % and unsafe sample count do not change.
+
+**Why this slot.** It is a self-contained change with the largest single visual improvement available, and it makes every subsequent priority easier to evaluate. P3, P5, P11 all leave teleports in place; only P10 removes them.
+
+---
+
+## P11 — BCD critical-vertex decomposition
+
+**Problem.** The current `lab_geometry.bcd_decompose` only cuts at hole x-extents. When a lawn obstacle sits near the outer boundary, the eroded obstacle merges with the eroded outer boundary and the resulting mainland is hole-free but has a concave "notch" cut out of one side. My BCD then skips decomposition entirely (because there are no interiors), Fields2Cover plans swaths across the notched polygon, and every stripe that crosses the notch gets fragmented into two short stripes with no internal connection. The `obstacle_off_center_map` example exposes this clearly: 1 cell, 31 swaths, 17 fill chunks for what should be ~25 clean stripes plus a small notch region.
+
+**Solution.** Implement proper Boustrophedon Cellular Decomposition with critical-vertex detection on the outer boundary. A critical vertex in the stripe-aligned frame is one where the boundary turns away from the sweep direction (a local extremum in x for stripes along x). At each critical vertex, cut a vertical line through it and intersect with the polygon. Cells are the connected components of `polygon - cut_union`.
+
+Specifically, extend `bcd_decompose` to:
+
+1. Rotate the polygon so stripes run along x (existing behaviour).
+2. Walk the outer ring and classify each vertex as a critical vertex if the boundary's x-derivative changes sign across it *and* the vertex is concave (inside angle > 180°).
+3. Walk each interior ring and classify each hole vertex the same way (existing behaviour for the leftmost/rightmost cases, extended to all critical vertices for non-convex holes).
+4. Cut at every critical vertex's x-coordinate, deduplicated and snapped at `1 mm` tolerance.
+5. Return cells with the same hole-free, area-filtered invariants as today.
+
+**Acceptance.**
+
+- On `obstacle_off_center_map`, BCD returns at least 2 cells (one clean rectangle below the notch, plus the notched region) and the bottom cell produces approximately 16 long stripes with no internal fragmentation.
+- `metrics.json.cells.count` ≥ 2 for any map whose mainland polygon has at least one concave critical vertex on the outer boundary.
+- No regression on the maps where the current BCD already produces correct cells (rectangle, l_shape, narrow_pivot, obstacle, two_obstacles).
+
+**Why this slot.** Second-biggest visual improvement after P10. Reduces stripe count and turn count on every map with a notched outer boundary. Independent of P10 (different code paths), so safe to land in a separate pass.
 
 ---
 
