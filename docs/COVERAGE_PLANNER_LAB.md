@@ -19,6 +19,20 @@ Copy a mower map manually into the ignored local data directory:
 scp <mower-user>@<mower-host>:~/.ros/map.json tools/coverage_lab/data/maps/current/map.json
 ```
 
+Or convert Google Earth KML polygons into the same JSON shape. Name each KML polygon with a case-insensitive `mow:`, `obstacle:`, or `nav:` prefix:
+
+```bash
+tools/coverage_lab/bin/coverage_lab convert-kml --kml ~/Downloads/front_yard.kml
+tools/coverage_lab/bin/coverage_lab plan --map tools/coverage_lab/data/maps/google_earth/front_yard.json
+```
+
+For a directory of KML files:
+
+```bash
+tools/coverage_lab/bin/coverage_lab convert-kml --kml-dir ~/Downloads/lawn_kmls
+tools/coverage_lab/bin/coverage_lab batch --maps tools/coverage_lab/data/maps/google_earth
+```
+
 Validate and plan:
 
 ```bash
@@ -49,11 +63,11 @@ Each run writes ignored artifacts under `tools/coverage_lab/runs/`:
 - `plan.svg`: visual overlay of lawn boundary, obstacles, generated swaths, headlands, and path.
 - `plan.html`: evaluation report.
 - `planpath_compat.json`: `PlanPath`-like JSON with map-frame `paths[]`.
-- `metrics.json`: approximate coverage and safety metrics.
+- `metrics.json`: approximate coverage and safety metrics, scoped to the selected lawn when `--area-index` is used.
 - `source_map_snapshot.json`: reproducibility copy of the input map.
 - `planning_debug.json`: additional generated geometry for re-rendering and agent inspection.
 
-Batch runs also write `batch.html`, a small index that links to each generated `plan.html`.
+Each primary run is the `mowrator_zero_turn` profile. Comparison output for Fields2Cover's built-in small-radius path planner is written under `profiles/f2c_tiny_radius/`. Batch runs also write `batch.html`, a small index that links to each generated `plan.html`.
 
 ## Defaults
 
@@ -62,16 +76,21 @@ The default config is `tools/coverage_lab/configs/default.yaml`.
 It mirrors current Mowrator planning assumptions where possible:
 
 - `tool_width: 0.4`
+- `tool_center_offset: [0.41, 0.0]`
 - `outline_count: 3`
 - `outline_offset: 0.0`
 - footprint: `[[0.0, 0.34], [0.82, 0.34], [0.82, -0.34], [0.0, -0.34]]`
+- `drive_model: zero_turn`
+- `pivot_yaw_step_degrees: 10`
+- `safety_margin_m: 0.05`
 - Fields2Cover `v2.0.0`
-- built-in Fields2Cover headland, swath, route-order, and Dubins path-planning primitives
+- built-in Fields2Cover headland, swath, and route-order primitives
+- comparison profile using Fields2Cover Dubins path planning with `min_turning_radius: 0.10`
 
 ## Guardrails
 
 Do not add automatic SSH or mower-control behavior to the lab. The map copy step is manual by design.
 
-Do not commit private maps or run outputs. `tools/coverage_lab/data/maps/**/*.json`, `tools/coverage_lab/data/maps/**/*.bag`, and `tools/coverage_lab/runs/**` are ignored.
+Do not commit private maps or run outputs. `tools/coverage_lab/data/maps/**/*.json`, `tools/coverage_lab/data/maps/**/*.kml`, `tools/coverage_lab/data/maps/**/*.bag`, and `tools/coverage_lab/runs/**` are ignored.
 
 The first mower migration target is compatibility with the existing planner service concept, not immediate execution. Treat `planpath_compat.json` as a bridge artifact for future work.

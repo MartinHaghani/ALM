@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>multiple_lawns</name>
+    <Placemark>
+      <name>mow: Front Lawn</name>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -83.000000,42.000000,0
+              -82.999880,42.000000,0
+              -82.999880,42.000080,0
+              -83.000000,42.000080,0
+              -83.000000,42.000000,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+    <Placemark>
+      <name>mow: Side Lawn</name>
+      <MultiGeometry>
+        <Polygon>
+          <outerBoundaryIs>
+            <LinearRing>
+              <coordinates>
+                -82.999820,42.000000,0
+                -82.999720,42.000000,0
+                -82.999720,42.000070,0
+                -82.999820,42.000070,0
+                -82.999820,42.000000,0
+              </coordinates>
+            </LinearRing>
+          </outerBoundaryIs>
+        </Polygon>
+      </MultiGeometry>
+    </Placemark>
+    <Placemark>
+      <name>nav: Driveway</name>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -83.000050,41.999980,0
+              -83.000010,41.999980,0
+              -83.000010,42.000090,0
+              -83.000050,42.000090,0
+              -83.000050,41.999980,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  </Document>
+</kml>

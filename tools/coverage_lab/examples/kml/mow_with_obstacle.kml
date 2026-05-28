@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>mow_with_obstacle</name>
+    <Placemark>
+      <name>mow: Lawn With Tree</name>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -83.000000,42.000000,0
+              -82.999800,42.000000,0
+              -82.999800,42.000108,0
+              -83.000000,42.000108,0
+              -83.000000,42.000000,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+    <Placemark>
+      <name>obstacle: Tree Bed</name>
+      <Polygon>
+        <outerBoundaryIs>
+          <LinearRing>
+            <coordinates>
+              -82.999930,42.000040,0
+              -82.999890,42.000040,0
+              -82.999890,42.000068,0
+              -82.999930,42.000068,0
+              -82.999930,42.000040,0
+            </coordinates>
+          </LinearRing>
+        </outerBoundaryIs>
+      </Polygon>
+    </Placemark>
+  </Document>
+</kml>

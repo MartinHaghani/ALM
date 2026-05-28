@@ -42,6 +42,18 @@ host_path() {
   esac
 }
 
+container_path() {
+  local path="$1"
+  case "$path" in
+    "$REPO_DIR"/*)
+      printf '/workspace/%s\n' "${path#$REPO_DIR/}"
+      ;;
+    *)
+      printf '%s\n' "$path"
+      ;;
+  esac
+}
+
 open_report() {
   if [ "${COVERAGE_LAB_NO_OPEN:-}" = "1" ]; then
     return
@@ -84,6 +96,27 @@ run_lab_and_open_reports() {
   return "$status"
 }
 
+run_host_convert_kml() {
+  local log_file status map_path container_map
+  log_file="$(mktemp -t coverage_lab_kml.XXXXXX)"
+
+  set +e
+  python3 "$LAB_DIR/coverage_lab.py" "$@" 2>&1 | tee "$log_file"
+  status=${PIPESTATUS[0]}
+  set -e
+
+  if [ "$status" -eq 0 ]; then
+    while IFS= read -r map_path; do
+      [ -n "$map_path" ] || continue
+      container_map="$(container_path "$map_path")"
+      run_lab_and_open_reports plan --map "$container_map"
+    done < <(sed -n 's/^Plan map: //p' "$log_file")
+  fi
+
+  rm -f "$log_file"
+  return "$status"
+}
+
 cmd="${1:-help}"
 case "$cmd" in
   build)
@@ -102,6 +135,9 @@ case "$cmd" in
       -w /workspace \
       --entrypoint bash \
       "$IMAGE"
+    ;;
+  convert-kml)
+    run_host_convert_kml "$@"
     ;;
   help|-h|--help)
     python3 "$LAB_DIR/coverage_lab.py" --help

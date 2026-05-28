@@ -1,0 +1,20 @@
+{
+  "areas": [
+    {
+      "id": "narrow-pivot-lawn",
+      "outline": [
+        {"x": 0.0, "y": 0.0},
+        {"x": 8.0, "y": 0.0},
+        {"x": 8.0, "y": 4.0},
+        {"x": 0.0, "y": 4.0},
+        {"x": 0.0, "y": 0.0}
+      ],
+      "properties": {
+        "active": true,
+        "name": "Narrow Pivot Lawn",
+        "type": "mow"
+      }
+    }
+  ],
+  "docking_stations": []
+}
