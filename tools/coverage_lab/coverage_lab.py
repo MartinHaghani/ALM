@@ -2123,6 +2123,180 @@ def build_transit_path(
     )
 
 
+def _reverse_cell_paths(paths: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a deep-copy of ``paths`` with chunk order reversed and each chunk's
+    poses reversed. Used by the visit-order optimiser when entering a cell from
+    its "end" side gives a cleaner inter-cell connection than entering from its
+    F2C-default "start" side. Wheel-anchor maneuver metadata is intentionally
+    not relabelled here — it stays on the original sample but is no longer the
+    direction of execution; that's a known cosmetic limitation flagged for P3.
+    """
+    out: list[dict[str, Any]] = []
+    for original in reversed(paths):
+        clone = copy.deepcopy(original)
+        if clone.get("path", {}).get("poses"):
+            clone["path"]["poses"] = list(reversed(clone["path"]["poses"]))
+        if clone.get("tool_path", {}).get("poses"):
+            clone["tool_path"]["poses"] = list(reversed(clone["tool_path"]["poses"]))
+        out.append(clone)
+    return out
+
+
+def _cell_endpoint_poses(paths: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    first_pose = None
+    last_pose = None
+    for chunk in paths:
+        poses = chunk.get("path", {}).get("poses") or []
+        if poses:
+            if first_pose is None:
+                first_pose = poses[0]
+            last_pose = poses[-1]
+    return first_pose, last_pose
+
+
+def _pose_distance(a: dict[str, Any], b: dict[str, Any]) -> float:
+    return math.hypot(float(a["x"]) - float(b["x"]), float(a["y"]) - float(b["y"]))
+
+
+def _greedy_visit_order_from(
+    cells: list[dict[str, Any]],
+    first_cell: dict[str, Any],
+    first_direction: str,
+) -> tuple[list[tuple[int, str, list[dict[str, Any]]]], float]:
+    """Run a greedy nearest-neighbour visit starting from ``first_cell`` with
+    the given ``first_direction``. Returns the visit order and the total inter-
+    cell transit distance accumulated.
+    """
+    visited: list[tuple[int, str, list[dict[str, Any]]]] = []
+    if first_direction == "reverse":
+        first_paths = _reverse_cell_paths(first_cell["paths"])
+        current_end = first_cell["start"]
+    else:
+        first_paths = first_cell["paths"]
+        current_end = first_cell["end"]
+    visited.append((first_cell["idx"], first_direction, first_paths))
+    remaining = [c for c in cells if c["idx"] != first_cell["idx"]]
+    total_cost = 0.0
+
+    while remaining:
+        best_cell = None
+        best_dir = "forward"
+        best_dist = math.inf
+        for candidate in remaining:
+            d_fwd = _pose_distance(current_end, candidate["start"])
+            d_rev = _pose_distance(current_end, candidate["end"])
+            if d_fwd < best_dist:
+                best_dist = d_fwd
+                best_cell = candidate
+                best_dir = "forward"
+            if d_rev < best_dist:
+                best_dist = d_rev
+                best_cell = candidate
+                best_dir = "reverse"
+        assert best_cell is not None
+        total_cost += best_dist
+        if best_dir == "reverse":
+            paths = _reverse_cell_paths(best_cell["paths"])
+            current_end = best_cell["start"]
+        else:
+            paths = best_cell["paths"]
+            current_end = best_cell["end"]
+        visited.append((best_cell["idx"], best_dir, paths))
+        remaining = [c for c in remaining if c["idx"] != best_cell["idx"]]
+
+    return visited, total_cost
+
+
+def optimize_cell_visit_order(
+    cell_fill_paths: list[list[dict[str, Any]]],
+) -> list[tuple[int, str, list[dict[str, Any]]]]:
+    """Pick a cell visit order that minimises inter-cell transit distance.
+
+    Each cell can be visited in F2C "forward" order or pose-reversed "reverse"
+    order. The strategy is multi-start greedy nearest-neighbour: try every
+    (starting cell, starting direction) pair, run a greedy walk from each,
+    and keep the one with the smallest total inter-cell transit distance.
+    This is O(N^3) with a small constant (≤ ~14 starts × ~N^2 greedy = a few
+    thousand ops for N ≤ 16), which is fast enough that we always do it.
+
+    Greedy with a fixed start can lock the planner into a corner — picking the
+    bottom-left endpoint forward dumps the exit at the opposite corner on
+    asymmetric maps. Trying all (start, direction) pairs costs almost nothing
+    and consistently chooses a starting cell whose F2C-chosen end lands near
+    the other cells.
+
+    Returns a list of (original_cell_index, direction, paths) in execution
+    order, with ``paths`` already reversed when ``direction == 'reverse'``.
+    Empty cells are dropped.
+    """
+    cells: list[dict[str, Any]] = []
+    for idx, paths in enumerate(cell_fill_paths):
+        if not paths:
+            continue
+        start, end = _cell_endpoint_poses(paths)
+        if start is None or end is None:
+            continue
+        cells.append({"idx": idx, "paths": paths, "start": start, "end": end})
+
+    if not cells:
+        return []
+    if len(cells) == 1:
+        return [(cells[0]["idx"], "forward", cells[0]["paths"])]
+
+    best_visited: list[tuple[int, str, list[dict[str, Any]]]] | None = None
+    best_total_cost = math.inf
+    for first_cell in cells:
+        for first_direction in ("forward", "reverse"):
+            visited, cost = _greedy_visit_order_from(cells, first_cell, first_direction)
+            if cost < best_total_cost:
+                best_total_cost = cost
+                best_visited = visited
+
+    assert best_visited is not None
+    return best_visited
+
+
+def try_direct_inter_cell_connector(
+    *,
+    lawn: Lawn,
+    area_index: int,
+    label: str,
+    from_pose: dict[str, Any],
+    to_pose: dict[str, Any],
+    config: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Try to bridge two consecutive cells with the existing wheel-anchor / U-turn
+    planner before falling back to a transit via the headland.
+
+    Returns a path record carrying the turn poses, or ``None`` if no direct
+    turn was found (the caller should then build a transit).
+    """
+    sample_step = float(config["evaluation"].get("path_sample_step_m", 0.1))
+    offset = tool_center_offset(config)
+    turn_poses, _warning = plan_swath_turn_base_poses(
+        lawn,
+        from_pose,
+        to_pose,
+        sample_step,
+        config,
+        context,
+    )
+    if not turn_poses:
+        return None
+    base_poses = list(turn_poses)
+    tool_poses = [tool_pose_from_base_pose(p, offset) for p in base_poses]
+    return make_path_record(
+        is_outline=False,
+        area_index=area_index,
+        lawn=lawn,
+        label=label,
+        frame_id=config.get("frame_id", "map"),
+        base_poses=base_poses,
+        tool_poses=tool_poses,
+    )
+
+
 def plan_one_lawn_profiles(lawn: Lawn, area_index: int, config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     try:
         import fields2cover as f2c
@@ -2351,31 +2525,62 @@ def _plan_one_lawn_profiles_footprint_disk(
         largest = max(eroded_polygons, key=lambda p: p.area)
         transit_ring = lab_geometry.polygon_outer_ring(largest)
 
-    # Assemble primary path list: headland(s) + cell-1 fill + transit + cell-2 fill + ...
-    primary_paths = list(result_profiles[primary]["paths"])
-    last_terminal: dict[str, Any] | None = None
+    # Optimise cell visit order: greedy nearest-neighbour with per-cell
+    # forward/reverse choice so that consecutive cells' endpoints sit close
+    # together. This eliminates the long "across the property" transits the
+    # previous arbitrary order produced (e.g. obstacle_map Cell 2 → Cell 3
+    # used to walk the entire perimeter to reach the right-of-obstacle band).
+    visit_order = optimize_cell_visit_order(cell_fill_paths)
+
+    # Count within-cell path splits — places where build_zero_turn_fill_paths
+    # called finish_current() because both wheel-anchor and the forward U-turn
+    # fallback failed. A cell with k chunks contributes k-1 splits.
+    split_count = sum(max(0, len(paths) - 1) for paths in cell_fill_paths)
+    inter_cell_direct_turns = 0
     transit_count = 0
     transit_length = 0.0
-    for cell_i, fill_paths in enumerate(cell_fill_paths):
+
+    # Assemble primary path list: headland(s) + ordered cell fills + connector
+    # (direct turn if feasible, else transit via headland) between cells.
+    primary_paths = list(result_profiles[primary]["paths"])
+    last_terminal: dict[str, Any] | None = None
+    for slot_i, (cell_i, direction, fill_paths) in enumerate(visit_order):
         if not fill_paths:
             continue
         first_pose = fill_paths[0]["path"]["poses"][0] if fill_paths[0]["path"]["poses"] else None
-        if last_terminal is not None and first_pose is not None and transit_ring:
-            transit = build_transit_path(
+        if last_terminal is not None and first_pose is not None:
+            connector_label_base = f"{lawn.area.name} inter-cell {slot_i}"
+            connector = try_direct_inter_cell_connector(
                 lawn=lawn,
                 area_index=area_index,
-                label=f"{lawn.area.name} transit {transit_count + 1}",
-                headland_outer_ring=transit_ring,
+                label=f"{connector_label_base} turn",
                 from_pose=last_terminal,
                 to_pose=first_pose,
                 config=config,
+                context={
+                    "area_index": area_index,
+                    "from_cell_index": visit_order[slot_i - 1][0],
+                    "to_cell_index": cell_i,
+                },
             )
-            if transit is not None:
-                primary_paths.append(transit)
-                transit_count += 1
-                transit_length += pose_list_length(transit["path"]["poses"])
+            if connector is not None:
+                primary_paths.append(connector)
+                inter_cell_direct_turns += 1
+            elif transit_ring:
+                transit = build_transit_path(
+                    lawn=lawn,
+                    area_index=area_index,
+                    label=f"{lawn.area.name} transit {transit_count + 1}",
+                    headland_outer_ring=transit_ring,
+                    from_pose=last_terminal,
+                    to_pose=first_pose,
+                    config=config,
+                )
+                if transit is not None:
+                    primary_paths.append(transit)
+                    transit_count += 1
+                    transit_length += pose_list_length(transit["path"]["poses"])
         primary_paths.extend(fill_paths)
-        # Update terminal to the last pose of the last fill chunk for this cell
         last_terminal = fill_paths[-1]["path"]["poses"][-1] if fill_paths[-1]["path"]["poses"] else last_terminal
 
     result_profiles[primary]["paths"] = primary_paths
@@ -2383,6 +2588,12 @@ def _plan_one_lawn_profiles_footprint_disk(
     for profile_name in profile_names:
         result_profiles[profile_name]["debug_area"]["transit_count"] = transit_count
         result_profiles[profile_name]["debug_area"]["transit_total_length_m"] = transit_length
+        result_profiles[profile_name]["debug_area"]["inter_cell_direct_turns"] = inter_cell_direct_turns
+        result_profiles[profile_name]["debug_area"]["within_cell_path_splits"] = split_count
+        result_profiles[profile_name]["debug_area"]["visit_order"] = [
+            {"slot": i, "cell_index": ci, "direction": d}
+            for i, (ci, d, _) in enumerate(visit_order)
+        ]
 
     # Comparison profile: keep using global F2C path planning on a fresh swath set
     # built from the union mainland (so the f2c_tiny_radius comparison still shows
@@ -2899,6 +3110,8 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
     }
     cells_metrics: dict[str, Any] = {"count": 0, "areas_m2": []}
     transit_metrics: dict[str, Any] = {"count": 0, "total_length_m": 0.0}
+    inter_cell_metrics: dict[str, Any] = {"direct_turn_count": 0}
+    split_metrics: dict[str, Any] = {"within_cell_path_splits": 0}
     seen_strategy: set[str] = set()
     for area in debug.get("areas", []):
         if not isinstance(area, dict):
@@ -2911,6 +3124,8 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
             cells_metrics["areas_m2"].append(float(cell.get("area_m2", 0.0)))
         transit_metrics["count"] += int(area.get("transit_count", 0) or 0)
         transit_metrics["total_length_m"] += float(area.get("transit_total_length_m", 0.0) or 0.0)
+        inter_cell_metrics["direct_turn_count"] += int(area.get("inter_cell_direct_turns", 0) or 0)
+        split_metrics["within_cell_path_splits"] += int(area.get("within_cell_path_splits", 0) or 0)
     if len(seen_strategy) == 1:
         headland_metrics["strategy"] = next(iter(seen_strategy))
     elif seen_strategy:
@@ -2996,6 +3211,8 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
         "headland": headland_metrics,
         "cells": cells_metrics,
         "transit": transit_metrics,
+        "inter_cell": inter_cell_metrics,
+        "path_splits": split_metrics,
     }
 
 
