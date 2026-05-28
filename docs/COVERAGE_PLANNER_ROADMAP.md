@@ -31,16 +31,16 @@ Listed in **execution order** (top = do next). IDs are stable per the "do not re
 |---|---|---|---|---|---|
 | – | P0 | Footprint-aware headland | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
 | – | P1 | Obstacle-aware swath bridging | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
+| – | P11 | BCD critical-vertex decomposition (split at concave outer-boundary vertices, not just hole x-extents) | landed | – | 91c4f92 |
 | 1 | **P10** | Always-connected base-link path (eliminate teleports between paths) | not started — next | – | – |
-| 2 | **P11** | BCD critical-vertex decomposition (split at concave outer-boundary vertices, not just hole x-extents) | not started | – | – |
-| 3 | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot, skip-stripe ordering) | not started | – | – |
-| 4 | P6 | Multi-lawn navigation and dock integration | not started | – | – |
-| 5 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started | – | – |
-| 6 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
-| 7 | P4 | FTC-aware execution contract | not started | – | – |
-| 8 | P9 | Path smoothing and FTC-truthful preview | not started | – | – |
-| 9 | P7 | Slope and soft-zone awareness | not started | – | – |
-| 10 | P8 | Stripe-quality regression suite | not started | – | – |
+| 2 | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot, skip-stripe ordering) | not started | – | – |
+| 3 | P6 | Multi-lawn navigation and dock integration | not started | – | – |
+| 4 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started | – | – |
+| 5 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
+| 6 | P4 | FTC-aware execution contract | not started | – | – |
+| 7 | P9 | Path smoothing and FTC-truthful preview | not started | – | – |
+| 8 | P7 | Slope and soft-zone awareness | not started | – | – |
+| 9 | P8 | Stripe-quality regression suite | not started | – | – |
 
 Statuses: `not started`, `in progress`, `blocked`, `landed`. When marking `landed`, include the commit SHA or PR link in the last column.
 
@@ -153,6 +153,22 @@ Specifically, extend `bcd_decompose` to:
 - No regression on the maps where the current BCD already produces correct cells (rectangle, l_shape, narrow_pivot, obstacle, two_obstacles).
 
 **Why this slot.** Second-biggest visual improvement after P10. Reduces stripe count and turn count on every map with a notched outer boundary. Independent of P10 (different code paths), so safe to land in a separate pass.
+
+**Outcome (91c4f92).** Implementation in `lab_geometry.outer_reflex_xs`: walk the CCW outer ring, aggregate signed turn angles into contiguous reflex runs (a single rolled-disk arc from Minkowski erosion becomes one run with cumulative turn ≈ −π/2), emit one candidate cut per run at the |turn|-weighted centroid x. A second filter pass keeps only candidates that *actually fragment* a horizontal swath — the polygon's intersection with a horizontal line at the reflex y must have more than one connected component. This drops benign concavities like the L-shape's inner corner (cross-section stays one segment) and keeps notch corners (cross-section is two segments).
+
+Results vs the post-P0/P1 baseline (no regressions; large wins where the symptom existed):
+
+| map | warnings | cells | chunk jumps > 5 m |
+|---|---:|---:|---:|
+| rectangle_map | 0 → 0 | 1 → 1 | 0 → 0 |
+| l_shape_map | 0 → 0 | 1 → 1 | 1 → 1 |
+| narrow_pivot_map | 1 → 1 | 1 → 1 | 1 → 1 |
+| obstacle_map | 13 → 13 | 4 → 4 | 6 → 6 |
+| `obstacle_off_center_map` | **18 → 8** | 1 → 5 | **10 → 1** |
+| two_obstacles_map | 30 → 30 | 7 → 7 | 9 → 9 |
+| 57-Whitburn-Cres-simplified | 64 → 63 | 7 → 10 | **14 → 4** |
+
+The dominant visible improvement is the collapse of large chunk-to-chunk jumps on the two maps that have outer-boundary notches. Remaining short-and-medium gaps are owned by P10 (always-connected base-link path).
 
 ---
 
