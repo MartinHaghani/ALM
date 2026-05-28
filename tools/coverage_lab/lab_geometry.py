@@ -22,7 +22,14 @@ import math
 from typing import Iterable
 
 from shapely.affinity import rotate
-from shapely.geometry import LineString, MultiPolygon, Polygon, box
+from shapely.geometry import (
+    GeometryCollection,
+    LineString,
+    MultiLineString,
+    MultiPolygon,
+    Polygon,
+    box,
+)
 from shapely.ops import unary_union
 
 
@@ -33,6 +40,7 @@ __all__ = [
     "polygon_holes",
     "polygon_to_ring_dicts",
     "bcd_decompose",
+    "outer_reflex_xs",
     "ring_length",
     "walk_ring_between",
 ]
@@ -200,19 +208,198 @@ def polygon_to_ring_dicts(polygon: Polygon, layer: int, ring_index: int, centerl
 
 
 # --------------------------------------------------------------------------------
+# Reflex outer-boundary vertex detection (P11)
+# --------------------------------------------------------------------------------
+
+
+def outer_reflex_xs(
+    polygon: Polygon,
+    min_reflex_angle_rad: float = 0.35,
+) -> list[float]:
+    """Return sorted x-coords for cutting at outer-boundary reflex regions
+    that *fragment* horizontal swaths.
+
+    A reflex region is a contiguous run of CCW outer-ring vertices whose
+    cumulative signed turn angle is right-turning (into the polygon) by more
+    than ``min_reflex_angle_rad`` total. Each such region produces a single
+    candidate x-coord — the |turn|-weighted centroid of the region — so a
+    rolled-disk arc inserted at a concave corner by Minkowski erosion is
+    treated as one candidate, not one per arc vertex.
+
+    A candidate is kept only if it actually causes swath fragmentation: the
+    polygon's intersection with a horizontal line just inside the polygon at
+    the reflex's y-coord must have more than one connected component. This
+    drops benign concavities (an L-shape's inner corner) and keeps notch
+    corners (a rectangular notch's bottom corners). The polygon is assumed
+    to already be rotated so the stripe direction is the x-axis.
+
+    The default ``min_reflex_angle_rad = 0.35`` rad (~20°) ignores near-
+    straight numerical noise and small "almost flat" concavities.
+
+    >>> from shapely.geometry import Polygon
+    >>> # Plain rectangle: no reflex vertices.
+    >>> outer_reflex_xs(Polygon([(0, 0), (10, 0), (10, 5), (0, 5)]))
+    []
+    >>> # L-shape inner corner at (5, 4): reflex but does NOT fragment swaths.
+    >>> # Horizontal swaths through y=4 are still one segment ([0, 12]).
+    >>> L = Polygon([(0, 0), (12, 0), (12, 4), (5, 4), (5, 10), (0, 10)])
+    >>> outer_reflex_xs(L)
+    []
+    >>> # Notched rectangle: notch corners fragment swaths in [6, 10] y range
+    >>> # into two segments [0, 2] U [6, 16].
+    >>> notched = Polygon([
+    ...     (0, 0), (16, 0), (16, 10), (6, 10),
+    ...     (6, 6), (2, 6), (2, 10), (0, 10),
+    ... ])
+    >>> outer_reflex_xs(notched)
+    [2.0, 6.0]
+    """
+    ring = list(polygon.exterior.coords)
+    if ring and ring[0] == ring[-1]:
+        ring = ring[:-1]
+    if len(ring) < 3:
+        return []
+    if not polygon.exterior.is_ccw:
+        ring = list(reversed(ring))
+    n = len(ring)
+    bounds_minx, bounds_miny, bounds_maxx, bounds_maxy = polygon.bounds
+    bounds_width = bounds_maxx - bounds_minx
+
+    def fragments_horizontal_swath_at(y_test: float) -> bool:
+        """True iff the polygon's intersection with the horizontal line at
+        y_test has more than one connected component. This is the criterion
+        that distinguishes a fragmenting concave notch (the polygon has a gap
+        in x at this y, like the bottom of a notch) from a benign concavity
+        like the inner corner of an L-shape (cross-section stays one segment).
+        """
+        line = LineString([(bounds_minx - 1.0, y_test), (bounds_maxx + 1.0, y_test)])
+        inter = polygon.intersection(line)
+        if inter.is_empty:
+            return False
+        if isinstance(inter, LineString):
+            return False
+        if isinstance(inter, MultiLineString):
+            return len([g for g in inter.geoms if not g.is_empty]) > 1
+        if isinstance(inter, GeometryCollection):
+            n_lines = sum(
+                1 for g in inter.geoms
+                if isinstance(g, LineString) and not g.is_empty
+            )
+            return n_lines > 1
+        return False
+
+    # Signed turn angle at each vertex (positive = left/convex, negative = right/reflex).
+    turns: list[float] = [0.0] * n
+    for i in range(n):
+        prev_x, prev_y = ring[i - 1]
+        cur_x, cur_y = ring[i]
+        nxt_x, nxt_y = ring[(i + 1) % n]
+        in_dx = cur_x - prev_x
+        in_dy = cur_y - prev_y
+        out_dx = nxt_x - cur_x
+        out_dy = nxt_y - cur_y
+        in_len = math.hypot(in_dx, in_dy)
+        out_len = math.hypot(out_dx, out_dy)
+        if in_len < EPS or out_len < EPS:
+            continue
+        cross = in_dx * out_dy - in_dy * out_dx
+        dot = in_dx * out_dx + in_dy * out_dy
+        turns[i] = math.atan2(cross, dot)
+
+    # Anchor the walk on a convex (or flat) vertex so wraparound runs are handled
+    # uniformly. If the polygon is entirely reflex (impossible for a simple
+    # polygon, but guard anyway) bail out.
+    start = next((k for k in range(n) if turns[k] >= 0), None)
+    if start is None:
+        return []
+
+    # Walk reflex runs, emitting one candidate cut per ~90° of accumulated
+    # turn. A single rolled-disk arc inserted by Minkowski erosion accumulates
+    # close to -π/2 over many vertices and produces one candidate. Two adjacent
+    # 90° corners (e.g. the two bottom corners of a rectangular notch on the
+    # raw polygon, where there is no zero-turn vertex between them) each
+    # accumulate -π/2 separately and produce two candidates.
+    corner_threshold = math.pi / 2 - 1e-3
+    candidates: list[tuple[float, float]] = []  # (x_cut, y_at_reflex)
+    i = 0
+    while i < n:
+        idx = (start + i) % n
+        if turns[idx] >= 0:
+            i += 1
+            continue
+        accum = 0.0
+        seg_xs: list[float] = []
+        seg_ys: list[float] = []
+        seg_weights: list[float] = []
+        j = i
+        while j < n:
+            jj = (start + j) % n
+            if turns[jj] >= 0:
+                break
+            accum += turns[jj]
+            seg_xs.append(ring[jj][0])
+            seg_ys.append(ring[jj][1])
+            seg_weights.append(abs(turns[jj]))
+            if -accum >= corner_threshold and sum(seg_weights) > 0:
+                w_sum = sum(seg_weights)
+                cx = sum(x * w for x, w in zip(seg_xs, seg_weights)) / w_sum
+                cy = sum(y * w for y, w in zip(seg_ys, seg_weights)) / w_sum
+                candidates.append((float(cx), float(cy)))
+                accum = 0.0
+                seg_xs = []
+                seg_ys = []
+                seg_weights = []
+            j += 1
+        if seg_weights and -accum >= min_reflex_angle_rad:
+            w_sum = sum(seg_weights)
+            cx = sum(x * w for x, w in zip(seg_xs, seg_weights)) / w_sum
+            cy = sum(y * w for y, w in zip(seg_ys, seg_weights)) / w_sum
+            candidates.append((float(cx), float(cy)))
+        i = j + 1
+
+    # Fragmenting filter: only keep candidates where the polygon's
+    # horizontal cross-section at (or just inside) the reflex y is split into
+    # multiple segments. This drops benign concavities like the L-shape's
+    # inner corner (cross-section stays one segment) while keeping notch
+    # corners (cross-section is two segments). Probe at a small offset on
+    # both sides of the reflex y to handle notches opening up or down.
+    height = max(bounds_maxy - bounds_miny, 1.0)
+    probe_eps = max(min(1e-2, height * 1e-3), 1e-4)
+    cuts: list[float] = []
+    for cx, cy in candidates:
+        if (
+            fragments_horizontal_swath_at(cy + probe_eps)
+            or fragments_horizontal_swath_at(cy - probe_eps)
+        ):
+            cuts.append(cx)
+
+    cuts.sort()
+    snapped: list[float] = []
+    for x in cuts:
+        if not snapped or x - snapped[-1] > 1e-3:
+            snapped.append(x)
+    return snapped
+
+
+# --------------------------------------------------------------------------------
 # Boustrophedon Cellular Decomposition (BCD)
 # --------------------------------------------------------------------------------
 
 
 def bcd_decompose(polygon: Polygon, stripe_angle_rad: float) -> list[Polygon]:
-    """Decompose a polygon with holes into hole-free cells aligned to the stripe direction.
+    """Decompose a polygon into hole-free cells aligned to the stripe direction.
 
-    Algorithm: rotate so stripes run along x, cut the polygon along vertical
-    strips through each hole's x-extents (and through every hole vertex's x
-    for robustness on non-convex holes), split into connected components,
-    rotate back. Every returned cell has no interior rings.
+    Algorithm: rotate so stripes run along x, collect cut x-coords from:
+      - each interior hole's x-extents (handles obstacles in the interior);
+      - each reflex outer-boundary vertex (P11; handles concave notches in the
+        outer boundary, e.g. when an eroded obstacle has merged with the eroded
+        outer boundary and the polygon is hole-free but notched).
+    Cut the polygon along thin vertical strips at every distinct x-coord,
+    split into connected components, rotate back. Every returned cell has no
+    interior rings.
 
-    A polygon with no holes is returned as a single cell unchanged.
+    A simply-convex polygon (no holes and no reflex outer vertices) is
+    returned unchanged as a single cell.
 
     >>> simple = Polygon([(0, 0), (10, 0), (10, 5), (0, 5)])
     >>> len(bcd_decompose(simple, 0.0))
@@ -226,21 +413,24 @@ def bcd_decompose(polygon: Polygon, stripe_angle_rad: float) -> list[Polygon]:
     [4.0, 4.0, 15.0, 15.0]
     >>> all(len(list(c.interiors)) == 0 for c in cells)
     True
+    >>> # Notched polygon (no interior hole). P11 splits at the notch x-extents.
+    >>> notched = Polygon([
+    ...     (0, 0), (16, 0), (16, 10), (6, 10),
+    ...     (6, 6), (2, 6), (2, 10), (0, 10),
+    ... ])
+    >>> cells = bcd_decompose(notched, 0.0)
+    >>> sorted(round(c.area, 2) for c in cells)  # 2*10 + 4*6 + 10*10 == 144
+    [20.0, 24.0, 100.0]
     """
-    if not list(polygon.interiors):
-        return [polygon]
-
     deg = math.degrees(stripe_angle_rad)
     rot = rotate(polygon, -deg, origin=(0, 0), use_radians=False)
     minx, miny, maxx, maxy = rot.bounds
     span_y = (maxy - miny) + 10.0
     strip_eps = 1e-6
 
-    # Cut only at each hole's x-extents (bounding box left/right). This guarantees
-    # full hole isolation for convex (and Minkowski-eroded near-circular) holes
-    # while avoiding the over-decomposition that would result from cutting at
-    # every interior hole vertex when the hole has many sampled boundary points.
-    # Non-convex holes that need internal splits are deferred to a future BCD v2.
+    # Cut at each hole's x-extents (bounding box left/right). Guarantees full
+    # hole isolation for convex (and Minkowski-eroded near-circular) holes.
+    # Non-convex holes that need internal splits are deferred to a future v2.
     cut_xs: set[float] = set()
     for hole in rot.interiors:
         coords = list(hole.coords)
@@ -248,9 +438,12 @@ def bcd_decompose(polygon: Polygon, stripe_angle_rad: float) -> list[Polygon]:
         cut_xs.add(min(xs))
         cut_xs.add(max(xs))
 
-    # Snap nearly-equal cuts together to avoid sliver cells. Use a wider snap
-    # tolerance so adjacent rounded-hole extremes from different holes do not
-    # accidentally generate twin cuts within a centimetre of each other.
+    # Cut at every reflex outer-boundary region (P11). One cut per region
+    # — a rolled-disk arc inserted at a concave corner by erosion is a single
+    # region, so it produces one cut at the |turn|-weighted centroid x.
+    for x in outer_reflex_xs(rot):
+        cut_xs.add(x)
+
     sorted_xs = sorted(cut_xs)
     snap_tol = 1e-3
     snapped: list[float] = []
