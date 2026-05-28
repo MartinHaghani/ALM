@@ -1,0 +1,33 @@
+{
+  "areas": [
+    {
+      "id": "example-obstacle-off-center-mow",
+      "properties": {
+        "name": "Example Lawn With Off-Center Obstacle",
+        "type": "mow"
+      },
+      "outline": [
+        {"x": 0.0, "y": 0.0},
+        {"x": 16.0, "y": 0.0},
+        {"x": 16.0, "y": 10.0},
+        {"x": 0.0, "y": 10.0},
+        {"x": 0.0, "y": 0.0}
+      ]
+    },
+    {
+      "id": "example-off-center-obstacle",
+      "properties": {
+        "name": "Off-Center Garden Bed",
+        "type": "obstacle"
+      },
+      "outline": [
+        {"x": 2.0, "y": 6.5},
+        {"x": 5.5, "y": 6.5},
+        {"x": 5.5, "y": 8.5},
+        {"x": 2.0, "y": 8.5},
+        {"x": 2.0, "y": 6.5}
+      ]
+    }
+  ],
+  "docking_stations": []
+}
