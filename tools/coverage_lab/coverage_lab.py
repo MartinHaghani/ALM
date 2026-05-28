@@ -16,6 +16,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+import lab_geometry
+
 
 LAB_DIR = pathlib.Path(__file__).resolve().parent
 REPO_DIR = LAB_DIR.parents[1]
@@ -728,6 +730,48 @@ def make_f2c_cells(lawn: Lawn, f2c: Any) -> Any:
     for hole in lawn.holes:
         cell.addRing(make_f2c_ring(hole.outline, f2c))
     return f2c.Cells(cell)
+
+
+def make_f2c_cells_from_polygon(polygon: Any, f2c: Any) -> Any:
+    """Build an F2C ``Cells`` from a shapely Polygon.
+
+    Used by P0/P1: footprint-disk erosion and BCD cells produce shapely
+    polygons that must be handed back to F2C for swath generation.
+    """
+    outer_ring = lab_geometry.polygon_outer_ring(polygon)
+    cell = f2c.Cell(make_f2c_ring(outer_ring, f2c))
+    for hole_ring in lab_geometry.polygon_holes(polygon):
+        cell.addRing(make_f2c_ring(hole_ring, f2c))
+    return f2c.Cells(cell)
+
+
+def swath_angle_from_swaths_json(swaths_json: list[dict[str, Any]]) -> float | None:
+    """Best-effort: extract the swath direction (radians) from F2C swath JSON.
+
+    Used so BCD can be aligned to F2C's automatically-chosen swath angle in
+    ``best_swath_length`` mode, before re-running F2C per cell with a fixed
+    angle.
+    """
+    for swath in swaths_json:
+        points = swath.get("points") or []
+        if len(points) < 2:
+            continue
+        a = points[0]
+        b = points[-1]
+        dx = float(b["x"]) - float(a["x"])
+        dy = float(b["y"]) - float(a["y"])
+        if math.hypot(dx, dy) > EPSILON:
+            return math.atan2(dy, dx)
+    return None
+
+
+def configured_swath_angle(config: dict[str, Any]) -> float | None:
+    """If the swath angle is fixed in config, return it (radians); else None."""
+    angle_cfg = config.get("fields2cover", {}).get("swath_angle", {}) or {}
+    mode = str(angle_cfg.get("mode", "best_swath_length")).lower()
+    if mode == "fixed":
+        return math.radians(float(angle_cfg.get("degrees", 0.0)))
+    return None
 
 
 def planner_turn(config: dict[str, Any], f2c: Any) -> Any:
@@ -2032,12 +2076,349 @@ def build_f2c_fill_path(
     )
 
 
+def build_transit_path(
+    *,
+    lawn: Lawn,
+    area_index: int,
+    label: str,
+    headland_outer_ring: list[tuple[float, float]],
+    from_pose: dict[str, Any],
+    to_pose: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Build a path that walks along the headland centreline from ``from_pose`` to ``to_pose``.
+
+    Used by P1: between two BCD cells, connect them by walking the eroded-lawn
+    boundary instead of attempting a direct turn. Poses are tagged
+    ``section='connector'`` and ``cutting_enabled=False`` so they are excluded
+    from coverage metrics.
+    """
+    sample_step = float(config["evaluation"].get("path_sample_step_m", 0.1))
+    offset = tool_center_offset(config)
+    start_xy = (float(from_pose["x"]), float(from_pose["y"]))
+    end_xy = (float(to_pose["x"]), float(to_pose["y"]))
+    walk = lab_geometry.walk_ring_between(headland_outer_ring, start_xy, end_xy)
+    if len(walk) < 2:
+        return None
+    # Bracket the walk with the exact endpoint poses so wheel-anchor turn metrics
+    # remain consistent.
+    base_poses = sample_polyline_tool_poses(
+        walk, "connector", sample_step, cutting_enabled=False
+    )
+    base_poses = poses_to_base_link(base_poses, offset)
+    # Re-tag and force connector semantics
+    for pose in base_poses:
+        pose["section"] = "connector"
+        pose["cutting_enabled"] = False
+        pose["transit"] = True
+    tool_poses = [tool_pose_from_base_pose(p, offset) for p in base_poses]
+    return make_path_record(
+        is_outline=False,
+        area_index=area_index,
+        lawn=lawn,
+        label=label,
+        frame_id=config.get("frame_id", "map"),
+        base_poses=base_poses,
+        tool_poses=tool_poses,
+    )
+
+
 def plan_one_lawn_profiles(lawn: Lawn, area_index: int, config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     try:
         import fields2cover as f2c
     except ImportError:
         die("Fields2Cover is not installed; run through tools/coverage_lab/bin/coverage_lab")
 
+    strategy = str(config.get("headland_strategy", "footprint_disk")).lower()
+    if strategy == "f2c":
+        return _plan_one_lawn_profiles_f2c(lawn, area_index, config, f2c)
+    return _plan_one_lawn_profiles_footprint_disk(lawn, area_index, config, f2c)
+
+
+def _plan_one_lawn_profiles_footprint_disk(
+    lawn: Lawn, area_index: int, config: dict[str, Any], f2c: Any
+) -> dict[str, dict[str, Any]]:
+    """P0+P1 implementation: footprint-disk eroded headland and BCD cell decomposition."""
+    warnings: list[str] = []
+    tool_width = float(config["tool_width"])
+    outline_count = int(config.get("outline_count", 0))
+    outline_offset = float(config.get("outline_offset", 0.0))
+    r_disk = lab_geometry.footprint_disk_radius(config)
+    cell_decomposition = bool(config.get("cell_decomposition", True))
+
+    base_debug: dict[str, Any] = {
+        "area_index": area_index,
+        "area_id": lawn.area.id,
+        "area_name": lawn.area.name,
+        "input_boundary": [{"x": x, "y": y} for x, y in lawn.area.outline],
+        "input_obstacles": [
+            {"id": h.id, "name": h.name, "points": [{"x": x, "y": y} for x, y in h.outline]}
+            for h in lawn.holes
+        ],
+        "headland_strategy": "footprint_disk",
+        "footprint_disk_radius_m": r_disk,
+        "outline_clearance_m": r_disk,
+        "headland_rings": [],
+        "mainland_rings": [],
+        "eroded_polygon_area_m2": 0.0,
+        "mainland_polygon_area_m2": 0.0,
+        "cells": [],
+        "transit_count": 0,
+        "transit_total_length_m": 0.0,
+        "swaths": [],
+        "tool_center_offset": list(tool_center_offset(config)),
+    }
+
+    hole_rings = [hole.outline for hole in lawn.holes]
+    eroded_polygons = lab_geometry.erode_lawn(lawn.area.outline, hole_rings, r_disk)
+    if not eroded_polygons:
+        warnings.append(
+            f"footprint-disk erosion (r={r_disk:.3f} m) left no drivable area in {lawn.area.name}; "
+            "lawn is too narrow for the configured footprint+safety margin"
+        )
+        result_profiles: dict[str, dict[str, Any]] = {}
+        for profile_name in [primary_profile_name(config)] + comparison_profile_names(config):
+            debug = copy.deepcopy(base_debug)
+            debug["profile"] = profile_name
+            result_profiles[profile_name] = {
+                "paths": [],
+                "debug_area": debug,
+                "warnings": list(warnings),
+            }
+        return result_profiles
+
+    base_debug["eroded_polygon_area_m2"] = sum(p.area for p in eroded_polygons)
+
+    # Build per-layer headland centrelines and record them in the same shape as the
+    # legacy F2C path, so build_headland_paths and rendering stay unchanged.
+    layer_centrelines: list[list] = []  # list[list[shapely Polygon]] per layer
+    layer_centrelines.append(eroded_polygons)
+    for layer_i in range(1, outline_count):
+        inner = []
+        for parent in eroded_polygons:
+            extra = lab_geometry.erode_lawn(
+                lab_geometry.polygon_outer_ring(parent),
+                lab_geometry.polygon_holes(parent),
+                layer_i * tool_width,
+            )
+            inner.extend(extra)
+        layer_centrelines.append(inner)
+
+    ring_index_counter = 0
+    if outline_count > 0:
+        for layer_i, polygons in enumerate(layer_centrelines):
+            centerline_offset = r_disk + layer_i * tool_width
+            for poly in polygons:
+                for spec in lab_geometry.polygon_to_ring_dicts(poly, layer_i, ring_index_counter, centerline_offset):
+                    base_debug["headland_rings"].append(spec)
+                    ring_index_counter += 1
+
+    # Mainland = drivable area after the headland passes.
+    mainland_inset = max(0.0, outline_count * tool_width - tool_width / 2.0 + outline_offset)
+    mainland_polygons: list = []
+    if mainland_inset <= EPSILON:
+        mainland_polygons = list(eroded_polygons)
+    else:
+        for parent in eroded_polygons:
+            mainland_polygons.extend(
+                lab_geometry.erode_lawn(
+                    lab_geometry.polygon_outer_ring(parent),
+                    lab_geometry.polygon_holes(parent),
+                    mainland_inset,
+                )
+            )
+    base_debug["mainland_polygon_area_m2"] = sum(p.area for p in mainland_polygons)
+    base_debug["mainland_rings"] = [
+        [{"x": x, "y": y} for x, y in lab_geometry.polygon_outer_ring(p)]
+        for p in mainland_polygons
+    ]
+
+    result_profiles = {}
+    profile_names = [primary_profile_name(config)] + comparison_profile_names(config)
+    for profile_name in profile_names:
+        debug = copy.deepcopy(base_debug)
+        debug["profile"] = profile_name
+        result_profiles[profile_name] = {
+            "paths": build_headland_paths(lawn, area_index, debug["headland_rings"], config),
+            "debug_area": debug,
+            "warnings": list(warnings),
+        }
+
+    if not mainland_polygons:
+        for profile_name in profile_names:
+            result_profiles[profile_name]["warnings"].append(
+                "footprint-disk erosion produced no mainland; lawn is too narrow for headland passes"
+            )
+        return result_profiles
+
+    # Decide swath angle. If configured fixed, use it directly. Otherwise run F2C
+    # swath generation once on the union mainland to pick the best angle, then
+    # use that fixed angle for per-cell planning.
+    fixed_angle = configured_swath_angle(config)
+    if fixed_angle is None:
+        try:
+            probe_cells = make_f2c_cells_from_polygon(mainland_polygons[0], f2c)
+            probe_swaths = generate_swaths(probe_cells, config, f2c)
+            fixed_angle = swath_angle_from_swaths_json(f2c_swaths_to_json(probe_swaths))
+        except Exception as exc:  # pragma: no cover - best-effort probe
+            warnings.append(f"Fields2Cover swath angle probe failed: {exc}; using 0 rad")
+            fixed_angle = 0.0
+        if fixed_angle is None:
+            fixed_angle = 0.0
+
+    # Decompose each mainland piece into hole-free BCD cells aligned to the swath angle.
+    sliver_area = max(tool_width * tool_width, 0.05)
+    all_cells: list = []
+    dropped_cell_area_m2 = 0.0
+    dropped_cell_count = 0
+    for mainland_polygon in mainland_polygons:
+        if cell_decomposition:
+            cells_here = lab_geometry.bcd_decompose(mainland_polygon, fixed_angle)
+        else:
+            cells_here = [mainland_polygon]
+        for cell in cells_here:
+            if cell.area < sliver_area:
+                dropped_cell_area_m2 += cell.area
+                dropped_cell_count += 1
+                continue
+            all_cells.append(cell)
+    for profile_name in profile_names:
+        result_profiles[profile_name]["debug_area"]["dropped_sliver_cell_count"] = dropped_cell_count
+        result_profiles[profile_name]["debug_area"]["dropped_sliver_cell_area_m2"] = dropped_cell_area_m2
+    cells_summary = [
+        {"index": i, "area_m2": float(c.area)} for i, c in enumerate(all_cells)
+    ]
+    for profile_name in profile_names:
+        result_profiles[profile_name]["debug_area"]["cells"] = copy.deepcopy(cells_summary)
+
+    # Run F2C swath gen + sort + zero-turn fill per cell, with a fixed swath angle
+    # so stripes are visually continuous across cells.
+    fixed_config = copy.deepcopy(config)
+    fixed_config.setdefault("fields2cover", {})
+    fixed_config["fields2cover"]["swath_angle"] = {
+        "mode": "fixed",
+        "degrees": math.degrees(fixed_angle),
+    }
+
+    primary = primary_profile_name(config)
+    cell_fill_paths: list[list[dict[str, Any]]] = []
+    cell_swaths_json_all: list[dict[str, Any]] = []
+    cell_fill_warnings: list[str] = []
+    swath_index_offset = 0
+    for cell_i, cell_polygon in enumerate(all_cells):
+        try:
+            cell_f2c = make_f2c_cells_from_polygon(cell_polygon, f2c)
+            cell_swaths = generate_swaths(cell_f2c, fixed_config, f2c)
+            try:
+                cell_swaths = sort_swaths(cell_swaths, fixed_config, f2c)
+            except TypeError as exc:
+                warnings.append(
+                    f"Fields2Cover swath ordering failed in cell {cell_i}; using generated order: {exc}"
+                )
+            cell_swaths_json = f2c_swaths_to_json(cell_swaths)
+            # Re-number swath indices so per-cell warnings carry global numbering.
+            for k, sw in enumerate(cell_swaths_json):
+                sw["index"] = swath_index_offset + k
+                sw["cell_index"] = cell_i
+            swath_index_offset += len(cell_swaths_json)
+            cell_swaths_json_all.extend(cell_swaths_json)
+        except Exception as exc:
+            warnings.append(f"Fields2Cover swath generation failed in cell {cell_i}: {exc}")
+            cell_fill_paths.append([])
+            continue
+
+        if not cell_swaths_json:
+            cell_fill_paths.append([])
+            continue
+        cell_paths, cell_warns = build_zero_turn_fill_paths(lawn, area_index, cell_swaths_json, config)
+        cell_fill_warnings.extend(
+            f"cell {cell_i}: {w}" for w in cell_warns
+        )
+        cell_fill_paths.append(cell_paths)
+
+    for profile_name in profile_names:
+        result_profiles[profile_name]["debug_area"]["swaths"] = copy.deepcopy(cell_swaths_json_all)
+
+    if not cell_swaths_json_all:
+        for profile_name in profile_names:
+            result_profiles[profile_name]["warnings"].append(
+                "footprint-disk planner produced no swaths across any cell"
+            )
+
+    # Pick a single headland outer ring for transit stitching: largest eroded polygon.
+    transit_ring: list[tuple[float, float]] = []
+    if eroded_polygons:
+        largest = max(eroded_polygons, key=lambda p: p.area)
+        transit_ring = lab_geometry.polygon_outer_ring(largest)
+
+    # Assemble primary path list: headland(s) + cell-1 fill + transit + cell-2 fill + ...
+    primary_paths = list(result_profiles[primary]["paths"])
+    last_terminal: dict[str, Any] | None = None
+    transit_count = 0
+    transit_length = 0.0
+    for cell_i, fill_paths in enumerate(cell_fill_paths):
+        if not fill_paths:
+            continue
+        first_pose = fill_paths[0]["path"]["poses"][0] if fill_paths[0]["path"]["poses"] else None
+        if last_terminal is not None and first_pose is not None and transit_ring:
+            transit = build_transit_path(
+                lawn=lawn,
+                area_index=area_index,
+                label=f"{lawn.area.name} transit {transit_count + 1}",
+                headland_outer_ring=transit_ring,
+                from_pose=last_terminal,
+                to_pose=first_pose,
+                config=config,
+            )
+            if transit is not None:
+                primary_paths.append(transit)
+                transit_count += 1
+                transit_length += pose_list_length(transit["path"]["poses"])
+        primary_paths.extend(fill_paths)
+        # Update terminal to the last pose of the last fill chunk for this cell
+        last_terminal = fill_paths[-1]["path"]["poses"][-1] if fill_paths[-1]["path"]["poses"] else last_terminal
+
+    result_profiles[primary]["paths"] = primary_paths
+    result_profiles[primary]["warnings"].extend(cell_fill_warnings)
+    for profile_name in profile_names:
+        result_profiles[profile_name]["debug_area"]["transit_count"] = transit_count
+        result_profiles[profile_name]["debug_area"]["transit_total_length_m"] = transit_length
+
+    # Comparison profile: keep using global F2C path planning on a fresh swath set
+    # built from the union mainland (so the f2c_tiny_radius comparison still shows
+    # F2C's built-in connector behaviour).
+    for profile_name in comparison_profile_names(config):
+        try:
+            union_cells = make_f2c_cells_from_polygon(mainland_polygons[0], f2c)
+            union_swaths = generate_swaths(union_cells, fixed_config, f2c)
+            try:
+                union_swaths = sort_swaths(union_swaths, fixed_config, f2c)
+            except TypeError:
+                pass
+            if union_swaths.size() == 0:
+                result_profiles[profile_name]["warnings"].append(
+                    "Fields2Cover produced no fill swaths for comparison profile"
+                )
+                continue
+            fill_path = build_f2c_fill_path(
+                lawn, area_index, union_swaths, profile_config(fixed_config, profile_name), f2c
+            )
+            if fill_path:
+                result_profiles[profile_name]["paths"].append(fill_path)
+            else:
+                result_profiles[profile_name]["warnings"].append(
+                    "Fields2Cover path planner produced no fill path"
+                )
+        except Exception as exc:
+            result_profiles[profile_name]["warnings"].append(f"Fields2Cover path planner failed: {exc}")
+
+    return result_profiles
+
+
+def _plan_one_lawn_profiles_f2c(
+    lawn: Lawn, area_index: int, config: dict[str, Any], f2c: Any
+) -> dict[str, dict[str, Any]]:
+    """Legacy F2C-headland strategy, kept for headland_strategy: f2c comparison."""
     warnings: list[str] = []
     cells = make_f2c_cells(lawn, f2c)
     const_hl = f2c.HG_Const_gen()
@@ -2060,6 +2441,7 @@ def plan_one_lawn_profiles(lawn: Lawn, area_index: int, config: dict[str, Any]) 
             {"id": h.id, "name": h.name, "points": [{"x": x, "y": y} for x, y in h.outline]}
             for h in lawn.holes
         ],
+        "headland_strategy": "f2c",
         "headland_width_m": headland_width,
         "outline_clearance_m": clearance,
         "headland_rings": [],
@@ -2492,6 +2874,36 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
         "coverage_percent": (100.0 * covered / mowable) if mowable else 0.0,
         "shoelace_mowable_area_m2": sum(polygon_area(lawn) for lawn in metric_lawns),
     }
+    # Aggregate per-area P0/P1 debug into top-level metrics
+    headland_metrics: dict[str, Any] = {
+        "strategy": "unknown",
+        "eroded_polygon_area_m2": 0.0,
+        "mainland_polygon_area_m2": 0.0,
+        "unsafe_footprint_samples": 0,
+    }
+    cells_metrics: dict[str, Any] = {"count": 0, "areas_m2": []}
+    transit_metrics: dict[str, Any] = {"count": 0, "total_length_m": 0.0}
+    seen_strategy: set[str] = set()
+    for area in debug.get("areas", []):
+        if not isinstance(area, dict):
+            continue
+        seen_strategy.add(str(area.get("headland_strategy", "unknown")))
+        headland_metrics["eroded_polygon_area_m2"] += float(area.get("eroded_polygon_area_m2", 0.0) or 0.0)
+        headland_metrics["mainland_polygon_area_m2"] += float(area.get("mainland_polygon_area_m2", 0.0) or 0.0)
+        for cell in area.get("cells", []) or []:
+            cells_metrics["count"] += 1
+            cells_metrics["areas_m2"].append(float(cell.get("area_m2", 0.0)))
+        transit_metrics["count"] += int(area.get("transit_count", 0) or 0)
+        transit_metrics["total_length_m"] += float(area.get("transit_total_length_m", 0.0) or 0.0)
+    if len(seen_strategy) == 1:
+        headland_metrics["strategy"] = next(iter(seen_strategy))
+    elif seen_strategy:
+        headland_metrics["strategy"] = "mixed"
+    # Headland-section unsafe sample count (independent from connector/turn/pivot)
+    unsafe_headland_samples = sum(
+        1 for s in unsafe_samples if s.get("section") == "headland"
+    )
+    headland_metrics["unsafe_footprint_samples"] = unsafe_headland_samples
     return {
         "schema": "open_mower.coverage_lab.metrics.v0",
         "profile": compat.get("profile", primary_profile_name(config)),
@@ -2556,6 +2968,9 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
             "unsafe_turn_samples": unsafe_turn_samples,
             "unsafe_samples": unsafe_samples,
         },
+        "headland": headland_metrics,
+        "cells": cells_metrics,
+        "transit": transit_metrics,
     }
 
 

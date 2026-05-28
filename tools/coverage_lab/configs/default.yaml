@@ -3,6 +3,17 @@
 frame_id: map
 tool_width: 0.4
 tool_center_offset: [0.41, 0.0]
+# headland_strategy:
+#   footprint_disk -- (default) erode the lawn by the safety-footprint
+#     circumscribed disk (P0). Guarantees footprint stays inside the lawn at
+#     every yaw on the headland centreline.
+#   f2c            -- legacy Fields2Cover polygon inset. Kept for comparison.
+headland_strategy: footprint_disk
+# cell_decomposition: true -- Boustrophedon Cellular Decomposition around
+#   obstacles (P1). When true, the planner splits the mainland into hole-free
+#   sub-regions before running F2C swath generation, and stitches them with
+#   explicit transit segments along the headland.
+cell_decomposition: true
 outline_count: 1
 outline_clearance_m: auto
 outline_offset: 0.0
