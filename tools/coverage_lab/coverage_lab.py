@@ -2797,7 +2797,23 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
                 obstacle_pose_samples += 1
 
     area_unit = sample_res * sample_res
-    swath_count = sum(len(area.get("swaths", [])) for area in debug.get("areas", []))
+    all_swaths = [sw for area in debug.get("areas", []) for sw in area.get("swaths", [])]
+    swath_count = len(all_swaths)
+    swath_length_total = sum(float(sw.get("length_m", 0.0)) for sw in all_swaths)
+    mean_swath_length = (swath_length_total / swath_count) if swath_count else 0.0
+    if all_swaths:
+        sorted_lengths = sorted(float(sw.get("length_m", 0.0)) for sw in all_swaths)
+        median_swath_length = sorted_lengths[len(sorted_lengths) // 2]
+        min_swath_length = sorted_lengths[0]
+        max_swath_length = sorted_lengths[-1]
+        short_swath_threshold = max(2.0 * float(config.get("tool_width", 0.4)), 1.0)
+        short_swath_count = sum(1 for ell in sorted_lengths if ell < short_swath_threshold)
+    else:
+        median_swath_length = 0.0
+        min_swath_length = 0.0
+        max_swath_length = 0.0
+        short_swath_count = 0
+        short_swath_threshold = 0.0
     headland_count = sum(1 for p in paths if p.get("is_outline"))
     connector_length = path_length(
         paths,
@@ -2914,6 +2930,15 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
         "obstacle_count": len(metric_obstacles),
         "map_obstacle_count": len(model.obstacles),
         "swath_count": swath_count,
+        "swath_length": {
+            "total_m": swath_length_total,
+            "mean_m": mean_swath_length,
+            "median_m": median_swath_length,
+            "min_m": min_swath_length,
+            "max_m": max_swath_length,
+            "short_threshold_m": short_swath_threshold,
+            "short_count": short_swath_count,
+        },
         "headland_path_count": headland_count,
         "path": {
             "total_length_m": total_length,

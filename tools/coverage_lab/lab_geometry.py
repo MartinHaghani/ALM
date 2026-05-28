@@ -40,7 +40,7 @@ __all__ = [
     "polygon_holes",
     "polygon_to_ring_dicts",
     "bcd_decompose",
-    "outer_reflex_xs",
+    "outer_reflex_ys",
     "ring_length",
     "walk_ring_between",
 ]
@@ -212,17 +212,22 @@ def polygon_to_ring_dicts(polygon: Polygon, layer: int, ring_index: int, centerl
 # --------------------------------------------------------------------------------
 
 
-def outer_reflex_xs(
+def outer_reflex_ys(
     polygon: Polygon,
     min_reflex_angle_rad: float = 0.35,
 ) -> list[float]:
-    """Return sorted x-coords for cutting at outer-boundary reflex regions
+    """Return sorted y-coords for cutting at outer-boundary reflex regions
     that *fragment* horizontal swaths.
+
+    Used by Y-sweep BCD: when stripes run along the x-axis, the perpendicular
+    sweep is along y, and cells are horizontal bands separated by horizontal
+    cuts at every y where the polygon's x-cross-section topology changes
+    (1 segment ↔ 2+ segments).
 
     A reflex region is a contiguous run of CCW outer-ring vertices whose
     cumulative signed turn angle is right-turning (into the polygon) by more
     than ``min_reflex_angle_rad`` total. Each such region produces a single
-    candidate x-coord — the |turn|-weighted centroid of the region — so a
+    candidate y-coord — the |turn|-weighted centroid of the region — so a
     rolled-disk arc inserted at a concave corner by Minkowski erosion is
     treated as one candidate, not one per arc vertex.
 
@@ -238,21 +243,22 @@ def outer_reflex_xs(
 
     >>> from shapely.geometry import Polygon
     >>> # Plain rectangle: no reflex vertices.
-    >>> outer_reflex_xs(Polygon([(0, 0), (10, 0), (10, 5), (0, 5)]))
+    >>> outer_reflex_ys(Polygon([(0, 0), (10, 0), (10, 5), (0, 5)]))
     []
     >>> # L-shape inner corner at (5, 4): reflex but does NOT fragment swaths.
     >>> # Horizontal swaths through y=4 are still one segment ([0, 12]).
     >>> L = Polygon([(0, 0), (12, 0), (12, 4), (5, 4), (5, 10), (0, 10)])
-    >>> outer_reflex_xs(L)
+    >>> outer_reflex_ys(L)
     []
-    >>> # Notched rectangle: notch corners fragment swaths in [6, 10] y range
-    >>> # into two segments [0, 2] U [6, 16].
+    >>> # Notched rectangle: notch corners (2,6) and (6,6) both sit at y=6;
+    >>> # horizontal swaths just above y=6 are split into [0,2] U [6,16], so
+    >>> # one fragmenting cut at y=6.
     >>> notched = Polygon([
     ...     (0, 0), (16, 0), (16, 10), (6, 10),
     ...     (6, 6), (2, 6), (2, 10), (0, 10),
     ... ])
-    >>> outer_reflex_xs(notched)
-    [2.0, 6.0]
+    >>> outer_reflex_ys(notched)
+    [6.0]
     """
     ring = list(polygon.exterior.coords)
     if ring and ring[0] == ring[-1]:
@@ -371,13 +377,13 @@ def outer_reflex_xs(
             fragments_horizontal_swath_at(cy + probe_eps)
             or fragments_horizontal_swath_at(cy - probe_eps)
         ):
-            cuts.append(cx)
+            cuts.append(cy)
 
     cuts.sort()
     snapped: list[float] = []
-    for x in cuts:
-        if not snapped or x - snapped[-1] > 1e-3:
-            snapped.append(x)
+    for y in cuts:
+        if not snapped or y - snapped[-1] > 1e-3:
+            snapped.append(y)
     return snapped
 
 
@@ -389,16 +395,21 @@ def outer_reflex_xs(
 def bcd_decompose(polygon: Polygon, stripe_angle_rad: float) -> list[Polygon]:
     """Decompose a polygon into hole-free cells aligned to the stripe direction.
 
-    Algorithm: rotate so stripes run along x, collect cut x-coords from:
-      - each interior hole's x-extents (handles obstacles in the interior);
-      - each reflex outer-boundary vertex (P11; handles concave notches in the
-        outer boundary, e.g. when an eroded obstacle has merged with the eroded
-        outer boundary and the polygon is hole-free but notched).
-    Cut the polygon along thin vertical strips at every distinct x-coord,
-    split into connected components, rotate back. Every returned cell has no
-    interior rings.
+    For stripes along x, the BCD sweep runs perpendicular (along y), so cells
+    are horizontal bands. Cuts are at every y where the polygon's horizontal
+    cross-section topology changes:
+      - interior-hole y-extents (top and bottom of every interior obstacle);
+      - outer-boundary reflex y-values where a concave region splits the
+        cross-section into multiple x-segments (P11, e.g. a notched outer
+        boundary after Minkowski erosion).
+    Horizontal bands give long full-width stripes wherever the polygon has no
+    obstacle blocking, and short sub-cell stripes only in y-bands where an
+    obstacle actually fragments the cross-section. This is the classical
+    Boustrophedon Cellular Decomposition direction; v1 of P1 mistakenly cut
+    along x (vertical columns), which fragmented every stripe that crossed
+    an obstacle's x-range and produced 3-4× the necessary stripe count.
 
-    A simply-convex polygon (no holes and no reflex outer vertices) is
+    A simply-convex polygon (no holes and no fragmenting reflex regions) is
     returned unchanged as a single cell.
 
     >>> simple = Polygon([(0, 0), (10, 0), (10, 5), (0, 5)])
@@ -409,54 +420,57 @@ def bcd_decompose(polygon: Polygon, stripe_angle_rad: float) -> list[Polygon]:
     ...     [[(3, 1), (3, 4), (7, 4), (7, 1)]],
     ... )
     >>> cells = bcd_decompose(with_hole, 0.0)
-    >>> sorted(round(c.area, 2) for c in cells)  # 3*5 + 4*1 + 4*1 + 3*5 == 38
-    [4.0, 4.0, 15.0, 15.0]
+    >>> # y-cuts at hole y-extents 1 and 4 produce: bottom band (10*1=10),
+    >>> # middle band split by hole into left (3*3=9) and right (3*3=9), and
+    >>> # top band (10*1=10).
+    >>> sorted(round(c.area, 2) for c in cells)
+    [9.0, 9.0, 10.0, 10.0]
     >>> all(len(list(c.interiors)) == 0 for c in cells)
     True
-    >>> # Notched polygon (no interior hole). P11 splits at the notch x-extents.
+    >>> # Notched polygon (no interior hole). P11 cuts at the notch's reflex y.
     >>> notched = Polygon([
     ...     (0, 0), (16, 0), (16, 10), (6, 10),
     ...     (6, 6), (2, 6), (2, 10), (0, 10),
     ... ])
     >>> cells = bcd_decompose(notched, 0.0)
-    >>> sorted(round(c.area, 2) for c in cells)  # 2*10 + 4*6 + 10*10 == 144
-    [20.0, 24.0, 100.0]
+    >>> # y-cut at y=6: bottom band (16*6=96) and the upper band split by the
+    >>> # notch into left (2*4=8) and right (10*4=40).
+    >>> sorted(round(c.area, 2) for c in cells)
+    [8.0, 40.0, 96.0]
     """
     deg = math.degrees(stripe_angle_rad)
     rot = rotate(polygon, -deg, origin=(0, 0), use_radians=False)
     minx, miny, maxx, maxy = rot.bounds
-    span_y = (maxy - miny) + 10.0
+    span_x = (maxx - minx) + 10.0
     strip_eps = 1e-6
 
-    # Cut at each hole's x-extents (bounding box left/right). Guarantees full
+    # Cut at each hole's y-extents (bounding box top/bottom). Guarantees full
     # hole isolation for convex (and Minkowski-eroded near-circular) holes.
-    # Non-convex holes that need internal splits are deferred to a future v2.
-    cut_xs: set[float] = set()
+    # Non-convex holes that need internal y-splits are deferred to a future v2.
+    cut_ys: set[float] = set()
     for hole in rot.interiors:
         coords = list(hole.coords)
-        xs = [c[0] for c in coords]
-        cut_xs.add(min(xs))
-        cut_xs.add(max(xs))
+        ys = [c[1] for c in coords]
+        cut_ys.add(min(ys))
+        cut_ys.add(max(ys))
 
-    # Cut at every reflex outer-boundary region (P11). One cut per region
-    # — a rolled-disk arc inserted at a concave corner by erosion is a single
-    # region, so it produces one cut at the |turn|-weighted centroid x.
-    for x in outer_reflex_xs(rot):
-        cut_xs.add(x)
+    # Cut at every reflex outer-boundary region (P11). One cut per region.
+    for y in outer_reflex_ys(rot):
+        cut_ys.add(y)
 
-    sorted_xs = sorted(cut_xs)
+    sorted_ys = sorted(cut_ys)
     snap_tol = 1e-3
     snapped: list[float] = []
-    for x in sorted_xs:
-        if not snapped or x - snapped[-1] > snap_tol:
-            snapped.append(x)
+    for y in sorted_ys:
+        if not snapped or y - snapped[-1] > snap_tol:
+            snapped.append(y)
 
     if not snapped:
         return [polygon]
 
     strips = [
-        box(x - strip_eps, miny - span_y, x + strip_eps, maxy + span_y)
-        for x in snapped
+        box(minx - span_x, y - strip_eps, maxx + span_x, y + strip_eps)
+        for y in snapped
     ]
     cut_union = unary_union(strips)
     split = rot.difference(cut_union)
