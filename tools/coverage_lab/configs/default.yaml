@@ -3,10 +3,38 @@
 frame_id: map
 tool_width: 0.4
 tool_center_offset: [0.41, 0.0]
-outline_count: 3
+outline_count: 1
+outline_clearance_m: auto
 outline_offset: 0.0
 drive_model: zero_turn
 pivot_yaw_step_degrees: 10
+wheel_track_m: 0.58
+wheel_contact_x_m: 0.0
+turn_planner: wheel_anchor
+turn_cutting_mode: "off"
+turn_reverse_enabled: true
+turn_forward_extent_spacing_factor: 1.0
+turn_anchor_pivot_min_degrees: 90
+turn_anchor_pivot_max_degrees: 180
+turn_anchor_angle_step_degrees: 2.5
+turn_anchor_target_tolerance_m: 0.03
+turn_anchor_refine_tolerance_m: 0.01
+turn_anchor_reverse_max_spacing_factor: 4.0
+turn_anchor_envelope_tolerance_m: 0.03
+turn_fallback_planners:
+  - forward_u_turn
+turn_lattice_step_m: 0.10
+turn_lattice_xy_resolution_m: 0.10
+turn_lattice_yaw_step_degrees: 15.0
+turn_lattice_pivot_step_degrees: 12.0
+turn_lattice_min_radius_m: 0.28
+turn_lattice_terminal_max_distance_m: 1.8
+turn_lattice_search_margin_m: 1.2
+turn_lattice_max_nodes: 6000
+turn_lattice_allow_pivots: true
+turn_lattice_pivot_cost_m_per_rad: 0.18
+turn_lattice_reverse_penalty: 0.10
+turn_lattice_switch_penalty_m: 0.04
 safety_margin_m: 0.05
 
 footprint:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import copy
 import datetime as dt
+import heapq
 import html
 import json
 import math
@@ -478,6 +479,22 @@ def tool_center_offset(config: dict[str, Any]) -> tuple[float, float]:
     return parse_xy_pair(config.get("tool_center_offset"), "tool_center_offset", (0.0, 0.0))
 
 
+def outline_clearance(config: dict[str, Any]) -> float:
+    raw = config.get("outline_clearance_m", "auto")
+    tool_width = float(config["tool_width"])
+    if raw is not None and str(raw).lower() != "auto":
+        return max(tool_width / 2.0, float(raw))
+
+    offset = tool_center_offset(config)
+    footprint = safety_footprint(config)
+    if len(footprint) < 3:
+        return tool_width / 2.0
+    return max(
+        tool_width / 2.0,
+        max(math.hypot(float(point[0]) - offset[0], float(point[1]) - offset[1]) for point in footprint),
+    )
+
+
 def rotate_xy(x: float, y: float, yaw: float) -> tuple[float, float]:
     c, s = math.cos(yaw), math.sin(yaw)
     return (c * x - s * y, s * x + c * y)
@@ -503,16 +520,76 @@ def tool_pose_from_base_pose(base_pose: dict[str, Any], offset: tuple[float, flo
     return pose
 
 
+def local_to_world_xy(pose: dict[str, Any], local_point: tuple[float, float]) -> tuple[float, float]:
+    dx, dy = rotate_xy(local_point[0], local_point[1], float(pose.get("yaw", 0.0)))
+    return (float(pose["x"]) + dx, float(pose["y"]) + dy)
+
+
+def world_to_local_xy(reference_pose: dict[str, Any], point: tuple[float, float]) -> tuple[float, float]:
+    yaw = float(reference_pose.get("yaw", 0.0))
+    dx = point[0] - float(reference_pose["x"])
+    dy = point[1] - float(reference_pose["y"])
+    c, s = math.cos(yaw), math.sin(yaw)
+    return (c * dx + s * dy, -s * dx + c * dy)
+
+
+def wheel_track_m(config: dict[str, Any]) -> float:
+    return max(EPSILON, float(config.get("wheel_track_m", 0.58)))
+
+
+def wheel_contact_x_m(config: dict[str, Any]) -> float:
+    return float(config.get("wheel_contact_x_m", 0.0))
+
+
+def wheel_local_point(config: dict[str, Any], side: str) -> tuple[float, float]:
+    half_track = wheel_track_m(config) / 2.0
+    return (wheel_contact_x_m(config), half_track if side == "left" else -half_track)
+
+
+def wheel_points_for_pose(pose: dict[str, Any], config: dict[str, Any]) -> dict[str, dict[str, float]]:
+    left = local_to_world_xy(pose, wheel_local_point(config, "left"))
+    right = local_to_world_xy(pose, wheel_local_point(config, "right"))
+    return {
+        "left": {"x": left[0], "y": left[1]},
+        "right": {"x": right[0], "y": right[1]},
+    }
+
+
+def pose_with_wheel_at(
+    anchor_point: tuple[float, float],
+    local_wheel_point: tuple[float, float],
+    yaw: float,
+) -> dict[str, float]:
+    dx, dy = rotate_xy(local_wheel_point[0], local_wheel_point[1], yaw)
+    return {
+        "x": anchor_point[0] - dx,
+        "y": anchor_point[1] - dy,
+        "yaw": normalize_angle(yaw),
+    }
+
+
 def sample_polyline_tool_poses(
     points: list[tuple[float, float]],
     section: str,
     sample_step: float,
     direction: str = "forward",
+    cutting_enabled: bool | None = None,
 ) -> list[dict[str, Any]]:
+    if cutting_enabled is None:
+        cutting_enabled = section in {"headland", "swath"}
     if not points:
         return []
     if len(points) == 1:
-        return [{"x": points[0][0], "y": points[0][1], "yaw": 0.0, "section": section, "direction": direction}]
+        return [
+            {
+                "x": points[0][0],
+                "y": points[0][1],
+                "yaw": 0.0,
+                "section": section,
+                "direction": direction,
+                "cutting_enabled": cutting_enabled,
+            }
+        ]
 
     poses: list[dict[str, Any]] = []
     step = sample_step if sample_step > EPSILON else float("inf")
@@ -533,10 +610,20 @@ def sample_polyline_tool_poses(
                     "yaw": yaw,
                     "section": section,
                     "direction": direction,
+                    "cutting_enabled": cutting_enabled,
                 }
             )
     if not poses:
-        poses.append({"x": points[0][0], "y": points[0][1], "yaw": 0.0, "section": section, "direction": direction})
+        poses.append(
+            {
+                "x": points[0][0],
+                "y": points[0][1],
+                "yaw": 0.0,
+                "section": section,
+                "direction": direction,
+                "cutting_enabled": cutting_enabled,
+            }
+        )
     return fill_missing_yaws(poses)
 
 
@@ -625,6 +712,7 @@ def f2c_path_to_poses(path: Any, f2c: Any) -> list[dict[str, Any]]:
                 "yaw": float(state.angle) if math.isfinite(float(state.angle)) else None,
                 "section": section,
                 "direction": direction,
+                "cutting_enabled": section == "swath",
                 "len": float(state.len),
             }
         )
@@ -742,10 +830,192 @@ def append_pose_pair(
     base_pose: dict[str, Any],
     tool_pose: dict[str, Any],
 ) -> None:
-    if base_poses and same_pose(base_poses[-1], base_pose):
+    if base_poses and same_pose(base_poses[-1], base_pose) and base_poses[-1].get("section") == base_pose.get("section"):
         return
     base_poses.append(base_pose)
     tool_poses.append(tool_pose)
+
+
+def pose_list_length(poses: list[dict[str, Any]]) -> float:
+    return sum(dist(pose_xy(a), pose_xy(b)) for a, b in zip(poses, poses[1:]))
+
+
+def pose_cutting_enabled(path: dict[str, Any], pose: dict[str, Any]) -> bool:
+    if "cutting_enabled" in pose:
+        return bool(pose["cutting_enabled"])
+    return bool(path.get("is_outline")) or pose.get("section") in {"headland", "swath"}
+
+
+def turn_cutting_enabled(config: dict[str, Any], direction: str) -> bool:
+    raw_mode = config.get("turn_cutting_mode", "off")
+    if isinstance(raw_mode, bool):
+        mode = "all" if raw_mode else "off"
+    else:
+        mode = str(raw_mode).lower()
+    if mode == "off":
+        return False
+    if mode == "forward_only":
+        return direction == "forward"
+    if mode == "all":
+        return True
+    die(f"unsupported turn_cutting_mode: {mode}")
+
+
+def footprint_is_safe_for_lawn(lawn: Lawn, corners: list[tuple[float, float]]) -> bool:
+    return all(point_in_lawn(corner, lawn) for corner in corners)
+
+
+def footprint_unsafe_sample_count_for_lawn(
+    lawn: Lawn,
+    poses: list[dict[str, Any]],
+    footprint: list[list[float]],
+) -> int:
+    return sum(1 for pose in poses if not footprint_is_safe_for_lawn(lawn, transform_footprint(pose, footprint)))
+
+
+def turn_unsafe_sample_count(lawn: Lawn, poses: list[dict[str, Any]], config: dict[str, Any]) -> int:
+    footprint = safety_footprint(config)
+    return footprint_unsafe_sample_count_for_lawn(lawn, poses, footprint)
+
+
+def ring_distance(point: tuple[float, float], ring: list[tuple[float, float]]) -> float:
+    if len(ring) < 2:
+        return float("inf")
+    return min(point_segment_distance(point, ring[i], ring[i + 1]) for i in range(len(ring) - 1))
+
+
+def footprint_clearance_m(lawn: Lawn, pose: dict[str, Any], footprint: list[list[float]]) -> float:
+    corners = transform_footprint(pose, footprint)
+    if not footprint_is_safe_for_lawn(lawn, corners):
+        return -1.0
+    clearances: list[float] = []
+    for corner in corners:
+        clearances.append(ring_distance(corner, lawn.area.outline))
+        clearances.extend(ring_distance(corner, hole.outline) for hole in lawn.holes)
+    return min(clearances) if clearances else 0.0
+
+
+def turn_min_clearance_m(lawn: Lawn, poses: list[dict[str, Any]], config: dict[str, Any]) -> float:
+    footprint = safety_footprint(config)
+    if not poses:
+        return 0.0
+    return min(footprint_clearance_m(lawn, pose, footprint) for pose in poses)
+
+
+def turn_reverse_length(start_pose: dict[str, Any], poses: list[dict[str, Any]]) -> float:
+    total = 0.0
+    all_poses = [start_pose] + poses
+    for a, b in zip(all_poses, all_poses[1:]):
+        if a.get("direction") == "backward" or b.get("direction") == "backward":
+            total += dist(pose_xy(a), pose_xy(b))
+    return total
+
+
+def yaw_motion(poses: list[dict[str, Any]]) -> float:
+    return sum(
+        abs(angle_delta(float(a.get("yaw", 0.0)), float(b.get("yaw", 0.0))))
+        for a, b in zip(poses, poses[1:])
+    )
+
+
+def pose_distance(a: dict[str, Any], b: dict[str, Any]) -> float:
+    return math.hypot(float(b["x"]) - float(a["x"]), float(b["y"]) - float(a["y"]))
+
+
+def turn_motion_cost(start_pose: dict[str, Any], poses: list[dict[str, Any]], config: dict[str, Any]) -> float:
+    all_poses = [start_pose] + poses
+    pivot_cost = float(config.get("turn_lattice_pivot_cost_m_per_rad", 0.18))
+    reverse_penalty = float(config.get("turn_lattice_reverse_penalty", 0.10))
+    switch_penalty = float(config.get("turn_lattice_switch_penalty_m", 0.04))
+    total = 0.0
+    previous_direction = start_pose.get("direction", "forward")
+    for a, b in zip(all_poses, all_poses[1:]):
+        length = pose_distance(a, b)
+        yaw = abs(angle_delta(float(a.get("yaw", 0.0)), float(b.get("yaw", 0.0))))
+        total += length
+        if length <= EPSILON:
+            total += yaw * pivot_cost
+        if b.get("direction") == "backward":
+            total += length * reverse_penalty
+        if previous_direction != b.get("direction") and b.get("direction") in {"forward", "backward"}:
+            total += switch_penalty
+        previous_direction = b.get("direction", previous_direction)
+    return total
+
+
+def mark_turn_pose(
+    pose: dict[str, Any],
+    *,
+    direction: str,
+    turn_planner: str,
+    primitive: str,
+    cutting_enabled: bool,
+) -> dict[str, Any]:
+    marked = dict(pose)
+    marked["section"] = "turn"
+    marked["direction"] = direction
+    marked["turn_planner"] = turn_planner
+    marked["turn_primitive"] = primitive
+    marked["cutting_enabled"] = cutting_enabled
+    return marked
+
+
+def map_point_payload(point: tuple[float, float] | None) -> dict[str, float] | None:
+    if point is None:
+        return None
+    return {"x": float(point[0]), "y": float(point[1])}
+
+
+def wheel_anchor_pose_metadata(
+    pose: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    direction: str,
+    phase: str,
+    maneuver_id: str,
+    turn_leg: int,
+    pivot_wheel: str | None,
+    anchor_point: tuple[float, float] | None,
+    target_anchor_point: tuple[float, float] | None,
+    target_wheel_error_m: float,
+    min_clearance_m: float,
+    reverse_distance_m: float,
+    pivot_angle_deg: float,
+) -> dict[str, Any]:
+    marked = mark_turn_pose(
+        pose,
+        direction=direction,
+        turn_planner="wheel_anchor",
+        primitive=phase,
+        cutting_enabled=turn_cutting_enabled(config, direction),
+    )
+    marked["maneuver_id"] = maneuver_id
+    marked["maneuver_type"] = "wheel_anchor_turn"
+    marked["phase"] = phase
+    marked["turn_leg"] = turn_leg
+    marked["pivot_wheel"] = pivot_wheel
+    marked["anchor_point"] = map_point_payload(anchor_point)
+    marked["target_anchor_point"] = map_point_payload(target_anchor_point)
+    marked["left_wheel"] = wheel_points_for_pose(marked, config)["left"]
+    marked["right_wheel"] = wheel_points_for_pose(marked, config)["right"]
+    marked["blade_enabled"] = marked["cutting_enabled"]
+    marked["target_wheel_error_m"] = target_wheel_error_m
+    marked["min_clearance_m"] = min_clearance_m
+    marked["reverse_distance_m"] = reverse_distance_m
+    marked["pivot_angle_deg"] = pivot_angle_deg
+    return marked
+
+
+def annotate_turn_legs(poses: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    leg = 0
+    previous: tuple[str, str] | None = None
+    for pose in poses:
+        current = (str(pose.get("direction", "")), str(pose.get("turn_primitive", "")))
+        if current != previous:
+            leg += 1
+            previous = current
+        pose["turn_leg"] = leg
+    return poses
 
 
 def sample_pivot_base_poses(base_pose: dict[str, Any], target_yaw: float, config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -762,6 +1032,7 @@ def sample_pivot_base_poses(base_pose: dict[str, Any], target_yaw: float, config
         pose["yaw"] = yaw
         pose["section"] = "pivot"
         pose["direction"] = "rotate"
+        pose["cutting_enabled"] = False
         poses.append(pose)
     return poses
 
@@ -797,6 +1068,821 @@ def sample_line_base_poses(
     return poses
 
 
+def sample_pivot_turn_poses(
+    start_pose: dict[str, Any],
+    target_yaw: float,
+    sample_step: float,
+    config: dict[str, Any],
+    turn_planner: str = "lattice",
+) -> list[dict[str, Any]]:
+    start_yaw = float(start_pose.get("yaw", 0.0))
+    delta = angle_delta(start_yaw, target_yaw)
+    if abs(delta) <= math.radians(1.0):
+        return []
+    yaw_step = math.radians(max(1.0, float(config.get("turn_lattice_pivot_step_degrees", 12.0))))
+    count = max(1, int(math.ceil(abs(delta) / yaw_step)))
+    poses: list[dict[str, Any]] = []
+    for i in range(1, count + 1):
+        yaw = normalize_angle(start_yaw + delta * i / count)
+        pose = dict(start_pose)
+        pose["yaw"] = yaw
+        poses.append(
+            mark_turn_pose(
+                pose,
+                direction="rotate",
+                turn_planner=turn_planner,
+                primitive="pivot",
+                cutting_enabled=False,
+            )
+        )
+    return poses
+
+
+def sample_straight_turn_poses(
+    start_pose: dict[str, Any],
+    end_xy: tuple[float, float],
+    yaw: float,
+    direction: str,
+    sample_step: float,
+    config: dict[str, Any],
+    turn_planner: str = "lattice",
+) -> list[dict[str, Any]]:
+    start_xy = pose_xy(start_pose)
+    length = dist(start_xy, end_xy)
+    if length <= EPSILON:
+        return []
+    step = sample_step if sample_step > EPSILON else length
+    count = max(1, int(math.ceil(length / step)))
+    cutting_enabled = turn_cutting_enabled(config, direction)
+    poses: list[dict[str, Any]] = []
+    for i in range(1, count + 1):
+        t = i / count
+        poses.append(
+            mark_turn_pose(
+                {
+                    "x": start_xy[0] + (end_xy[0] - start_xy[0]) * t,
+                    "y": start_xy[1] + (end_xy[1] - start_xy[1]) * t,
+                    "yaw": yaw,
+                },
+                direction=direction,
+                turn_planner=turn_planner,
+                primitive="straight",
+                cutting_enabled=cutting_enabled,
+            )
+        )
+    return poses
+
+
+def sample_arc_turn_poses(
+    start_pose: dict[str, Any],
+    direction: str,
+    curvature: float,
+    length: float,
+    sample_step: float,
+    config: dict[str, Any],
+    turn_planner: str = "lattice",
+) -> list[dict[str, Any]]:
+    if length <= EPSILON:
+        return []
+    step = sample_step if sample_step > EPSILON else length
+    count = max(1, int(math.ceil(length / step)))
+    ds = length / count
+    sign = 1.0 if direction == "forward" else -1.0
+    x, y = pose_xy(start_pose)
+    yaw = float(start_pose.get("yaw", 0.0))
+    cutting_enabled = turn_cutting_enabled(config, direction)
+    primitive = "straight" if abs(curvature) <= EPSILON else "arc"
+    poses: list[dict[str, Any]] = []
+    for _ in range(count):
+        signed_ds = sign * ds
+        dtheta = curvature * signed_ds
+        mid_yaw = yaw + dtheta / 2.0
+        x += math.cos(mid_yaw) * signed_ds
+        y += math.sin(mid_yaw) * signed_ds
+        yaw = normalize_angle(yaw + dtheta)
+        poses.append(
+            mark_turn_pose(
+                {"x": x, "y": y, "yaw": yaw},
+                direction=direction,
+                turn_planner=turn_planner,
+                primitive=primitive,
+                cutting_enabled=cutting_enabled,
+            )
+        )
+    return poses
+
+
+def sample_forward_u_turn_base_poses(
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    sample_step: float,
+    config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    start_yaw = float(start_pose.get("yaw", 0.0))
+    end_yaw = float(end_pose.get("yaw", start_yaw + math.pi))
+    p0 = (float(start_pose["x"]), float(start_pose["y"]))
+    p3 = (float(end_pose["x"]), float(end_pose["y"]))
+    delta = (p3[0] - p0[0], p3[1] - p0[1])
+    distance = math.hypot(delta[0], delta[1])
+    if distance <= EPSILON:
+        return sample_pivot_base_poses(start_pose, end_yaw, config)
+
+    start_heading = (math.cos(start_yaw), math.sin(start_yaw))
+    start_left = (-start_heading[1], start_heading[0])
+    longitudinal = start_heading[0] * delta[0] + start_heading[1] * delta[1]
+    lateral = start_left[0] * delta[0] + start_left[1] * delta[1]
+    stripe_spacing = abs(lateral)
+    spacing_basis = stripe_spacing if stripe_spacing > EPSILON else distance
+    extent_factor = max(0.0, float(config.get("turn_forward_extent_spacing_factor", 1.0)))
+    forward_extent = max(sample_step, spacing_basis * extent_factor)
+    approx_length = abs(lateral) * math.pi / 2.0 + abs(longitudinal) + 2.0 * forward_extent
+    step = sample_step if sample_step > EPSILON else approx_length
+    count = max(2, int(math.ceil(approx_length / step)))
+
+    poses: list[dict[str, Any]] = []
+    for i in range(1, count + 1):
+        t = i / count
+        theta = math.pi * t
+        smooth = 0.5 - 0.5 * math.cos(theta)
+        smooth_derivative = 0.5 * math.pi * math.sin(theta)
+        local_x = longitudinal * smooth + forward_extent * math.sin(theta)
+        local_y = lateral * smooth
+        local_dx = longitudinal * smooth_derivative + forward_extent * math.pi * math.cos(theta)
+        local_dy = lateral * smooth_derivative
+        x = p0[0] + start_heading[0] * local_x + start_left[0] * local_y
+        y = p0[1] + start_heading[1] * local_x + start_left[1] * local_y
+        dx = start_heading[0] * local_dx + start_left[0] * local_dy
+        dy = start_heading[1] * local_dx + start_left[1] * local_dy
+        yaw = math.atan2(dy, dx) if math.hypot(dx, dy) > EPSILON else start_yaw + angle_delta(start_yaw, end_yaw) * t
+        if i == count:
+            x, y, yaw = p3[0], p3[1], end_yaw
+        poses.append(
+            {
+                "x": x,
+                "y": y,
+                "yaw": normalize_angle(yaw),
+                "section": "turn",
+                "direction": "forward",
+                "turn_leg": 1,
+                "turn_planner": "forward_u_turn",
+                "cutting_enabled": turn_cutting_enabled(config, "forward"),
+                "stripe_spacing_m": spacing_basis,
+                "turn_forward_extent_m": forward_extent,
+            }
+        )
+    return poses
+
+
+def wheel_anchor_maneuver_id(
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    context: dict[str, Any] | None,
+) -> str:
+    if context:
+        area = context.get("area_index", "area")
+        start_swath = context.get("from_swath_index", "from")
+        end_swath = context.get("to_swath_index", "to")
+        return f"area-{area}-swath-{start_swath}-to-{end_swath}"
+    return (
+        "wheel-anchor-"
+        f"{float(start_pose['x']):.2f}-{float(start_pose['y']):.2f}-"
+        f"{float(end_pose['x']):.2f}-{float(end_pose['y']):.2f}"
+    )
+
+
+def turn_fallback_planners(config: dict[str, Any]) -> list[str]:
+    raw = config.get("turn_fallback_planners", ["forward_u_turn"])
+    if isinstance(raw, str):
+        return [raw.lower()]
+    if not isinstance(raw, list):
+        die("turn_fallback_planners must be a list or string")
+    return [str(item).lower() for item in raw]
+
+
+def turn_is_footprint_safe(lawn: Lawn, poses: list[dict[str, Any]], config: dict[str, Any]) -> bool:
+    physical = [[float(p[0]), float(p[1])] for p in (config.get("footprint") or [])]
+    return (
+        footprint_unsafe_sample_count_for_lawn(lawn, poses, physical) == 0
+        and turn_unsafe_sample_count(lawn, poses, config) == 0
+    )
+
+
+def outward_footprint_extent(
+    start_pose: dict[str, Any],
+    poses: list[dict[str, Any]],
+    footprint: list[list[float]],
+    outward_sign: float,
+) -> float:
+    extent = -float("inf")
+    for pose in poses:
+        for corner in transform_footprint(pose, footprint):
+            local_corner = world_to_local_xy(start_pose, corner)
+            extent = max(extent, outward_sign * local_corner[1])
+    return extent
+
+
+def sample_wheel_anchor_pivot_poses(
+    *,
+    anchor_point: tuple[float, float],
+    local_wheel_point: tuple[float, float],
+    start_yaw: float,
+    end_yaw: float,
+    config: dict[str, Any],
+    direction: str,
+    phase: str,
+    maneuver_id: str,
+    turn_leg: int,
+    pivot_wheel: str | None,
+    target_anchor_point: tuple[float, float] | None,
+    target_wheel_error_m: float,
+    min_clearance_m: float,
+    reverse_distance_m: float,
+    pivot_angle_deg: float,
+    forced_final_pose: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    delta = angle_delta(start_yaw, end_yaw)
+    if abs(delta) <= math.radians(0.1):
+        return []
+    yaw_step = math.radians(
+        max(1.0, float(config.get("turn_anchor_angle_sample_degrees", config.get("turn_anchor_angle_step_degrees", 2.5))))
+    )
+    count = max(1, int(math.ceil(abs(delta) / yaw_step)))
+    poses: list[dict[str, Any]] = []
+    for i in range(1, count + 1):
+        yaw = normalize_angle(start_yaw + delta * i / count)
+        pose = pose_with_wheel_at(anchor_point, local_wheel_point, yaw)
+        if forced_final_pose is not None and i == count:
+            pose = {
+                "x": float(forced_final_pose["x"]),
+                "y": float(forced_final_pose["y"]),
+                "yaw": normalize_angle(float(forced_final_pose.get("yaw", yaw))),
+            }
+        poses.append(
+            wheel_anchor_pose_metadata(
+                pose,
+                config,
+                direction=direction,
+                phase=phase,
+                maneuver_id=maneuver_id,
+                turn_leg=turn_leg,
+                pivot_wheel=pivot_wheel,
+                anchor_point=anchor_point,
+                target_anchor_point=target_anchor_point,
+                target_wheel_error_m=target_wheel_error_m,
+                min_clearance_m=min_clearance_m,
+                reverse_distance_m=reverse_distance_m,
+                pivot_angle_deg=pivot_angle_deg,
+            )
+        )
+    return poses
+
+
+def sample_wheel_anchor_reverse_poses(
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    sample_step: float,
+    config: dict[str, Any],
+    *,
+    maneuver_id: str,
+    turn_leg: int,
+    target_anchor_point: tuple[float, float],
+    target_wheel_error_m: float,
+    min_clearance_m: float,
+    reverse_distance_m: float,
+    pivot_angle_deg: float,
+) -> list[dict[str, Any]]:
+    length = pose_distance(start_pose, end_pose)
+    if length <= EPSILON:
+        return []
+    step = sample_step if sample_step > EPSILON else length
+    count = max(1, int(math.ceil(length / step)))
+    poses: list[dict[str, Any]] = []
+    yaw = normalize_angle(float(start_pose.get("yaw", 0.0)))
+    for i in range(1, count + 1):
+        t = i / count
+        pose = {
+            "x": float(start_pose["x"]) + (float(end_pose["x"]) - float(start_pose["x"])) * t,
+            "y": float(start_pose["y"]) + (float(end_pose["y"]) - float(start_pose["y"])) * t,
+            "yaw": yaw,
+        }
+        if i == count:
+            pose["x"] = float(end_pose["x"])
+            pose["y"] = float(end_pose["y"])
+        poses.append(
+            wheel_anchor_pose_metadata(
+                pose,
+                config,
+                direction="backward",
+                phase="reverse_anchor",
+                maneuver_id=maneuver_id,
+                turn_leg=turn_leg,
+                pivot_wheel=None,
+                anchor_point=None,
+                target_anchor_point=target_anchor_point,
+                target_wheel_error_m=target_wheel_error_m,
+                min_clearance_m=min_clearance_m,
+                reverse_distance_m=reverse_distance_m,
+                pivot_angle_deg=pivot_angle_deg,
+            )
+        )
+    return poses
+
+
+def wheel_anchor_candidate_geometry(
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    inside_side: str,
+    outside_side: str,
+    relative_yaw: float,
+) -> dict[str, Any]:
+    start_wheels = wheel_points_for_pose(start_pose, config)
+    end_wheels = wheel_points_for_pose(end_pose, config)
+    inside_anchor = (start_wheels[inside_side]["x"], start_wheels[inside_side]["y"])
+    outside_target = (end_wheels[outside_side]["x"], end_wheels[outside_side]["y"])
+    inside_local = wheel_local_point(config, inside_side)
+    outside_local = wheel_local_point(config, outside_side)
+    mid_yaw = normalize_angle(float(start_pose.get("yaw", 0.0)) + relative_yaw)
+    after_pivot = pose_with_wheel_at(inside_anchor, inside_local, mid_yaw)
+    outside_after_pivot = local_to_world_xy(after_pivot, outside_local)
+    heading = (math.cos(mid_yaw), math.sin(mid_yaw))
+    target_delta = (
+        outside_target[0] - outside_after_pivot[0],
+        outside_target[1] - outside_after_pivot[1],
+    )
+    reverse_distance = -(target_delta[0] * heading[0] + target_delta[1] * heading[1])
+    closest = (
+        outside_after_pivot[0] - heading[0] * reverse_distance,
+        outside_after_pivot[1] - heading[1] * reverse_distance,
+    )
+    target_error = dist(closest, outside_target)
+    reverse_end = {
+        "x": float(after_pivot["x"]) - heading[0] * reverse_distance,
+        "y": float(after_pivot["y"]) - heading[1] * reverse_distance,
+        "yaw": mid_yaw,
+    }
+    snapped_reverse_end = pose_with_wheel_at(outside_target, outside_local, mid_yaw)
+    return {
+        "inside_anchor": inside_anchor,
+        "outside_target": outside_target,
+        "inside_local": inside_local,
+        "outside_local": outside_local,
+        "mid_yaw": mid_yaw,
+        "relative_yaw": relative_yaw,
+        "after_pivot": after_pivot,
+        "reverse_end": reverse_end,
+        "snapped_reverse_end": snapped_reverse_end,
+        "reverse_distance": reverse_distance,
+        "target_error": target_error,
+    }
+
+
+def refine_wheel_anchor_relative_yaw(
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    config: dict[str, Any],
+    *,
+    inside_side: str,
+    outside_side: str,
+    relative_yaw: float,
+    step_rad: float,
+    min_rad: float,
+    max_rad: float,
+) -> float:
+    sign = 1.0 if relative_yaw >= 0.0 else -1.0
+    lo = max(min_rad, abs(relative_yaw) - step_rad)
+    hi = min(max_rad, abs(relative_yaw) + step_rad)
+    if hi <= lo + EPSILON:
+        return relative_yaw
+
+    def error_for(abs_value: float) -> float:
+        geometry = wheel_anchor_candidate_geometry(
+            start_pose,
+            end_pose,
+            config,
+            inside_side=inside_side,
+            outside_side=outside_side,
+            relative_yaw=sign * abs_value,
+        )
+        return float(geometry["target_error"])
+
+    for _ in range(18):
+        left = lo + (hi - lo) / 3.0
+        right = hi - (hi - lo) / 3.0
+        if error_for(left) <= error_for(right):
+            hi = right
+        else:
+            lo = left
+    return sign * ((lo + hi) / 2.0)
+
+
+def best_safe_wheel_anchor_turn(
+    lawn: Lawn,
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    sample_step: float,
+    config: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], str]:
+    start_yaw = normalize_angle(float(start_pose.get("yaw", 0.0)))
+    end_yaw = normalize_angle(float(end_pose.get("yaw", start_yaw + math.pi)))
+    start_heading = (math.cos(start_yaw), math.sin(start_yaw))
+    start_left = (-start_heading[1], start_heading[0])
+    delta_xy = (float(end_pose["x"]) - float(start_pose["x"]), float(end_pose["y"]) - float(start_pose["y"]))
+    lateral = start_left[0] * delta_xy[0] + start_left[1] * delta_xy[1]
+    spacing = abs(lateral) if abs(lateral) > EPSILON else max(sample_step, math.hypot(delta_xy[0], delta_xy[1]))
+    inside_side = "left" if lateral >= 0.0 else "right"
+    outside_side = "right" if inside_side == "left" else "left"
+    min_rad = math.radians(max(0.0, float(config.get("turn_anchor_pivot_min_degrees", 90.0))))
+    max_rad = math.radians(max(math.degrees(min_rad), float(config.get("turn_anchor_pivot_max_degrees", 180.0))))
+    step_rad = math.radians(max(0.25, float(config.get("turn_anchor_angle_step_degrees", 2.5))))
+    target_tolerance = max(0.0, float(config.get("turn_anchor_target_tolerance_m", 0.03)))
+    refine_tolerance = max(0.0, float(config.get("turn_anchor_refine_tolerance_m", 0.01)))
+    max_reverse = spacing * max(0.0, float(config.get("turn_anchor_reverse_max_spacing_factor", 4.0)))
+    envelope_tol = max(0.0, float(config.get("turn_anchor_envelope_tolerance_m", 0.03)))
+    maneuver_id = wheel_anchor_maneuver_id(start_pose, end_pose, context)
+    physical_footprint = [[float(p[0]), float(p[1])] for p in (config.get("footprint") or [])]
+    outward_sign = 1.0 if lateral >= 0.0 else -1.0
+    candidates: list[tuple[tuple[float, float, float, float, float], list[dict[str, Any]]]] = []
+    rejections: dict[str, int] = {}
+
+    def reject(reason: str) -> None:
+        rejections[reason] = rejections.get(reason, 0) + 1
+
+    angle_values: list[float] = []
+    count = max(1, int(math.ceil((max_rad - min_rad) / step_rad)))
+    for i in range(count + 1):
+        angle_values.append(min(max_rad, min_rad + i * step_rad))
+
+    tested: set[int] = set()
+    for sign in (-1.0, 1.0):
+        for angle in angle_values:
+            refined = refine_wheel_anchor_relative_yaw(
+                start_pose,
+                end_pose,
+                config,
+                inside_side=inside_side,
+                outside_side=outside_side,
+                relative_yaw=sign * angle,
+                step_rad=step_rad,
+                min_rad=min_rad,
+                max_rad=max_rad,
+            )
+            key = int(round(refined / math.radians(0.05)))
+            if key in tested:
+                continue
+            tested.add(key)
+            geometry = wheel_anchor_candidate_geometry(
+                start_pose,
+                end_pose,
+                config,
+                inside_side=inside_side,
+                outside_side=outside_side,
+                relative_yaw=refined,
+            )
+            reverse_distance = float(geometry["reverse_distance"])
+            target_error = float(geometry["target_error"])
+            if reverse_distance <= EPSILON:
+                reject("negative_reverse_distance")
+                continue
+            if reverse_distance > max_reverse + EPSILON:
+                reject("reverse_distance_limit")
+                continue
+            if target_error > target_tolerance + EPSILON:
+                reject("target_error")
+                continue
+
+            pivot_angle_deg = abs(math.degrees(refined))
+            min_clearance_placeholder = 0.0
+            phase1 = sample_wheel_anchor_pivot_poses(
+                anchor_point=geometry["inside_anchor"],
+                local_wheel_point=geometry["inside_local"],
+                start_yaw=start_yaw,
+                end_yaw=float(geometry["mid_yaw"]),
+                config=config,
+                direction="rotate",
+                phase="initial_pivot",
+                maneuver_id=maneuver_id,
+                turn_leg=1,
+                pivot_wheel=inside_side,
+                target_anchor_point=geometry["outside_target"],
+                target_wheel_error_m=target_error,
+                min_clearance_m=min_clearance_placeholder,
+                reverse_distance_m=reverse_distance,
+                pivot_angle_deg=pivot_angle_deg,
+            )
+            if not phase1:
+                reject("empty_initial_pivot")
+                continue
+
+            reverse_start = phase1[-1]
+            reverse_end = geometry["snapped_reverse_end"]
+            phase2 = sample_wheel_anchor_reverse_poses(
+                reverse_start,
+                reverse_end,
+                sample_step,
+                config,
+                maneuver_id=maneuver_id,
+                turn_leg=2,
+                target_anchor_point=geometry["outside_target"],
+                target_wheel_error_m=target_error,
+                min_clearance_m=min_clearance_placeholder,
+                reverse_distance_m=reverse_distance,
+                pivot_angle_deg=pivot_angle_deg,
+            )
+            if not phase2:
+                reject("empty_reverse")
+                continue
+
+            phase3 = sample_wheel_anchor_pivot_poses(
+                anchor_point=geometry["outside_target"],
+                local_wheel_point=geometry["outside_local"],
+                start_yaw=float(geometry["mid_yaw"]),
+                end_yaw=end_yaw,
+                config=config,
+                direction="rotate",
+                phase="final_straighten",
+                maneuver_id=maneuver_id,
+                turn_leg=3,
+                pivot_wheel=outside_side,
+                target_anchor_point=geometry["outside_target"],
+                target_wheel_error_m=target_error,
+                min_clearance_m=min_clearance_placeholder,
+                reverse_distance_m=reverse_distance,
+                pivot_angle_deg=pivot_angle_deg,
+                forced_final_pose=end_pose,
+            )
+            if not phase3:
+                phase3 = [
+                    wheel_anchor_pose_metadata(
+                        {
+                            "x": float(end_pose["x"]),
+                            "y": float(end_pose["y"]),
+                            "yaw": end_yaw,
+                        },
+                        config,
+                        direction="rotate",
+                        phase="final_straighten",
+                        maneuver_id=maneuver_id,
+                        turn_leg=3,
+                        pivot_wheel=outside_side,
+                        anchor_point=geometry["outside_target"],
+                        target_anchor_point=geometry["outside_target"],
+                        target_wheel_error_m=target_error,
+                        min_clearance_m=min_clearance_placeholder,
+                        reverse_distance_m=reverse_distance,
+                        pivot_angle_deg=pivot_angle_deg,
+                    )
+                ]
+
+            poses = phase1 + phase2 + phase3
+            if not same_pose(poses[-1], end_pose):
+                reject("final_pose_mismatch")
+                continue
+            if not turn_is_footprint_safe(lawn, poses, config):
+                reject("unsafe_footprint")
+                continue
+            initial_extent = outward_footprint_extent(start_pose, [start_pose] + phase1, physical_footprint, outward_sign)
+            later_extent = outward_footprint_extent(start_pose, phase2 + phase3, physical_footprint, outward_sign)
+            if later_extent > initial_extent + envelope_tol:
+                reject("outward_envelope")
+                continue
+
+            min_clearance = turn_min_clearance_m(lawn, poses, config)
+            for pose in poses:
+                pose["min_clearance_m"] = min_clearance
+                pose["target_wheel_error_m"] = target_error
+                pose["reverse_distance_m"] = reverse_distance
+                pose["pivot_angle_deg"] = pivot_angle_deg
+            score = (
+                -min_clearance,
+                pose_list_length([start_pose] + poses),
+                reverse_distance,
+                max(0.0, pivot_angle_deg - math.degrees(min_rad)),
+                target_error,
+            )
+            candidates.append((score, poses))
+
+    if not candidates:
+        reason = ", ".join(f"{key}={value}" for key, value in sorted(rejections.items())) or "no candidate samples"
+        return [], (
+            f"no footprint-safe wheel-anchor turn from {inside_side} pivot to {outside_side} target "
+            f"(spacing {spacing:.2f} m, wheel track {wheel_track_m(config):.2f} m; {reason})"
+        )
+
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1], ""
+
+
+def lattice_local_xy(start_pose: dict[str, Any], pose: dict[str, Any]) -> tuple[float, float]:
+    start_yaw = float(start_pose.get("yaw", 0.0))
+    dx = float(pose["x"]) - float(start_pose["x"])
+    dy = float(pose["y"]) - float(start_pose["y"])
+    c, s = math.cos(start_yaw), math.sin(start_yaw)
+    return (c * dx + s * dy, -s * dx + c * dy)
+
+
+def lattice_key(start_pose: dict[str, Any], pose: dict[str, Any], xy_res: float, yaw_res: float) -> tuple[int, int, int]:
+    lx, ly = lattice_local_xy(start_pose, pose)
+    yaw = angle_delta(float(start_pose.get("yaw", 0.0)), float(pose.get("yaw", 0.0)))
+    return (
+        int(round(lx / xy_res)),
+        int(round(ly / xy_res)),
+        int(round(yaw / yaw_res)),
+    )
+
+
+def lattice_in_bounds(
+    start_pose: dict[str, Any],
+    pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    margin: float,
+) -> bool:
+    x, y = lattice_local_xy(start_pose, pose)
+    gx, gy = lattice_local_xy(start_pose, end_pose)
+    return (
+        min(0.0, gx) - margin <= x <= max(0.0, gx) + margin
+        and min(0.0, gy) - margin <= y <= max(0.0, gy) + margin
+    )
+
+
+def terminal_lattice_connection(
+    lawn: Lawn,
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    sample_step: float,
+    config: dict[str, Any],
+) -> list[dict[str, Any]] | None:
+    start_xy = pose_xy(start_pose)
+    end_xy = pose_xy(end_pose)
+    dx, dy = end_xy[0] - start_xy[0], end_xy[1] - start_xy[1]
+    distance = math.hypot(dx, dy)
+    directions = ["forward"]
+    if bool(config.get("turn_reverse_enabled", True)):
+        directions.append("backward")
+    candidates: list[tuple[float, list[dict[str, Any]]]] = []
+
+    if distance <= max(EPSILON, sample_step * 0.25):
+        poses = sample_pivot_turn_poses(start_pose, float(end_pose.get("yaw", 0.0)), sample_step, config)
+        if poses and turn_unsafe_sample_count(lawn, poses, config) == 0:
+            candidates.append((turn_motion_cost(start_pose, poses, config), poses))
+    else:
+        direct_heading = math.atan2(dy, dx)
+        max_terminal_distance = max(
+            sample_step,
+            float(config.get("turn_lattice_terminal_max_distance_m", 1.8)),
+        )
+        if distance <= max_terminal_distance:
+            for direction in directions:
+                travel_yaw = direct_heading if direction == "forward" else normalize_angle(direct_heading + math.pi)
+                poses: list[dict[str, Any]] = []
+                current = start_pose
+                poses.extend(sample_pivot_turn_poses(current, travel_yaw, sample_step, config))
+                if poses:
+                    current = poses[-1]
+                poses.extend(sample_straight_turn_poses(current, end_xy, travel_yaw, direction, sample_step, config))
+                if poses:
+                    current = poses[-1]
+                poses.extend(sample_pivot_turn_poses(current, float(end_pose.get("yaw", travel_yaw)), sample_step, config))
+                if poses and turn_unsafe_sample_count(lawn, poses, config) == 0:
+                    candidates.append((turn_motion_cost(start_pose, poses, config), poses))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return annotate_turn_legs(candidates[0][1])
+
+
+def best_safe_lattice_turn(
+    lawn: Lawn,
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    sample_step: float,
+    config: dict[str, Any],
+) -> tuple[list[dict[str, Any]], int]:
+    xy_res = max(sample_step, float(config.get("turn_lattice_xy_resolution_m", sample_step)))
+    yaw_res = math.radians(max(5.0, float(config.get("turn_lattice_yaw_step_degrees", 15.0))))
+    primitive_step = max(sample_step, float(config.get("turn_lattice_step_m", max(0.16, sample_step))))
+    max_nodes = max(1, int(config.get("turn_lattice_max_nodes", 6000)))
+    search_margin = max(0.75, float(config.get("turn_lattice_search_margin_m", 1.2)))
+    pivot_step = math.radians(max(5.0, float(config.get("turn_lattice_pivot_step_degrees", 15.0))))
+    reverse_enabled = bool(config.get("turn_reverse_enabled", True))
+    min_radius = max(0.12, float(config.get("turn_lattice_min_radius_m", 0.28)))
+    radii = [min_radius, min_radius * 1.75, min_radius * 2.75]
+    curvatures = [0.0]
+    for radius in radii:
+        curvatures.extend([1.0 / radius, -1.0 / radius])
+    directions = ["forward"] + (["backward"] if reverse_enabled else [])
+    pivot_enabled = bool(config.get("turn_lattice_allow_pivots", True))
+    pivot_cost = float(config.get("turn_lattice_pivot_cost_m_per_rad", 0.18))
+
+    best_path = terminal_lattice_connection(lawn, start_pose, end_pose, sample_step, config)
+    best_cost = turn_motion_cost(start_pose, best_path, config) if best_path else float("inf")
+
+    def heuristic(pose: dict[str, Any]) -> float:
+        return (
+            pose_distance(pose, end_pose)
+            + abs(angle_delta(float(pose.get("yaw", 0.0)), float(end_pose.get("yaw", 0.0)))) * pivot_cost
+        )
+
+    queue: list[tuple[float, int, float, dict[str, Any], list[dict[str, Any]]]] = []
+    counter = 0
+    start_key = lattice_key(start_pose, start_pose, xy_res, yaw_res)
+    best_cost_by_key: dict[tuple[int, int, int], float] = {start_key: 0.0}
+    heapq.heappush(queue, (heuristic(start_pose), counter, 0.0, dict(start_pose), []))
+    nodes_expanded = 0
+
+    while queue and nodes_expanded < max_nodes:
+        priority, _, cost_so_far, pose, path_so_far = heapq.heappop(queue)
+        key = lattice_key(start_pose, pose, xy_res, yaw_res)
+        if cost_so_far > best_cost_by_key.get(key, float("inf")) + EPSILON:
+            continue
+        if priority > best_cost + EPSILON:
+            break
+        nodes_expanded += 1
+
+        terminal = terminal_lattice_connection(lawn, pose, end_pose, sample_step, config)
+        if terminal:
+            candidate = path_so_far + terminal
+            candidate_cost = cost_so_far + turn_motion_cost(pose, terminal, config)
+            if candidate_cost < best_cost:
+                best_cost = candidate_cost
+                best_path = candidate
+
+        primitives: list[list[dict[str, Any]]] = []
+        if pivot_enabled:
+            primitives.append(sample_pivot_turn_poses(pose, normalize_angle(float(pose.get("yaw", 0.0)) + pivot_step), sample_step, config))
+            primitives.append(sample_pivot_turn_poses(pose, normalize_angle(float(pose.get("yaw", 0.0)) - pivot_step), sample_step, config))
+        for direction in directions:
+            for curvature in curvatures:
+                primitives.append(sample_arc_turn_poses(pose, direction, curvature, primitive_step, sample_step, config))
+
+        for primitive in primitives:
+            if not primitive:
+                continue
+            next_pose = primitive[-1]
+            if not lattice_in_bounds(start_pose, next_pose, end_pose, search_margin):
+                continue
+            if turn_unsafe_sample_count(lawn, primitive, config):
+                continue
+            next_key = lattice_key(start_pose, next_pose, xy_res, yaw_res)
+            primitive_cost = turn_motion_cost(pose, primitive, config)
+            next_cost = cost_so_far + primitive_cost
+            if next_cost + EPSILON >= best_cost_by_key.get(next_key, float("inf")):
+                continue
+            best_cost_by_key[next_key] = next_cost
+            counter += 1
+            heapq.heappush(
+                queue,
+                (next_cost + heuristic(next_pose), counter, next_cost, next_pose, path_so_far + primitive),
+            )
+
+    if not best_path:
+        return [], nodes_expanded
+    annotated = annotate_turn_legs(best_path)
+    for pose in annotated:
+        pose["turn_lattice_nodes_expanded"] = nodes_expanded
+    return annotated, nodes_expanded
+
+
+def plan_swath_turn_base_poses(
+    lawn: Lawn,
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    sample_step: float,
+    config: dict[str, Any],
+    context: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    planner = str(config.get("turn_planner", "wheel_anchor")).lower()
+    if planner not in {"wheel_anchor", "lattice", "three_point", "forward_u_turn", "u_turn", "sampled_u_turn"}:
+        die(f"unsupported turn_planner: {planner}")
+
+    notes: list[str] = []
+    if planner == "wheel_anchor":
+        poses, note = best_safe_wheel_anchor_turn(lawn, start_pose, end_pose, sample_step, config, context)
+        if poses:
+            return poses, None
+        notes.append(note)
+    elif planner in {"lattice", "three_point"}:
+        poses, attempted = best_safe_lattice_turn(lawn, start_pose, end_pose, sample_step, config)
+        if poses:
+            return poses, None
+        notes.append(f"no footprint-safe lattice maneuver after expanding {attempted} nodes")
+    else:
+        notes.append(f"{planner} turn planner selected")
+
+    if planner in {"forward_u_turn", "u_turn", "sampled_u_turn"} or "forward_u_turn" in turn_fallback_planners(config):
+        fallback = sample_forward_u_turn_base_poses(start_pose, end_pose, sample_step, config)
+        if fallback and same_pose(fallback[-1], end_pose) and turn_is_footprint_safe(lawn, fallback, config):
+            for pose in fallback:
+                pose["turn_fallback_reason"] = "; ".join(note for note in notes if note)
+            return fallback, f"{'; '.join(note for note in notes if note)}; using footprint-safe forward U-turn fallback"
+        notes.append("no footprint-safe forward U-turn fallback")
+
+    return [], "; ".join(note for note in notes if note) or "no footprint-safe turn"
+
+
 def build_headland_paths(
     lawn: Lawn,
     area_index: int,
@@ -824,18 +1910,43 @@ def build_headland_paths(
     return paths
 
 
-def build_zero_turn_fill_path(
+def build_zero_turn_fill_paths(
     lawn: Lawn,
     area_index: int,
     swaths_json: list[dict[str, Any]],
     config: dict[str, Any],
-) -> dict[str, Any] | None:
+) -> tuple[list[dict[str, Any]], list[str]]:
     offset = tool_center_offset(config)
     sample_step = float(config["evaluation"].get("path_sample_step_m", 0.1))
+    paths: list[dict[str, Any]] = []
+    warnings: list[str] = []
     base_poses: list[dict[str, Any]] = []
     tool_poses: list[dict[str, Any]] = []
+    chunk_index = 1
 
+    def finish_current() -> None:
+        nonlocal base_poses, tool_poses, chunk_index
+        if not base_poses:
+            return
+        suffix = "" if chunk_index == 1 and not paths else f" {chunk_index}"
+        paths.append(
+            make_path_record(
+                is_outline=False,
+                area_index=area_index,
+                lawn=lawn,
+                label=f"{lawn.area.name} fill{suffix}",
+                frame_id=config.get("frame_id", "map"),
+                base_poses=base_poses,
+                tool_poses=tool_poses,
+            )
+        )
+        base_poses = []
+        tool_poses = []
+        chunk_index += 1
+
+    previous_swath_index: int | None = None
     for swath in swaths_json:
+        swath_index = int(swath.get("index", len(paths)))
         swath_points = [(p["x"], p["y"]) for p in swath.get("points", [])]
         swath_tool_poses = sample_polyline_tool_poses(swath_points, "swath", sample_step)
         if not swath_tool_poses:
@@ -845,47 +1956,41 @@ def build_zero_turn_fill_path(
         if not base_poses:
             for base_pose, tool_pose in zip(swath_base_poses, swath_tool_poses):
                 append_pose_pair(base_poses, tool_poses, base_pose, tool_pose)
+            previous_swath_index = swath_index
             continue
 
-        current = base_poses[-1]
-        target = swath_base_poses[0]
-        connector_len = math.hypot(float(target["x"]) - float(current["x"]), float(target["y"]) - float(current["y"]))
-        connector_yaw = (
-            math.atan2(float(target["y"]) - float(current["y"]), float(target["x"]) - float(current["x"]))
-            if connector_len > EPSILON
-            else float(target.get("yaw", current.get("yaw", 0.0)))
+        turn_poses, turn_warning = plan_swath_turn_base_poses(
+            lawn,
+            base_poses[-1],
+            swath_base_poses[0],
+            sample_step,
+            config,
+            {
+                "area_index": area_index,
+                "from_swath_index": previous_swath_index,
+                "to_swath_index": swath_index,
+            },
         )
+        if turn_warning:
+            warnings.append(
+                f"swath {previous_swath_index} to {swath_index}: {turn_warning}"
+            )
+        if not turn_poses:
+            finish_current()
+            for base_pose, tool_pose in zip(swath_base_poses, swath_tool_poses):
+                append_pose_pair(base_poses, tool_poses, base_pose, tool_pose)
+            previous_swath_index = swath_index
+            continue
 
-        for base_pose in sample_pivot_base_poses(current, connector_yaw, config):
-            append_pose_pair(base_poses, tool_poses, base_pose, tool_pose_from_base_pose(base_pose, offset))
-
-        pivoted_current = dict(base_poses[-1])
-        pivoted_current["yaw"] = connector_yaw
-        for base_pose in sample_line_base_poses(pivoted_current, target, connector_yaw, sample_step, "connector"):
-            append_pose_pair(base_poses, tool_poses, base_pose, tool_pose_from_base_pose(base_pose, offset))
-
-        at_target = dict(base_poses[-1])
-        at_target["x"] = target["x"]
-        at_target["y"] = target["y"]
-        at_target["yaw"] = connector_yaw
-        for base_pose in sample_pivot_base_poses(at_target, float(target.get("yaw", connector_yaw)), config):
+        for base_pose in turn_poses:
             append_pose_pair(base_poses, tool_poses, base_pose, tool_pose_from_base_pose(base_pose, offset))
 
         for base_pose, tool_pose in zip(swath_base_poses, swath_tool_poses):
             append_pose_pair(base_poses, tool_poses, base_pose, tool_pose)
+        previous_swath_index = swath_index
 
-    if not base_poses:
-        return None
-
-    return make_path_record(
-        is_outline=False,
-        area_index=area_index,
-        lawn=lawn,
-        label=f"{lawn.area.name} fill",
-        frame_id=config.get("frame_id", "map"),
-        base_poses=base_poses,
-        tool_poses=tool_poses,
-    )
+    finish_current()
+    return paths, warnings
 
 
 def robot_for_config(config: dict[str, Any], f2c: Any) -> Any:
@@ -939,7 +2044,12 @@ def plan_one_lawn_profiles(lawn: Lawn, area_index: int, config: dict[str, Any]) 
     tool_width = float(config["tool_width"])
     outline_count = int(config.get("outline_count", 0))
     outline_offset = float(config.get("outline_offset", 0.0))
-    headland_width = max(0.0, outline_count * tool_width + outline_offset)
+    clearance = outline_clearance(config)
+    headland_width = (
+        max(0.0, clearance + (outline_count - 0.5) * tool_width + outline_offset)
+        if outline_count > 0
+        else max(0.0, outline_offset)
+    )
 
     base_debug: dict[str, Any] = {
         "area_index": area_index,
@@ -951,6 +2061,7 @@ def plan_one_lawn_profiles(lawn: Lawn, area_index: int, config: dict[str, Any]) 
             for h in lawn.holes
         ],
         "headland_width_m": headland_width,
+        "outline_clearance_m": clearance,
         "headland_rings": [],
         "mainland_rings": [],
         "swaths": [],
@@ -958,20 +2069,28 @@ def plan_one_lawn_profiles(lawn: Lawn, area_index: int, config: dict[str, Any]) 
     }
 
     if outline_count > 0:
-        try:
-            headland_layers = const_hl.generateHeadlandSwaths(cells, tool_width, outline_count, True)
-            for layer_i in range(len(headland_layers)):
-                layer_rings = f2c_cells_rings(headland_layers[layer_i])
+        for layer_i in range(outline_count):
+            centerline_offset = clearance + layer_i * tool_width
+            try:
+                headland_cells = const_hl.generateHeadlands(cells, centerline_offset)
+                layer_rings = f2c_cells_rings(headland_cells)
+                if not layer_rings:
+                    warnings.append(
+                        f"Fields2Cover produced no headland ring at {centerline_offset:.3f} m inset"
+                    )
                 for ring_i, ring in enumerate(layer_rings):
                     base_debug["headland_rings"].append(
                         {
                             "layer": layer_i,
                             "ring": ring_i,
+                            "centerline_offset_m": centerline_offset,
                             "points": [{"x": x, "y": y} for x, y in ring],
                         }
                     )
-        except Exception as exc:
-            warnings.append(f"Fields2Cover headland swath generation failed: {exc}")
+            except Exception as exc:
+                warnings.append(
+                    f"Fields2Cover headland ring generation failed at {centerline_offset:.3f} m inset: {exc}"
+                )
 
     try:
         mainland = const_hl.generateHeadlands(cells, headland_width) if headland_width > 0.0 else cells
@@ -1017,9 +2136,10 @@ def plan_one_lawn_profiles(lawn: Lawn, area_index: int, config: dict[str, Any]) 
         return result_profiles
 
     primary = primary_profile_name(config)
-    fill_path = build_zero_turn_fill_path(lawn, area_index, swaths_json, config)
-    if fill_path:
-        result_profiles[primary]["paths"].append(fill_path)
+    fill_paths, fill_warnings = build_zero_turn_fill_paths(lawn, area_index, swaths_json, config)
+    result_profiles[primary]["warnings"].extend(fill_warnings)
+    if fill_paths:
+        result_profiles[primary]["paths"].extend(fill_paths)
     else:
         result_profiles[primary]["warnings"].append("zero-turn planner produced no fill path")
 
@@ -1048,8 +2168,7 @@ def path_poses(path: dict[str, Any], source: str = "base") -> list[dict[str, Any
 
 
 def is_coverage_section(path: dict[str, Any], a: dict[str, Any], b: dict[str, Any]) -> bool:
-    coverage_sections = {"headland", "swath"}
-    return path.get("is_outline") or (a.get("section") in coverage_sections and b.get("section") in coverage_sections)
+    return pose_cutting_enabled(path, a) and pose_cutting_enabled(path, b)
 
 
 def iter_pose_segments(
@@ -1204,6 +2323,22 @@ def section_yaw_motion(paths: list[dict[str, Any]], section: str) -> float:
     return total
 
 
+def count_turn_planners(paths: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for path in paths:
+        active: str | None = None
+        for pose in path_poses(path):
+            if pose.get("section") != "turn":
+                active = None
+                continue
+            planner = str(pose.get("turn_planner", "unknown"))
+            if planner == active:
+                continue
+            counts[planner] = counts.get(planner, 0) + 1
+            active = planner
+    return counts
+
+
 def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     paths = compat["paths"]
     selected_indices, metric_lawns, metric_obstacles = selected_metric_lawns(model, compat, debug)
@@ -1247,7 +2382,7 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
     stride = max(1, int(config["evaluation"].get("footprint_sample_stride", 1)))
     marker_limit = max(0, int(config["evaluation"].get("unsafe_marker_limit", 500)))
     footprint_samples = unsafe_footprint_samples = obstacle_pose_samples = 0
-    unsafe_straight_connector_samples = unsafe_pivot_samples = 0
+    unsafe_straight_connector_samples = unsafe_pivot_samples = unsafe_turn_samples = 0
     unsafe_samples: list[dict[str, Any]] = []
     for path in paths:
         for i, pose in enumerate(path_poses(path)):
@@ -1262,6 +2397,8 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
                     unsafe_straight_connector_samples += 1
                 if pose.get("section") == "pivot":
                     unsafe_pivot_samples += 1
+                if pose.get("section") == "turn":
+                    unsafe_turn_samples += 1
                 if len(unsafe_samples) < marker_limit:
                     unsafe_samples.append(
                         {
@@ -1269,6 +2406,8 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
                             "y": pose["y"],
                             "yaw": pose.get("yaw", 0.0),
                             "section": pose.get("section", "unknown"),
+                            "direction": pose.get("direction", "unknown"),
+                            "cutting_enabled": bool(pose_cutting_enabled(path, pose)),
                             "path_label": path.get("label", ""),
                         }
                     )
@@ -1280,7 +2419,7 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
     headland_count = sum(1 for p in paths if p.get("is_outline"))
     connector_length = path_length(
         paths,
-        lambda path, a, b: (not path.get("is_outline")) and (a.get("section") != "swath" or b.get("section") != "swath"),
+        lambda path, a, b: (not path.get("is_outline")) and a.get("section") == "connector" and b.get("section") == "connector",
         source="base",
     )
     straight_connector_length = path_length(
@@ -1290,6 +2429,60 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
     )
     total_length = path_length(paths, source="base")
     tool_length = path_length(paths, source="tool")
+    turn_length = path_length(
+        paths,
+        lambda path, a, b: (not path.get("is_outline")) and a.get("section") == "turn" and b.get("section") == "turn",
+        source="base",
+    )
+    turn_reverse_length_m = path_length(
+        paths,
+        lambda path, a, b: (
+            (not path.get("is_outline"))
+            and a.get("section") == "turn"
+            and b.get("section") == "turn"
+            and (a.get("direction") == "backward" or b.get("direction") == "backward")
+        ),
+        source="base",
+    )
+    turn_forward_length_m = path_length(
+        paths,
+        lambda path, a, b: (
+            (not path.get("is_outline"))
+            and a.get("section") == "turn"
+            and b.get("section") == "turn"
+            and a.get("direction") != "backward"
+            and b.get("direction") != "backward"
+        ),
+        source="base",
+    )
+    turn_cutting_length_m = path_length(
+        paths,
+        lambda path, a, b: (
+            (not path.get("is_outline"))
+            and a.get("section") == "turn"
+            and b.get("section") == "turn"
+            and is_coverage_section(path, a, b)
+        ),
+        source="tool",
+    )
+    maneuver_ids = {
+        str(pose.get("maneuver_id"))
+        for path in paths
+        for pose in path_poses(path)
+        if pose.get("maneuver_id")
+    }
+    wheel_anchor_errors = [
+        float(pose["target_wheel_error_m"])
+        for path in paths
+        for pose in path_poses(path)
+        if pose.get("turn_planner") == "wheel_anchor" and isinstance(pose.get("target_wheel_error_m"), (int, float))
+    ]
+    wheel_anchor_reverse_distances = {
+        str(pose.get("maneuver_id")): float(pose.get("reverse_distance_m", 0.0))
+        for path in paths
+        for pose in path_poses(path)
+        if pose.get("turn_planner") == "wheel_anchor" and pose.get("maneuver_id")
+    }
     coverage = {
         "sample_resolution_m": sample_res,
         "mowable_area_m2": mowable * area_unit,
@@ -1335,12 +2528,32 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
             "total_yaw_rad": section_yaw_motion(paths, "pivot"),
             "unsafe_pivot_samples": unsafe_pivot_samples,
         },
+        "turn_path": {
+            "count": count_section_runs(paths, "turn"),
+            "length_m": turn_length,
+            "forward_length_m": turn_forward_length_m,
+            "reverse_length_m": turn_reverse_length_m,
+            "cutting_length_m": turn_cutting_length_m,
+            "total_yaw_rad": section_yaw_motion(paths, "turn"),
+            "unsafe_turn_samples": unsafe_turn_samples,
+            "planner_counts": count_turn_planners(paths),
+            "maneuver_count": len(maneuver_ids),
+            "wheel_anchor_target_error_max_m": max(wheel_anchor_errors, default=0.0),
+            "wheel_anchor_reverse_distance_m": sum(wheel_anchor_reverse_distances.values()),
+            "reverse_pose_count": sum(
+                1
+                for path in paths
+                for pose in path_poses(path)
+                if pose.get("section") == "turn" and pose.get("direction") == "backward"
+            ),
+        },
         "safety": {
             "footprint_samples": footprint_samples,
             "unsafe_footprint_samples": unsafe_footprint_samples,
             "obstacle_pose_samples": obstacle_pose_samples,
             "unsafe_straight_connector_samples": unsafe_straight_connector_samples,
             "unsafe_pivot_samples": unsafe_pivot_samples,
+            "unsafe_turn_samples": unsafe_turn_samples,
             "unsafe_samples": unsafe_samples,
         },
     }
@@ -1393,6 +2606,36 @@ def plan_profile_results(
     return results
 
 
+def sanitize_planpath_compat(compat: dict[str, Any]) -> dict[str, Any]:
+    clean = {
+        "schema": compat.get("schema", "open_mower.planpath_compat.v0"),
+        "profile": compat.get("profile", "unknown"),
+        "frame_id": compat.get("frame_id", "map"),
+        "source_map": compat.get("source_map", ""),
+        "paths": [],
+    }
+    for path in compat.get("paths", []):
+        clean_path = {
+            "is_outline": bool(path.get("is_outline", False)),
+            "area_index": path.get("area_index"),
+            "area_id": path.get("area_id", ""),
+            "label": path.get("label", ""),
+            "path": {
+                "frame_id": path.get("path", {}).get("frame_id", compat.get("frame_id", "map")),
+                "poses": [
+                    {
+                        "x": float(pose["x"]),
+                        "y": float(pose["y"]),
+                        "yaw": float(pose.get("yaw", 0.0)),
+                    }
+                    for pose in path.get("path", {}).get("poses", [])
+                ],
+            },
+        }
+        clean["paths"].append(clean_path)
+    return clean
+
+
 def write_profile_artifacts(
     run_dir: pathlib.Path,
     map_path: pathlib.Path,
@@ -1405,10 +2648,13 @@ def write_profile_artifacts(
     debug = profile_result["debug"]
     metrics = compute_metrics(model, compat, debug, config)
     metrics["warnings"] = debug["warnings"]
+    debug_with_preview = copy.deepcopy(debug)
+    debug_with_preview["preview_paths"] = compat.get("paths", [])
     shutil.copyfile(map_path, run_dir / "source_map_snapshot.json")
-    write_json(run_dir / "planpath_compat.json", compat)
-    write_json(run_dir / "planning_debug.json", debug)
+    write_json(run_dir / "planpath_compat.json", sanitize_planpath_compat(compat))
+    write_json(run_dir / "planning_debug.json", debug_with_preview)
     write_json(run_dir / "metrics.json", metrics)
+    write_json(run_dir / "config_snapshot.json", config)
 
 
 def render_all_reports(run_dir: pathlib.Path) -> None:
@@ -1436,6 +2682,21 @@ def plan_map(args: argparse.Namespace) -> pathlib.Path:
     if getattr(args, "outline_count", None) is not None:
         config = copy.deepcopy(config)
         config["outline_count"] = args.outline_count
+    if getattr(args, "outline_clearance_m", None) is not None:
+        config = copy.deepcopy(config)
+        config["outline_clearance_m"] = args.outline_clearance_m
+    if getattr(args, "turn_forward_extent_spacing_factor", None) is not None:
+        config = copy.deepcopy(config)
+        config["turn_forward_extent_spacing_factor"] = args.turn_forward_extent_spacing_factor
+    if getattr(args, "turn_planner", None) is not None:
+        config = copy.deepcopy(config)
+        config["turn_planner"] = args.turn_planner
+    if getattr(args, "turn_cutting_mode", None) is not None:
+        config = copy.deepcopy(config)
+        config["turn_cutting_mode"] = args.turn_cutting_mode
+    if getattr(args, "turn_reverse_enabled", None) is not None:
+        config = copy.deepcopy(config)
+        config["turn_reverse_enabled"] = args.turn_reverse_enabled
     model = parse_map(map_path, repair_rings=args.repair_rings)
     run_dir = make_run_dir(map_path, pathlib.Path(args.output).resolve() if args.output else None)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -1531,11 +2792,287 @@ def comparison_rows(run_dir: pathlib.Path, current_metrics: dict[str, Any]) -> s
 """
 
 
+def json_script(data: Any) -> str:
+    return json.dumps(data, separators=(",", ":"), sort_keys=True).replace("<", "\\u003c").replace("&", "\\u0026")
+
+
+def map_point_dict(point: tuple[float, float]) -> dict[str, float]:
+    return {"x": float(point[0]), "y": float(point[1])}
+
+
+def pose_xy(pose: dict[str, Any]) -> tuple[float, float]:
+    return (float(pose["x"]), float(pose["y"]))
+
+
+def transform_status(model: OpenMowerMap, area_index: int, pose: dict[str, Any], footprint: list[list[float]]) -> bool:
+    if 0 <= area_index < len(model.lawns):
+        lawn = model.lawns[area_index]
+        return footprint_is_safe(model, transform_footprint(pose, footprint), [lawn], lawn.holes)
+    return footprint_is_safe(model, transform_footprint(pose, footprint))
+
+
+def build_simulation_preview(
+    model: OpenMowerMap,
+    compat: dict[str, Any],
+    debug: dict[str, Any],
+    metrics: dict[str, Any],
+    config: dict[str, Any],
+    view: dict[str, float],
+) -> dict[str, Any]:
+    footprint = [[float(p[0]), float(p[1])] for p in (config.get("footprint") or [])]
+    safety_fp = [[float(p[0]), float(p[1])] for p in safety_footprint(config)]
+    offset = tool_center_offset(config)
+    front_x = max((p[0] for p in footprint), default=0.0)
+    min_y = min((p[1] for p in footprint), default=0.0)
+    max_y = max((p[1] for p in footprint), default=0.0)
+    front_center = [front_x, (min_y + max_y) / 2.0]
+
+    timeline: list[dict[str, Any]] = []
+    segment_gaps: list[dict[str, Any]] = []
+    cumulative_m = 0.0
+    previous_path_end: dict[str, Any] | None = None
+    previous_path_index: int | None = None
+
+    paths = compat.get("paths", [])
+    for path_index, path in enumerate(paths):
+        base_poses = path.get("path", {}).get("poses", [])
+        tool_poses = path.get("tool_path", {}).get("poses", [])
+        if not base_poses:
+            continue
+        first_pose = base_poses[0]
+        pending_gap: dict[str, Any] | None = None
+        if previous_path_end is not None and previous_path_index is not None:
+            gap_distance = dist(pose_xy(previous_path_end), pose_xy(first_pose))
+            yaw_gap = abs(angle_delta(float(previous_path_end.get("yaw", 0.0)), float(first_pose.get("yaw", 0.0))))
+            if gap_distance > 0.05 or yaw_gap > math.radians(5.0):
+                pending_gap = {
+                    "from_path_index": previous_path_index,
+                    "to_path_index": path_index,
+                    "distance_m": gap_distance,
+                    "from": {
+                        "x": float(previous_path_end["x"]),
+                        "y": float(previous_path_end["y"]),
+                        "yaw": float(previous_path_end.get("yaw", 0.0)),
+                    },
+                    "to": {
+                        "x": float(first_pose["x"]),
+                        "y": float(first_pose["y"]),
+                        "yaw": float(first_pose.get("yaw", 0.0)),
+                    },
+                    "label": "unplanned first-point move between path segments",
+                }
+                segment_gaps.append(pending_gap)
+
+        for pose_index, pose in enumerate(base_poses):
+            if pose_index > 0:
+                cumulative_m += dist(pose_xy(base_poses[pose_index - 1]), pose_xy(pose))
+            area_index = int(path.get("area_index", -1))
+            physical_safe = transform_status(model, area_index, pose, footprint)
+            safety_safe = transform_status(model, area_index, pose, safety_fp)
+            if not physical_safe:
+                safety_status = "collision"
+            elif not safety_safe:
+                safety_status = "margin"
+            else:
+                safety_status = "safe"
+            tool_pose = tool_poses[pose_index] if pose_index < len(tool_poses) else None
+            wheel_points = wheel_points_for_pose(pose, config)
+            record = {
+                "global_index": len(timeline),
+                "path_index": path_index,
+                "pose_index": pose_index,
+                "area_index": area_index,
+                "area_id": path.get("area_id", ""),
+                "label": path.get("label", f"path {path_index}"),
+                "is_outline": bool(path.get("is_outline", False)),
+                "section": str(pose.get("section", "unknown")),
+                "direction": str(pose.get("direction", "unknown")),
+                "cutting_enabled": bool(pose_cutting_enabled(path, pose)),
+                "turn_leg": pose.get("turn_leg"),
+                "turn_planner": pose.get("turn_planner"),
+                "turn_candidate": pose.get("turn_candidate"),
+                "maneuver_id": pose.get("maneuver_id"),
+                "maneuver_type": pose.get("maneuver_type"),
+                "phase": pose.get("phase"),
+                "pivot_wheel": pose.get("pivot_wheel"),
+                "anchor_point": pose.get("anchor_point"),
+                "target_anchor_point": pose.get("target_anchor_point"),
+                "left_wheel": pose.get("left_wheel") or wheel_points["left"],
+                "right_wheel": pose.get("right_wheel") or wheel_points["right"],
+                "blade_enabled": bool(pose.get("blade_enabled", pose_cutting_enabled(path, pose))),
+                "target_wheel_error_m": pose.get("target_wheel_error_m"),
+                "min_clearance_m": pose.get("min_clearance_m"),
+                "reverse_distance_m": pose.get("reverse_distance_m"),
+                "pivot_angle_deg": pose.get("pivot_angle_deg"),
+                "x": float(pose["x"]),
+                "y": float(pose["y"]),
+                "yaw": float(pose.get("yaw", 0.0)),
+                "tool_pose": (
+                    {
+                        "x": float(tool_pose["x"]),
+                        "y": float(tool_pose["y"]),
+                        "yaw": float(tool_pose.get("yaw", pose.get("yaw", 0.0))),
+                    }
+                    if tool_pose
+                    else None
+                ),
+                "cumulative_distance_m": cumulative_m,
+                "physical_safe": physical_safe,
+                "safety_margin_safe": safety_safe,
+                "safety_status": safety_status,
+            }
+            if pose_index == 0 and pending_gap is not None:
+                record["segment_gap"] = pending_gap
+            timeline.append(record)
+
+        previous_path_end = base_poses[-1]
+        previous_path_index = path_index
+
+    maneuvers_by_id: dict[str, dict[str, Any]] = {}
+    for record in timeline:
+        maneuver_id = record.get("maneuver_id")
+        if not maneuver_id:
+            continue
+        maneuver = maneuvers_by_id.setdefault(
+            str(maneuver_id),
+            {
+                "maneuver_id": str(maneuver_id),
+                "maneuver_type": record.get("maneuver_type"),
+                "path_index": record.get("path_index"),
+                "start_global_index": record.get("global_index"),
+                "end_global_index": record.get("global_index"),
+                "phases": [],
+                "pivot_wheel": record.get("pivot_wheel"),
+                "anchor_point": record.get("anchor_point"),
+                "target_anchor_point": record.get("target_anchor_point"),
+                "target_wheel_error_m": record.get("target_wheel_error_m"),
+                "min_clearance_m": record.get("min_clearance_m"),
+                "reverse_distance_m": record.get("reverse_distance_m"),
+                "pivot_angle_deg": record.get("pivot_angle_deg"),
+            },
+        )
+        maneuver["end_global_index"] = record.get("global_index")
+        maneuver["target_wheel_error_m"] = record.get("target_wheel_error_m", maneuver.get("target_wheel_error_m"))
+        maneuver["min_clearance_m"] = record.get("min_clearance_m", maneuver.get("min_clearance_m"))
+        maneuver["reverse_distance_m"] = record.get("reverse_distance_m", maneuver.get("reverse_distance_m"))
+        maneuver["pivot_angle_deg"] = record.get("pivot_angle_deg", maneuver.get("pivot_angle_deg"))
+        if not maneuver.get("target_anchor_point") and record.get("target_anchor_point"):
+            maneuver["target_anchor_point"] = record.get("target_anchor_point")
+        phase = record.get("phase")
+        if phase:
+            phases = maneuver["phases"]
+            if not phases or phases[-1]["phase"] != phase:
+                phases.append(
+                    {
+                        "phase": phase,
+                        "direction": record.get("direction"),
+                        "pivot_wheel": record.get("pivot_wheel"),
+                        "start_global_index": record.get("global_index"),
+                        "end_global_index": record.get("global_index"),
+                    }
+                )
+            else:
+                phases[-1]["end_global_index"] = record.get("global_index")
+
+    map_payload = {
+        "lawns": [
+            {
+                "area_index": i,
+                "id": lawn.area.id,
+                "name": lawn.area.name,
+                "outline": [map_point_dict(p) for p in lawn.area.outline],
+                "holes": [hole.id for hole in lawn.holes],
+            }
+            for i, lawn in enumerate(model.lawns)
+        ],
+        "obstacles": [
+            {
+                "id": obstacle.id,
+                "name": obstacle.name,
+                "outline": [map_point_dict(p) for p in obstacle.outline],
+            }
+            for obstacle in model.obstacles
+        ],
+    }
+    return {
+        "schema": "open_mower.coverage_lab.simulation_preview.v0",
+        "profile": compat.get("profile", metrics.get("profile", "unknown")),
+        "frame_id": compat.get("frame_id", "map"),
+        "view": view,
+        "map": map_payload,
+        "debug_summary": {
+            "area_count": len(debug.get("areas", [])),
+            "warning_count": len(debug.get("warnings", [])),
+        },
+        "mower": {
+            "base_link": [0.0, 0.0],
+            "front_center": front_center,
+            "tool_center_offset": [float(offset[0]), float(offset[1])],
+            "wheel_track_m": wheel_track_m(config),
+            "wheel_contact_x_m": wheel_contact_x_m(config),
+            "left_wheel": list(wheel_local_point(config, "left")),
+            "right_wheel": list(wheel_local_point(config, "right")),
+            "footprint": footprint,
+            "safety_footprint": safety_fp,
+            "safety_margin_m": float(config.get("safety_margin_m", 0.0)),
+        },
+        "counts": {
+            "timeline": len(timeline),
+            "unsafe_physical": sum(1 for record in timeline if not record["physical_safe"]),
+            "unsafe_margin_only": sum(
+                1 for record in timeline if record["physical_safe"] and not record["safety_margin_safe"]
+            ),
+            "segment_gaps": len(segment_gaps),
+            "reverse_turn_poses": sum(
+                1 for record in timeline if record["section"] == "turn" and record["direction"] == "backward"
+            ),
+            "cutting_disabled_poses": sum(1 for record in timeline if not record["cutting_enabled"]),
+            "maneuvers": len(maneuvers_by_id),
+        },
+        "maneuvers": list(maneuvers_by_id.values()),
+        "segment_gaps": segment_gaps,
+        "timeline": timeline,
+    }
+
+
+def svg_group(group_id: str, children: list[str], **attrs: str) -> str:
+    attr_text = " ".join(f'{key.replace("_", "-")}="{html.escape(str(value))}"' for key, value in attrs.items())
+    body = "\n".join(children)
+    return f'<g id="{html.escape(group_id)}" {attr_text}>\n{body}\n</g>'
+
+
+def svg_circle(x: float, y: float, r: float, **attrs: str) -> str:
+    attr_text = " ".join(f'{key.replace("_", "-")}="{html.escape(str(value))}"' for key, value in attrs.items())
+    return f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{r:.2f}" {attr_text} />'
+
+
+def split_pose_runs(poses: list[dict[str, Any]], predicate: Any) -> list[list[tuple[float, float]]]:
+    runs: list[list[tuple[float, float]]] = []
+    active: list[tuple[float, float]] = []
+    for i in range(len(poses) - 1):
+        a, b = poses[i], poses[i + 1]
+        if predicate(a, b):
+            if not active:
+                active.append((float(a["x"]), float(a["y"])))
+            active.append((float(b["x"]), float(b["y"])))
+        elif active:
+            runs.append(active)
+            active = []
+    if active:
+        runs.append(active)
+    return runs
+
+
 def render_run(run_dir: pathlib.Path) -> None:
     source = read_json(run_dir / "source_map_snapshot.json")
     compat = read_json(run_dir / "planpath_compat.json")
     debug = read_json(run_dir / "planning_debug.json")
+    preview_compat = copy.deepcopy(compat)
+    if isinstance(debug.get("preview_paths"), list):
+        preview_compat["paths"] = debug["preview_paths"]
     metrics = read_json(run_dir / "metrics.json")
+    config_path = run_dir / "config_snapshot.json"
+    config = read_json(config_path) if config_path.exists() else load_config(DEFAULT_CONFIG)
     temp_map = run_dir / "source_map_snapshot.json"
     model = parse_map(temp_map, repair_rings=True)
 
@@ -1544,9 +3081,12 @@ def render_run(run_dir: pathlib.Path) -> None:
         all_points.extend(lawn.area.outline)
         for hole in lawn.holes:
             all_points.extend(hole.outline)
-    for path in compat.get("paths", []):
+    for path in preview_compat.get("paths", []):
         all_points.extend((p["x"], p["y"]) for p in path.get("path", {}).get("poses", []))
         all_points.extend((p["x"], p["y"]) for p in path.get("tool_path", {}).get("poses", []))
+        for pose in path.get("path", {}).get("poses", []):
+            all_points.extend(transform_footprint(pose, config.get("footprint") or []))
+            all_points.extend(transform_footprint(pose, safety_footprint(config)))
     min_x, min_y, max_x, max_y = bbox(all_points)
     width_m = max(max_x - min_x, 1.0)
     height_m = max(max_y - min_y, 1.0)
@@ -1554,54 +3094,218 @@ def render_run(run_dir: pathlib.Path) -> None:
     pad = 30.0
     svg_w = width_m * scale + 2 * pad
     svg_h = height_m * scale + 2 * pad
+    view = {
+        "min_x": min_x,
+        "min_y": min_y,
+        "max_x": max_x,
+        "max_y": max_y,
+        "scale": scale,
+        "pad": pad,
+        "svg_width": svg_w,
+        "svg_height": svg_h,
+    }
+    simulation_preview = build_simulation_preview(model, preview_compat, debug, metrics, config, view)
+    write_json(run_dir / "simulation_preview.json", simulation_preview)
 
     def tx(x: float, y: float) -> tuple[float, float]:
         return (pad + (x - min_x) * scale, pad + (max_y - y) * scale)
 
-    elements = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{svg_w:.0f}" height="{svg_h:.0f}" viewBox="0 0 {svg_w:.0f} {svg_h:.0f}">',
-        '<rect width="100%" height="100%" fill="#f7f7f2" />',
-    ]
+    svg_defs = """
+<defs>
+  <marker id="mower-front-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+    <path d="M0,0 L0,6 L7,3 z" fill="#111827" />
+  </marker>
+</defs>""".strip()
+    lawn_elements: list[str] = []
+    debug_elements: list[str] = []
+    tool_elements: list[str] = []
+    connector_elements: list[str] = []
+    pivot_elements: list[str] = []
+    base_elements: list[str] = []
+    unsafe_elements: list[str] = []
+    gap_elements: list[str] = []
+    marker_elements: list[str] = []
+    left_wheel_elements: list[str] = []
+    right_wheel_elements: list[str] = []
+    turn_anchor_elements: list[str] = []
+    swept_elements: list[str] = []
+
     for lawn in model.lawns:
-        elements.append(svg_polygon(lawn.area.outline, tx, fill="#d7efd2", stroke="#1d7a32", stroke_width="2"))
+        lawn_elements.append(svg_polygon(lawn.area.outline, tx, fill="#d7efd2", stroke="#1d7a32", stroke_width="2"))
         for hole in lawn.holes:
-            elements.append(svg_polygon(hole.outline, tx, fill="#ffd5d5", stroke="#b42323", stroke_width="2"))
+            lawn_elements.append(svg_polygon(hole.outline, tx, fill="#ffd5d5", stroke="#b42323", stroke_width="2"))
+
     for area in debug.get("areas", []):
         for ring in area.get("mainland_rings", []):
             pts = [(p["x"], p["y"]) for p in ring]
-            elements.append(svg_polyline(pts, tx, fill="none", stroke="#f59f00", stroke_width="1.5", stroke_dasharray="5 5"))
+            debug_elements.append(
+                svg_polyline(pts, tx, fill="none", stroke="#f59f00", stroke_width="1.5", stroke_dasharray="5 5")
+            )
         for swath in area.get("swaths", []):
             pts = [(p["x"], p["y"]) for p in swath.get("points", [])]
-            elements.append(svg_polyline(pts, tx, fill="none", stroke="#7b8794", stroke_width="1", opacity="0.75"))
-    tool_colors = ["#2f6fdd", "#00897b", "#7c3aed", "#c2410c", "#0f766e"]
-    for i, path in enumerate(compat.get("paths", [])):
-        base_pts = [(p["x"], p["y"]) for p in path.get("path", {}).get("poses", [])]
-        tool_pts = [(p["x"], p["y"]) for p in path.get("tool_path", {}).get("poses", [])]
-        color = "#234f1e" if path.get("is_outline") else tool_colors[i % len(tool_colors)]
-        if len(tool_pts) >= 2:
-            width = "2.1" if path.get("is_outline") else "2.8"
-            elements.append(svg_polyline(tool_pts, tx, fill="none", stroke=color, stroke_width=width, opacity="0.95"))
+            debug_elements.append(svg_polyline(pts, tx, fill="none", stroke="#7b8794", stroke_width="1", opacity="0.55"))
+
+    for gap in simulation_preview.get("segment_gaps", []):
+        pts = [(gap["from"]["x"], gap["from"]["y"]), (gap["to"]["x"], gap["to"]["y"])]
+        gap_elements.append(
+            svg_polyline(pts, tx, fill="none", stroke="#be185d", stroke_width="1.8", stroke_dasharray="3 6", opacity="0.85")
+        )
+
+    swath_colors = ["#2563eb", "#00897b"]
+    for i, path in enumerate(preview_compat.get("paths", [])):
+        base_poses = path.get("path", {}).get("poses", [])
+        tool_poses = path.get("tool_path", {}).get("poses", [])
+        base_pts = [(p["x"], p["y"]) for p in base_poses]
         if len(base_pts) >= 2:
-            elements.append(
-                svg_polyline(
-                    base_pts,
-                    tx,
-                    fill="none",
-                    stroke="#111827",
-                    stroke_width="1.2",
-                    stroke_dasharray="4 4",
-                    opacity="0.65",
-                )
+            base_elements.append(
+                svg_polyline(base_pts, tx, fill="none", stroke="#111827", stroke_width="1.2", stroke_dasharray="4 4", opacity="0.65")
             )
-        pts = tool_pts or base_pts
+
+        coverage_color = "#234f1e" if path.get("is_outline") else swath_colors[i % len(swath_colors)]
+        coverage_width = "2.1" if path.get("is_outline") else "2.8"
+        for run in split_pose_runs(
+            tool_poses,
+            lambda a, b: path.get("is_outline")
+            or (a.get("section") in {"headland", "swath", "turn"} and b.get("section") in {"headland", "swath", "turn"}),
+        ):
+            if len(run) >= 2:
+                tool_elements.append(
+                    svg_polyline(run, tx, fill="none", stroke=coverage_color, stroke_width=coverage_width, opacity="0.95")
+                )
+        for run in split_pose_runs(
+            tool_poses,
+            lambda a, b: a.get("section") == "connector" or b.get("section") == "connector",
+        ):
+            if len(run) >= 2:
+                connector_elements.append(
+                    svg_polyline(run, tx, fill="none", stroke="#f97316", stroke_width="2.0", stroke_dasharray="6 5", opacity="0.9")
+                )
+        for pose in tool_poses:
+            if pose.get("section") == "pivot":
+                sx, sy = tx(float(pose["x"]), float(pose["y"]))
+                pivot_elements.append(svg_circle(sx, sy, 1.6, fill="#7c3aed", opacity="0.65"))
+
+        pts = [(p["x"], p["y"]) for p in (tool_poses or base_poses)]
         if len(pts) >= 2:
             sx, sy = tx(*pts[0])
             ex, ey = tx(*pts[-1])
-            elements.append(f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="4" fill="{color}" />')
-            elements.append(f'<circle cx="{ex:.2f}" cy="{ey:.2f}" r="4" fill="#ffffff" stroke="{color}" stroke-width="2" />')
+            marker_elements.append(svg_circle(sx, sy, 4.0, fill=coverage_color))
+            marker_elements.append(svg_circle(ex, ey, 4.0, fill="#ffffff", stroke=coverage_color, stroke_width="2"))
+
+    left_run: list[tuple[float, float]] = []
+    right_run: list[tuple[float, float]] = []
+    anchor_keys: set[tuple[str, int, int]] = set()
+    wheel_turn_records = [
+        record
+        for record in simulation_preview.get("timeline", [])
+        if record.get("section") == "turn" and record.get("turn_planner") == "wheel_anchor"
+    ]
+
+    def flush_wheel_runs() -> None:
+        nonlocal left_run, right_run
+        if len(left_run) >= 2:
+            left_wheel_elements.append(
+                svg_polyline(left_run, tx, fill="none", stroke="#0f766e", stroke_width="1.5", stroke_dasharray="2 4", opacity="0.85")
+            )
+        if len(right_run) >= 2:
+            right_wheel_elements.append(
+                svg_polyline(right_run, tx, fill="none", stroke="#9333ea", stroke_width="1.5", stroke_dasharray="2 4", opacity="0.85")
+            )
+        left_run = []
+        right_run = []
+
+    previous_maneuver_id: str | None = None
+    for record in wheel_turn_records:
+        maneuver_id = str(record.get("maneuver_id") or "")
+        if previous_maneuver_id is not None and maneuver_id != previous_maneuver_id:
+            flush_wheel_runs()
+        previous_maneuver_id = maneuver_id
+        left = record.get("left_wheel") or {}
+        right = record.get("right_wheel") or {}
+        if "x" in left and "y" in left:
+            left_run.append((float(left["x"]), float(left["y"])))
+        if "x" in right and "y" in right:
+            right_run.append((float(right["x"]), float(right["y"])))
+    flush_wheel_runs()
+
+    for record in wheel_turn_records:
+        for key_name, color, radius, label in (
+            ("anchor_point", "#ea580c", 3.2, "pivot"),
+            ("target_anchor_point", "#0891b2", 2.8, "target"),
+        ):
+            point = record.get(key_name)
+            if not point:
+                continue
+            key = (key_name, int(round(float(point["x"]) * 1000)), int(round(float(point["y"]) * 1000)))
+            if key in anchor_keys:
+                continue
+            anchor_keys.add(key)
+            sx, sy = tx(float(point["x"]), float(point["y"]))
+            turn_anchor_elements.append(
+                svg_circle(
+                    sx,
+                    sy,
+                    radius,
+                    fill=color,
+                    opacity="0.90",
+                    **{"data-anchor": label},
+                )
+            )
+
+    footprint = [[float(p[0]), float(p[1])] for p in (config.get("footprint") or [])]
+    if footprint:
+        stride = max(1, int(math.ceil(len(wheel_turn_records) / 180))) if wheel_turn_records else 1
+        for i, record in enumerate(wheel_turn_records):
+            if i % stride:
+                continue
+            swept_elements.append(
+                svg_polygon(
+                    transform_footprint(record, footprint),
+                    tx,
+                    fill="#0284c7",
+                    fill_opacity="0.055",
+                    stroke="#0284c7",
+                    stroke_width="0.7",
+                    stroke_opacity="0.22",
+                )
+            )
+
     for sample in metrics.get("safety", {}).get("unsafe_samples", []):
         sx, sy = tx(float(sample["x"]), float(sample["y"]))
-        elements.append(f'<circle cx="{sx:.2f}" cy="{sy:.2f}" r="3.5" fill="#dc2626" opacity="0.85" />')
+        unsafe_elements.append(svg_circle(sx, sy, 3.5, fill="#dc2626", opacity="0.85"))
+
+    mower_overlay = """
+<g id="layer-mower-safety">
+  <polygon id="mower-safety-footprint" points="" fill="#f59e0b" fill-opacity="0.10" stroke="#d97706" stroke-width="1.2" stroke-dasharray="5 4" />
+</g>
+<g id="layer-mower">
+  <polygon id="mower-footprint" points="" fill="#16a34a" fill-opacity="0.20" stroke="#166534" stroke-width="2.2" />
+  <line id="mower-heading" x1="0" y1="0" x2="0" y2="0" stroke="#111827" stroke-width="2" marker-end="url(#mower-front-arrow)" />
+  <circle id="mower-base-link" cx="0" cy="0" r="4" fill="#111827" />
+  <circle id="mower-tool-center" cx="0" cy="0" r="3.5" fill="#ffffff" stroke="#2563eb" stroke-width="2" />
+</g>""".strip()
+
+    elements = [
+        f'<svg id="plan-map" xmlns="http://www.w3.org/2000/svg" width="{svg_w:.0f}" height="{svg_h:.0f}" viewBox="0 0 {svg_w:.0f} {svg_h:.0f}">',
+        '<rect width="100%" height="100%" fill="#f7f7f2" />',
+        svg_defs,
+        '<g id="map-viewport">',
+        svg_group("layer-lawns", lawn_elements),
+        svg_group("layer-debug", debug_elements),
+        svg_group("layer-tool", tool_elements),
+        svg_group("layer-connectors", connector_elements),
+        svg_group("layer-pivots", pivot_elements),
+        svg_group("layer-left-wheel", left_wheel_elements),
+        svg_group("layer-right-wheel", right_wheel_elements),
+        svg_group("layer-turn-anchors", turn_anchor_elements),
+        svg_group("layer-swept-footprint", swept_elements),
+        svg_group("layer-base", base_elements),
+        svg_group("layer-gaps", gap_elements),
+        svg_group("layer-unsafe", unsafe_elements),
+        svg_group("layer-markers", marker_elements),
+        mower_overlay,
+        "</g>",
+    ]
     elements.append("</svg>")
     svg = "\n".join(elements)
     (run_dir / "plan.svg").write_text(svg, encoding="utf-8")
@@ -1612,16 +3316,383 @@ def render_run(run_dir: pathlib.Path) -> None:
         for k, v in metrics.items()
         if k not in {"schema"}
     )
+    preview_json = json_script(simulation_preview)
+    preview_counts = simulation_preview.get("counts", {})
+    viewer_script = r"""
+<script>
+(function () {
+  const dataNode = document.getElementById("simulation-data");
+  const data = JSON.parse(dataNode.textContent);
+  const timeline = data.timeline || [];
+  const view = data.view || {};
+  const mower = data.mower || {};
+  const svg = document.getElementById("plan-map");
+  const mapViewport = document.getElementById("map-viewport");
+  const slider = document.getElementById("pose-slider");
+  const playButton = document.getElementById("preview-play");
+  const stepBack = document.getElementById("preview-step-back");
+  const stepForward = document.getElementById("preview-step-forward");
+  const speed = document.getElementById("preview-speed");
+  const zoomIn = document.getElementById("preview-zoom-in");
+  const zoomOut = document.getElementById("preview-zoom-out");
+  const zoomFit = document.getElementById("preview-zoom-fit");
+  const zoomLevel = document.getElementById("preview-zoom-level");
+  const rotateLeft = document.getElementById("preview-rotate-left");
+  const rotateRight = document.getElementById("preview-rotate-right");
+  const rotateReset = document.getElementById("preview-rotate-reset");
+  const rotateSlider = document.getElementById("preview-rotate-slider");
+  const rotateLevel = document.getElementById("preview-rotate-level");
+  const prevUnsafe = document.getElementById("preview-prev-unsafe");
+  const nextUnsafe = document.getElementById("preview-next-unsafe");
+  const safetyToggle = document.getElementById("show-safety-footprint");
+  const footprint = document.getElementById("mower-footprint");
+  const safetyFootprint = document.getElementById("mower-safety-footprint");
+  const baseDot = document.getElementById("mower-base-link");
+  const toolDot = document.getElementById("mower-tool-center");
+  const heading = document.getElementById("mower-heading");
+  const status = document.getElementById("preview-status");
+  const poseMeta = document.getElementById("preview-pose-meta");
+  const gapMeta = document.getElementById("preview-gap-meta");
+  const initialViewBox = {
+    x: 0,
+    y: 0,
+    w: Number(view.svg_width || svg.getAttribute("width") || 1),
+    h: Number(view.svg_height || svg.getAttribute("height") || 1)
+  };
+  let currentViewBox = Object.assign({}, initialViewBox);
+  let panStart = null;
+  let rotationDeg = 0;
+  let timer = null;
+
+  function toSvg(x, y) {
+    return {
+      x: view.pad + (x - view.min_x) * view.scale,
+      y: view.pad + (view.max_y - y) * view.scale
+    };
+  }
+
+  function rotate(x, y, yaw) {
+    const c = Math.cos(yaw);
+    const s = Math.sin(yaw);
+    return {x: c * x - s * y, y: s * x + c * y};
+  }
+
+  function localToMap(pose, point) {
+    const rotated = rotate(point[0], point[1], pose.yaw || 0);
+    return {x: pose.x + rotated.x, y: pose.y + rotated.y};
+  }
+
+  function polygonPoints(pose, localPoints) {
+    return (localPoints || []).map(function (point) {
+      const mapPoint = localToMap(pose, point);
+      const svgPoint = toSvg(mapPoint.x, mapPoint.y);
+      return svgPoint.x.toFixed(2) + "," + svgPoint.y.toFixed(2);
+    }).join(" ");
+  }
+
+  function setCircle(circle, point) {
+    circle.setAttribute("cx", point.x.toFixed(2));
+    circle.setAttribute("cy", point.y.toFixed(2));
+  }
+
+  function setLine(line, a, b) {
+    line.setAttribute("x1", a.x.toFixed(2));
+    line.setAttribute("y1", a.y.toFixed(2));
+    line.setAttribute("x2", b.x.toFixed(2));
+    line.setAttribute("y2", b.y.toFixed(2));
+  }
+
+  function screenToSvgPoint(clientX, clientY, inverseMatrix) {
+    const matrix = inverseMatrix || (svg.getScreenCTM() && svg.getScreenCTM().inverse());
+    if (!matrix) {
+      const rect = svg.getBoundingClientRect();
+      return {
+        x: currentViewBox.x + ((clientX - rect.left) / Math.max(rect.width, 1)) * currentViewBox.w,
+        y: currentViewBox.y + ((clientY - rect.top) / Math.max(rect.height, 1)) * currentViewBox.h
+      };
+    }
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+    const transformed = point.matrixTransform(matrix);
+    return {x: transformed.x, y: transformed.y};
+  }
+
+  function applyViewBox(nextViewBox) {
+    const minWidth = initialViewBox.w / 40;
+    const minHeight = initialViewBox.h / 40;
+    const maxWidth = initialViewBox.w * 3;
+    const maxHeight = initialViewBox.h * 3;
+    currentViewBox = {
+      x: nextViewBox.x,
+      y: nextViewBox.y,
+      w: Math.max(minWidth, Math.min(maxWidth, nextViewBox.w)),
+      h: Math.max(minHeight, Math.min(maxHeight, nextViewBox.h))
+    };
+    svg.setAttribute(
+      "viewBox",
+      currentViewBox.x.toFixed(2) + " " +
+      currentViewBox.y.toFixed(2) + " " +
+      currentViewBox.w.toFixed(2) + " " +
+      currentViewBox.h.toFixed(2)
+    );
+    zoomLevel.textContent = Math.round(initialViewBox.w / currentViewBox.w * 100) + "%";
+  }
+
+  function zoomAt(factor, clientX, clientY) {
+    const anchor = screenToSvgPoint(clientX, clientY);
+    const px = currentViewBox.w ? (anchor.x - currentViewBox.x) / currentViewBox.w : 0.5;
+    const py = currentViewBox.h ? (anchor.y - currentViewBox.y) / currentViewBox.h : 0.5;
+    const nextWidth = currentViewBox.w * factor;
+    const nextHeight = currentViewBox.h * factor;
+    applyViewBox({
+      x: anchor.x - px * nextWidth,
+      y: anchor.y - py * nextHeight,
+      w: nextWidth,
+      h: nextHeight
+    });
+  }
+
+  function zoomFromCenter(factor) {
+    const rect = svg.getBoundingClientRect();
+    zoomAt(factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }
+
+  function normalizeDegrees(degrees) {
+    let value = Number(degrees) || 0;
+    while (value > 180) value -= 360;
+    while (value < -180) value += 360;
+    return value;
+  }
+
+  function applyRotation(degrees) {
+    rotationDeg = normalizeDegrees(degrees);
+    const cx = initialViewBox.w / 2;
+    const cy = initialViewBox.h / 2;
+    mapViewport.setAttribute(
+      "transform",
+      "rotate(" + rotationDeg.toFixed(2) + " " + cx.toFixed(2) + " " + cy.toFixed(2) + ")"
+    );
+    rotateSlider.value = String(Math.round(rotationDeg));
+    rotateLevel.textContent = Math.round(rotationDeg) + " deg";
+  }
+
+  function safetyLabel(record) {
+    if (!record) return "no poses";
+    if (record.safety_status === "collision") return "collision";
+    if (record.safety_status === "margin") return "inside boundary, safety margin violated";
+    return "safe";
+  }
+
+  function styleFootprint(record) {
+    const styles = {
+      safe: ["#16a34a", "#166534"],
+      margin: ["#f59e0b", "#b45309"],
+      collision: ["#dc2626", "#991b1b"]
+    };
+    const pair = styles[record.safety_status] || styles.safe;
+    footprint.setAttribute("fill", pair[0]);
+    footprint.setAttribute("stroke", pair[1]);
+    status.className = "status-pill status-" + (record.safety_status || "safe");
+  }
+
+  function update(index) {
+    if (!timeline.length) {
+      status.textContent = "No executable poses";
+      return;
+    }
+    const clamped = Math.max(0, Math.min(timeline.length - 1, index));
+    const record = timeline[clamped];
+    slider.value = String(clamped);
+    footprint.setAttribute("points", polygonPoints(record, mower.footprint));
+    safetyFootprint.setAttribute("points", polygonPoints(record, mower.safety_footprint));
+    safetyFootprint.style.display = safetyToggle.checked ? "" : "none";
+
+    const base = toSvg(record.x, record.y);
+    const toolMap = record.tool_pose || localToMap(record, mower.tool_center_offset || [0, 0]);
+    const tool = toSvg(toolMap.x, toolMap.y);
+    const frontMap = localToMap(record, mower.front_center || [0, 0]);
+    const front = toSvg(frontMap.x, frontMap.y);
+    setCircle(baseDot, base);
+    setCircle(toolDot, tool);
+    setLine(heading, base, front);
+    styleFootprint(record);
+
+    status.textContent = safetyLabel(record);
+    const poseParts = [
+      "pose " + (clamped + 1) + " / " + timeline.length,
+      "path " + record.path_index,
+      "index " + record.pose_index,
+      "area " + record.area_index,
+      record.section,
+      record.direction,
+      record.is_outline ? "outline" : "fill",
+      record.cutting_enabled ? "cutting on" : "cutting off",
+      record.cumulative_distance_m.toFixed(2) + " m"
+    ];
+    if (record.turn_leg) poseParts.push("leg " + record.turn_leg);
+    if (record.turn_planner) poseParts.push(record.turn_planner);
+    if (record.phase) poseParts.push(record.phase);
+    if (record.pivot_wheel) poseParts.push("pivot " + record.pivot_wheel);
+    if (Number.isFinite(record.target_wheel_error_m)) {
+      poseParts.push("target err " + record.target_wheel_error_m.toFixed(3) + " m");
+    }
+    if (Number.isFinite(record.reverse_distance_m) && record.reverse_distance_m > 0) {
+      poseParts.push("reverse " + record.reverse_distance_m.toFixed(2) + " m");
+    }
+    if (Number.isFinite(record.pivot_angle_deg)) {
+      poseParts.push("pivot " + record.pivot_angle_deg.toFixed(1) + " deg");
+    }
+    poseMeta.textContent = poseParts.join(" | ");
+    if (record.segment_gap) {
+      gapMeta.textContent = "Unplanned first-point move from path " +
+        record.segment_gap.from_path_index + " to " + record.segment_gap.to_path_index +
+        ": " + record.segment_gap.distance_m.toFixed(2) + " m";
+      gapMeta.hidden = false;
+    } else {
+      gapMeta.hidden = true;
+    }
+  }
+
+  function setPlaying(playing) {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+    playButton.textContent = playing ? "Pause" : "Play";
+    if (playing && timeline.length > 1) {
+      const interval = Math.max(16, 1000 / Number(speed.value || 8));
+      timer = setInterval(function () {
+        const next = Number(slider.value) + 1;
+        if (next >= timeline.length) {
+          setPlaying(false);
+          return;
+        }
+        update(next);
+      }, interval);
+    }
+  }
+
+  function seekUnsafe(direction) {
+    if (!timeline.length) return;
+    const current = Number(slider.value);
+    let i = current + direction;
+    while (i >= 0 && i < timeline.length) {
+      if (timeline[i].safety_status !== "safe") {
+        update(i);
+        return;
+      }
+      i += direction;
+    }
+  }
+
+  document.querySelectorAll("[data-layer-toggle]").forEach(function (input) {
+    input.addEventListener("change", function () {
+      const layer = document.getElementById(input.getAttribute("data-layer-toggle"));
+      if (layer) layer.style.display = input.checked ? "" : "none";
+    });
+  });
+  slider.max = String(Math.max(0, timeline.length - 1));
+  slider.addEventListener("input", function () { update(Number(slider.value)); });
+  playButton.addEventListener("click", function () { setPlaying(!timer); });
+  speed.addEventListener("change", function () { if (timer) setPlaying(true); });
+  stepBack.addEventListener("click", function () { update(Number(slider.value) - 1); });
+  stepForward.addEventListener("click", function () { update(Number(slider.value) + 1); });
+  zoomIn.addEventListener("click", function () { zoomFromCenter(0.8); });
+  zoomOut.addEventListener("click", function () { zoomFromCenter(1.25); });
+  zoomFit.addEventListener("click", function () { applyViewBox(initialViewBox); });
+  rotateLeft.addEventListener("click", function () { applyRotation(rotationDeg - 15); });
+  rotateRight.addEventListener("click", function () { applyRotation(rotationDeg + 15); });
+  rotateReset.addEventListener("click", function () { applyRotation(0); });
+  rotateSlider.addEventListener("input", function () { applyRotation(Number(rotateSlider.value)); });
+  svg.addEventListener("wheel", function (event) {
+    event.preventDefault();
+    zoomAt(Math.exp(event.deltaY * 0.001), event.clientX, event.clientY);
+  }, {passive: false});
+  svg.addEventListener("pointerdown", function (event) {
+    if (event.button !== 0) return;
+    const screenCtm = svg.getScreenCTM();
+    panStart = {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      viewBox: Object.assign({}, currentViewBox),
+      inverseMatrix: screenCtm ? screenCtm.inverse() : null
+    };
+    svg.classList.add("is-panning");
+    svg.setPointerCapture(event.pointerId);
+  });
+  svg.addEventListener("pointermove", function (event) {
+    if (!panStart) return;
+    const start = screenToSvgPoint(panStart.clientX, panStart.clientY, panStart.inverseMatrix);
+    const current = screenToSvgPoint(event.clientX, event.clientY, panStart.inverseMatrix);
+    const dx = current.x - start.x;
+    const dy = current.y - start.y;
+    applyViewBox({
+      x: panStart.viewBox.x - dx,
+      y: panStart.viewBox.y - dy,
+      w: panStart.viewBox.w,
+      h: panStart.viewBox.h
+    });
+  });
+  function stopPan(event) {
+    if (!panStart) return;
+    panStart = null;
+    svg.classList.remove("is-panning");
+    if (event && svg.hasPointerCapture(event.pointerId)) {
+      svg.releasePointerCapture(event.pointerId);
+    }
+  }
+  svg.addEventListener("pointerup", stopPan);
+  svg.addEventListener("pointercancel", stopPan);
+  svg.addEventListener("pointerleave", stopPan);
+  prevUnsafe.addEventListener("click", function () { seekUnsafe(-1); });
+  nextUnsafe.addEventListener("click", function () { seekUnsafe(1); });
+  safetyToggle.addEventListener("change", function () { update(Number(slider.value)); });
+  applyViewBox(initialViewBox);
+  applyRotation(0);
+  update(0);
+})();
+</script>
+""".strip()
     report = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>{title}</title>
   <style>
-    body {{ font-family: system-ui, sans-serif; margin: 24px; color: #1f2933; }}
-    h1 {{ font-size: 22px; }}
-    h2 {{ font-size: 18px; margin-top: 24px; }}
-    .svg-wrap {{ border: 1px solid #d7d7d0; overflow: auto; background: #f7f7f2; }}
+    body {{ font-family: system-ui, sans-serif; margin: 16px; color: #1f2933; background: #fbfbf8; }}
+    h1 {{ font-size: 22px; margin-bottom: 6px; }}
+    h2 {{ font-size: 18px; margin: 0; }}
+    button, select, input[type="range"] {{ font: inherit; }}
+    button {{ border: 1px solid #c7ccd1; background: #ffffff; color: #111827; border-radius: 6px; padding: 6px 10px; cursor: pointer; }}
+    button:hover {{ background: #f3f4f6; }}
+    .report-meta {{ margin: 4px 0; }}
+    .svg-wrap {{ border: 1px solid #d7d7d0; overflow: hidden; background: #f7f7f2; flex: 1 1 auto; min-height: 280px; }}
+    #plan-map {{ width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; user-select: none; }}
+    #plan-map.is-panning {{ cursor: grabbing; }}
+    .preview-panel {{ border: 1px solid #d7d7d0; background: #ffffff; border-radius: 8px; padding: 12px; margin: 14px 0; height: calc(100vh - 32px); min-height: 560px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; }}
+    .preview-title-row {{ display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }}
+    .preview-controls {{ display: grid; grid-template-columns: auto auto auto minmax(280px, 1fr) auto auto; gap: 8px; align-items: center; }}
+    .preview-controls input[type="range"] {{ width: 100%; }}
+    .map-toolbar {{ display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }}
+    .map-toolbar button {{ min-width: 36px; padding: 5px 8px; }}
+    .toolbar-label {{ color: #4b5563; font-size: 13px; font-weight: 700; }}
+    .rotation-slider {{ width: 120px; }}
+    .zoom-readout, .rotate-readout {{ min-width: 58px; text-align: right; font-variant-numeric: tabular-nums; color: #4b5563; }}
+    .preview-meta {{ display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; }}
+    .status-pill {{ display: inline-flex; align-items: center; min-width: 96px; justify-content: center; padding: 3px 8px; border-radius: 999px; font-weight: 700; }}
+    .status-safe {{ color: #166534; background: #dcfce7; }}
+    .status-margin {{ color: #92400e; background: #fef3c7; }}
+    .status-collision {{ color: #991b1b; background: #fee2e2; }}
+    .gap-note {{ color: #9d174d; font-weight: 700; }}
+    .toggles, .legend {{ display: flex; flex-wrap: wrap; gap: 10px 14px; margin-top: 12px; font-size: 13px; }}
+    .toggles label {{ white-space: nowrap; }}
+    .legend span {{ display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }}
+    .key {{ width: 22px; height: 0; border-top: 3px solid #111827; display: inline-block; }}
+    .key-dashed {{ border-top-style: dashed; }}
+    .key-dot {{ width: 9px; height: 9px; border: 0; border-radius: 50%; background: #dc2626; }}
+    .key-fill {{ width: 16px; height: 10px; border: 2px solid #1d7a32; background: #d7efd2; }}
+    .preview-counts {{ margin: 0; font-size: 13px; }}
     table {{ border-collapse: collapse; margin-top: 20px; max-width: 1100px; }}
     th, td {{ border: 1px solid #ddd; padding: 6px 8px; text-align: left; vertical-align: top; }}
     th {{ width: 220px; background: #f3f4f6; }}
@@ -1630,11 +3701,83 @@ def render_run(run_dir: pathlib.Path) -> None:
 </head>
 <body>
   <h1>{title}</h1>
-  <p>Profile: <code>{html.escape(str(metrics.get("profile", compat.get("profile", "unknown"))))}</code></p>
-  <p>Source map: <code>{html.escape(str(source.get("id", "source_map_snapshot.json")))}</code></p>
+  <p class="report-meta">Profile: <code>{html.escape(str(metrics.get("profile", preview_compat.get("profile", "unknown"))))}</code></p>
+  <p class="report-meta">Source map: <code>{html.escape(str(source.get("id", "source_map_snapshot.json")))}</code></p>
   {comparison_rows(run_dir, metrics)}
-  <div class="svg-wrap">{svg}</div>
+  <section class="preview-panel">
+    <div class="preview-title-row">
+      <h2>Mower Path Preview</h2>
+      <div class="map-toolbar">
+        <span class="toolbar-label">Zoom</span>
+        <button id="preview-zoom-out" type="button" title="Zoom out">-</button>
+        <button id="preview-zoom-in" type="button" title="Zoom in">+</button>
+        <button id="preview-zoom-fit" type="button" title="Fit map">Fit</button>
+        <span id="preview-zoom-level" class="zoom-readout">100%</span>
+        <span class="toolbar-label">Rotate</span>
+        <button id="preview-rotate-left" type="button" title="Rotate left">-15</button>
+        <input id="preview-rotate-slider" class="rotation-slider" type="range" min="-180" max="180" step="1" value="0" aria-label="Map rotation">
+        <button id="preview-rotate-right" type="button" title="Rotate right">+15</button>
+        <button id="preview-rotate-reset" type="button" title="Reset rotation">0</button>
+        <span id="preview-rotate-level" class="rotate-readout">0 deg</span>
+      </div>
+    </div>
+    <div class="preview-controls">
+      <button id="preview-play" type="button">Play</button>
+      <button id="preview-step-back" type="button">Back</button>
+      <button id="preview-step-forward" type="button">Forward</button>
+      <input id="pose-slider" type="range" min="0" max="0" value="0">
+      <select id="preview-speed" aria-label="Preview speed">
+        <option value="2">2 poses/s</option>
+        <option value="8" selected>8 poses/s</option>
+        <option value="20">20 poses/s</option>
+        <option value="60">60 poses/s</option>
+      </select>
+      <span id="preview-status" class="status-pill status-safe">safe</span>
+    </div>
+    <div class="preview-meta">
+      <span id="preview-pose-meta">pose 0 / 0</span>
+      <span id="preview-gap-meta" class="gap-note" hidden></span>
+      <button id="preview-prev-unsafe" type="button">Previous unsafe</button>
+      <button id="preview-next-unsafe" type="button">Next unsafe</button>
+    </div>
+    <div class="toggles">
+      <label><input type="checkbox" data-layer-toggle="layer-base" checked> base_link path</label>
+      <label><input type="checkbox" data-layer-toggle="layer-tool" checked> cutter coverage</label>
+      <label><input type="checkbox" data-layer-toggle="layer-connectors" checked> connectors</label>
+      <label><input type="checkbox" data-layer-toggle="layer-pivots" checked> pivots</label>
+      <label><input type="checkbox" data-layer-toggle="layer-left-wheel" checked> left wheel track</label>
+      <label><input type="checkbox" data-layer-toggle="layer-right-wheel" checked> right wheel track</label>
+      <label><input type="checkbox" data-layer-toggle="layer-turn-anchors" checked> turn anchors</label>
+      <label><input type="checkbox" data-layer-toggle="layer-swept-footprint" checked> swept footprint</label>
+      <label><input type="checkbox" data-layer-toggle="layer-debug" checked> F2C debug</label>
+      <label><input type="checkbox" data-layer-toggle="layer-unsafe" checked> unsafe markers</label>
+      <label><input id="show-safety-footprint" type="checkbox" checked> safety footprint</label>
+    </div>
+    <div class="legend">
+      <span><i class="key key-fill"></i> mow area</span>
+      <span><i class="key" style="border-color:#2563eb"></i> cutter coverage</span>
+      <span><i class="key key-dashed" style="border-color:#111827"></i> base_link</span>
+      <span><i class="key key-dashed" style="border-color:#f97316"></i> connector</span>
+      <span><i class="key-dot" style="background:#7c3aed"></i> pivot sample</span>
+      <span><i class="key key-dashed" style="border-color:#0f766e"></i> left wheel</span>
+      <span><i class="key key-dashed" style="border-color:#9333ea"></i> right wheel</span>
+      <span><i class="key-dot" style="background:#ea580c"></i> pivot anchor</span>
+      <span><i class="key-dot" style="background:#0891b2"></i> target anchor</span>
+      <span><i class="key-dot"></i> unsafe sample</span>
+      <span><i class="key key-dashed" style="border-color:#be185d"></i> segment gap</span>
+    </div>
+	    <p class="preview-counts">Timeline poses: <code>{int(preview_counts.get("timeline", 0))}</code>.
+	    Physical collisions: <code>{int(preview_counts.get("unsafe_physical", 0))}</code>.
+	    Safety-margin only: <code>{int(preview_counts.get("unsafe_margin_only", 0))}</code>.
+	    Segment gaps: <code>{int(preview_counts.get("segment_gaps", 0))}</code>.
+	    Maneuvers: <code>{int(preview_counts.get("maneuvers", 0))}</code>.
+	    Reverse turn poses: <code>{int(preview_counts.get("reverse_turn_poses", 0))}</code>.
+	    Cutting-disabled poses: <code>{int(preview_counts.get("cutting_disabled_poses", 0))}</code>.</p>
+    <div class="svg-wrap">{svg}</div>
+  </section>
   <table>{metric_rows}</table>
+  <script id="simulation-data" type="application/json">{preview_json}</script>
+  {viewer_script}
 </body>
 </html>
 """
@@ -1834,6 +3977,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--swath-angle-degrees", type=float, help="fixed swath angle override in degrees")
     plan.add_argument("--outline-count", type=int, help="override outline/headland count from the config")
+    plan.add_argument("--outline-clearance-m", type=float, help="override outline centerline clearance from boundaries")
+    plan.add_argument(
+        "--turn-forward-extent-spacing-factor",
+        type=float,
+        help="override forward U-turn fallback extent as a factor of stripe spacing",
+    )
+    plan.add_argument(
+        "--turn-planner",
+        choices=["wheel_anchor", "lattice", "three_point", "forward_u_turn"],
+        help="override the primary stripe-to-stripe turn planner",
+    )
+    plan.add_argument(
+        "--turn-cutting-mode",
+        choices=["off", "forward_only", "all"],
+        help="override whether turn poses count as cutting coverage",
+    )
+    plan.add_argument("--turn-reverse-enabled", dest="turn_reverse_enabled", action="store_true", default=None)
+    plan.add_argument("--turn-reverse-disabled", dest="turn_reverse_enabled", action="store_false", default=None)
     plan.set_defaults(func=plan_map)
 
     render = sub.add_parser("render", help="re-render SVG/HTML for an existing run directory")
@@ -1853,6 +4014,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     batch.add_argument("--swath-angle-degrees", type=float, help="fixed swath angle override in degrees")
     batch.add_argument("--outline-count", type=int, help="override outline/headland count from the config")
+    batch.add_argument("--outline-clearance-m", type=float, help="override outline centerline clearance from boundaries")
+    batch.add_argument(
+        "--turn-forward-extent-spacing-factor",
+        type=float,
+        help="override forward U-turn fallback extent as a factor of stripe spacing",
+    )
+    batch.add_argument(
+        "--turn-planner",
+        choices=["wheel_anchor", "lattice", "three_point", "forward_u_turn"],
+        help="override the primary stripe-to-stripe turn planner",
+    )
+    batch.add_argument(
+        "--turn-cutting-mode",
+        choices=["off", "forward_only", "all"],
+        help="override whether turn poses count as cutting coverage",
+    )
+    batch.add_argument("--turn-reverse-enabled", dest="turn_reverse_enabled", action="store_true", default=None)
+    batch.add_argument("--turn-reverse-disabled", dest="turn_reverse_enabled", action="store_false", default=None)
     batch.set_defaults(func=cmd_batch)
 
     convert = sub.add_parser("convert-kml", help="convert Google Earth KML polygons into coverage-lab map JSON")
