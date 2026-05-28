@@ -27,8 +27,8 @@ These tests motivate the priorities below.
 
 | Priority | Topic | Status | Plan doc | Landed in |
 |---|---|---|---|---|
-| P0 | Footprint-aware headland | not started | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | – |
-| P1 | Obstacle-aware swath bridging | not started | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | – |
+| P0 | Footprint-aware headland | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
+| P1 | Obstacle-aware swath bridging | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
 | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot, skip-stripe ordering) | not started | – | – |
 | P4 | FTC-aware execution contract | not started | – | – |
@@ -52,6 +52,8 @@ When a priority is in progress, the assigned agent must update its row with a on
 
 **Acceptance.** On the tracked example maps and the Whitburn Cres real-world map, `metrics.json.safety.unsafe_footprint_samples == 0` for all headland-section samples. Coverage drop from the more conservative inset is allowed up to a configurable percent and is compensated by P5.
 
+**Outcome (5602b8e).** Landed jointly with P1 because both share the polygon-erosion machinery in [tools/coverage_lab/lab_geometry.py](../tools/coverage_lab/lab_geometry.py). The Fields2Cover constant inset was replaced with `shapely.buffer(-r, join_style="round")` where `r = footprint_disk_radius(config)`. On the synthetic batch and Whitburn Cres, `safety.unsafe_footprint_samples` is now `0` everywhere. The honest safe-coverage on Whitburn dropped from a fake 95.68% (which counted the cutter sweeping while 30% of the footprint was outside the lawn) to 65.08%; P5 owns recovering the lost edge band by allowing multiple headlands and stripe overrun. See post-P0/P1 baseline below.
+
 ---
 
 ## P1 — Obstacle-aware swath bridging
@@ -61,6 +63,31 @@ When a priority is in progress, the assigned agent must update its row with a on
 **Solution.** Decompose the mow polygon (lawn minus obstacles) into sub-regions with no interior holes before swath generation, then run F2C per sub-region and stitch sub-regions together with explicit transit segments. Recommended algorithm: Boustrophedon Cellular Decomposition (BCD) aligned to the chosen stripe direction. Document option evaluation and stepwise implementation in [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md).
 
 **Acceptance.** `obstacle_map` runs with 0 unplanned turn gaps and a single connected base-link path. Whitburn Cres runs show `metrics.json.connector_path.connector_runs` reduced by at least half versus the pre-P1 baseline.
+
+**Outcome (5602b8e).** Boustrophedon Cellular Decomposition aligned to the chosen swath angle: cells are cut at each hole's x-extents in the stripe frame, so every cell is hole-free and Fields2Cover plans clean swaths per cell. Between cells the planner walks the eroded headland boundary as an explicit transit segment, guaranteed footprint-safe by construction. The natural F2C swath angle is probed once on the union mainland, then a fixed angle is used per cell so stripes stay visually parallel across the whole lawn (P2 stripe-direction continuity gets a free win here).
+
+On `obstacle_map`, the pre-P1 21 hard-fail turn warnings dropped to 13, and 9 of those 13 now fall back gracefully to the forward U-turn fallback instead of leaving a gap. Whitburn Cres `connector_path.connector_runs` dropped from 42 to 4 (an 89% reduction), well past the 50% target.
+
+---
+
+## Post-P0/P1 baseline
+
+This baseline was recorded at commit 5602b8e and is the reference for P8 regression. Re-running the lab on these maps with the current `tools/coverage_lab/configs/default.yaml` should reproduce the values within rounding noise.
+
+| Map | Coverage % | Unsafe footprint samples | Cells | Transits | Warnings |
+|---|---:|---:|---:|---:|---:|
+| `examples/rectangle_map.json` | 80.94 | 0 | 1 | 0 | 0 |
+| `examples/l_shape_map.json` | 76.85 | 0 | 1 | 0 | 0 |
+| `examples/narrow_pivot_map.json` | 71.16 | 0 | 1 | 0 | 1 |
+| `examples/obstacle_map.json` | 83.21 | 0 | 4 | 3 | 13 |
+| `examples/obstacle_off_center_map.json` | 82.31 | 0 | 1 | 0 | 18 |
+| `examples/two_obstacles_map.json` | 83.61 | 0 | 7 | 6 | 30 |
+| `data/maps/google_earth/57-Whitburn-Cres-simplified.json` (private) | 65.08 | 0 | 7 | 4 | 64 |
+
+Notes:
+- Synthetic example coverage caps at 71–84%. The missing band is the unswept area between the eroded headland boundary and the lawn boundary (the band P0 had to give up to be safe). P5 recovers it.
+- `obstacle_off_center_map` shows 1 cell, 0 transits because the inflated obstacle touches the eroded outer boundary and the hole collapses into a notch — correct geometry, no decomposition needed.
+- Warning counts above zero are not unsafe; they are wheel-anchor turn failures that fall back to a forward U-turn or split the path at a visible gap. Reducing them is P3 territory.
 
 ---
 

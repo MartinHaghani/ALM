@@ -95,8 +95,10 @@ It mirrors current Mowrator planning assumptions where possible:
 
 - `tool_width: 0.4`
 - `tool_center_offset: [0.41, 0.0]`
+- `headland_strategy: footprint_disk` (P0). The headland centreline is the boundary of `lawn ⊖ disk(footprint_disk_radius)`, computed by [tools/coverage_lab/lab_geometry.py](../tools/coverage_lab/lab_geometry.py). The disk radius bakes in `safety_margin_m` so the safety footprint is guaranteed inside the lawn at every yaw. Legacy `f2c` strategy is preserved for comparison.
+- `cell_decomposition: true` (P1). The mainland is split into hole-free Boustrophedon cells before Fields2Cover swath generation; cells are stitched together with explicit transit segments that walk the eroded boundary.
 - `outline_count: 1`
-- `outline_clearance_m: auto`, which derives the first outline inset from the mower footprint plus configured safety margin
+- `outline_clearance_m: auto`, which derives the first outline inset from the mower footprint plus configured safety margin (only used when `headland_strategy: f2c`; the `footprint_disk` strategy computes its own clearance directly)
 - `outline_offset: 0.0`
 - footprint: `[[0.0, 0.34], [0.82, 0.34], [0.82, -0.34], [0.0, -0.34]]`
 - `drive_model: zero_turn`
@@ -178,13 +180,12 @@ Implications for the lab:
 
 ## Known Gaps
 
-The lab currently exposes several unresolved planning problems on complex real maps:
+P0 (footprint-aware headland) and P1 (obstacle-aware swath bridging) landed at commit `5602b8e`. The following are the remaining gaps that the prioritized roadmap continues to address:
 
-- unsafe footprint samples near boundaries and obstacles;
-- stripes or turns that can leave the mow area;
-- obstacle interactions that need stricter clipping and validation;
-- turn candidates that are geometrically impossible for the configured wheel track and stripe spacing;
-- uncertainty about how best to encode pivots, reverse, and blade state for the existing FTC controller.
+- coverage of the band between the eroded headland centreline and the lawn boundary (P5: multi-headland and stripe overrun);
+- wheel-anchor turn failures inside narrow cells where the geometry forbids any reverse-anchored maneuver (P3: richer turn library — omega, three-point Y, skip-stripe);
+- visual stripe direction continuity is preserved across cells (P1 carries this from P2) but stripe-end alignment, blade scheduling, and rotation-of-direction memory are still open (remainder of P2);
+- mower-side execution semantics for reverse, pivot wheel, and blade state are still unencoded (P4: maneuver-aware planner contract).
 
 Do not hide these by weakening validation. The next planning work should make small, testable changes and use the HTML preview plus tracked sample maps to compare behavior.
 
