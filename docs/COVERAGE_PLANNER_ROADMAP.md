@@ -80,6 +80,8 @@ P10 was placed at execution slot 1 because it has the largest immediate visual e
 
 On `obstacle_map`, the pre-P1 21 hard-fail turn warnings dropped to 13, and 9 of those 13 now fall back gracefully to the forward U-turn fallback instead of leaving a gap. Whitburn Cres `connector_path.connector_runs` dropped from 42 to 4 (an 89% reduction), well past the 50% target.
 
+**P1 v1 sweep direction was wrong; corrected at 6883754.** The original BCD cut along x (vertical columns), but for stripes-along-x the correct sweep is along y (horizontal bands). The X-cut version forced every stripe to be ≤ column width, producing 149 short stripes and 30 warnings on `two_obstacles_map` where the geometry should naturally support full-width stripes wherever no obstacle blocks. The Y-cut fix gives cell shapes that match the boustrophedon flow: bands at obstacle-free y values produce full-width long stripes; bands intersecting an obstacle split into left/right sub-cells only in that obstacle's y-range. Same total cell count, very different cell shapes and stripe counts. A `swath_length` section was also added to `metrics.json` (mean/median/min/max/short_count) so this class of regression is visible without manual inspection in the future.
+
 ---
 
 ## Post-P0/P1 baseline
