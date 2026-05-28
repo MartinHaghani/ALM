@@ -2,6 +2,8 @@
 
 Purpose: guardrails for the laptop-only Fields2Cover evaluation lab.
 
+Before starting any planner work, read [docs/COVERAGE_PLANNER_ROADMAP.md](../../docs/COVERAGE_PLANNER_ROADMAP.md). It carries the prioritized work list (P0–P9), per-priority status, per-priority implementation plan docs, and the natural-lawn edge case table. Update the roadmap status row when work lands.
+
 - This directory is for offline route-planning experiments only. Do not wire it into `open_mower.launch`, `mower_logic`, runtime Docker images, or mower startup scripts.
 - Do not add automatic SSH or mower-control behavior here. Current mower maps are copied manually into `data/maps/`.
 - Treat files under `data/maps/` and `runs/` as private local artifacts. They are ignored on purpose and should not be committed unless a user explicitly asks to publish a scrubbed sample.

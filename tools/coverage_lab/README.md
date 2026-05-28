@@ -75,7 +75,7 @@ tools/coverage_lab/bin/coverage_lab batch --maps tools/coverage_lab/examples
 
 ## Current Handoff Notes
 
-The lab is caught up as an offline evaluator, not as a mower-ready planner. A future agent should start by reading this file, `tools/coverage_lab/AGENTS.md`, and `docs/COVERAGE_PLANNER_LAB.md`.
+The lab is caught up as an offline evaluator, not as a mower-ready planner. A future agent should start by reading this file, `tools/coverage_lab/AGENTS.md`, `docs/COVERAGE_PLANNER_LAB.md`, and `docs/COVERAGE_PLANNER_ROADMAP.md`. The roadmap carries the prioritized work list and is where status updates land when a priority is implemented.
 
 The current primary output is `mowrator_zero_turn`. It uses Fields2Cover for headlands, swath generation, and swath ordering, then converts cutter-center swaths into executable Mowrator `base_link` poses and adds footprint-checked wheel-anchored stripe turns between adjacent swaths. The comparison output `f2c_tiny_radius` keeps Fields2Cover's built-in path planner for contrast.
 

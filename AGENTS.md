@@ -131,5 +131,7 @@ roslaunch open_mower open_mower.launch
 - [docs/SIMULATION.md](docs/SIMULATION.md): simulation entrypoints and observed behavior.
 - [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md): fork maintenance guidance.
 - [docs/TODO.md](docs/TODO.md): deferred fork-specific implementation ideas.
+- [docs/COVERAGE_PLANNER_LAB.md](docs/COVERAGE_PLANNER_LAB.md): laptop-only Fields2Cover evaluation lab design.
+- [docs/COVERAGE_PLANNER_ROADMAP.md](docs/COVERAGE_PLANNER_ROADMAP.md): prioritized coverage planner work list and status.
 - [docs/CODE_REVIEW.md](docs/CODE_REVIEW.md): review checklist.
 - [docs/DOCS_MAINTENANCE.md](docs/DOCS_MAINTENANCE.md): how to keep the documentation layer aligned.

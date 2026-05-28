@@ -188,10 +188,4 @@ The lab currently exposes several unresolved planning problems on complex real m
 
 Do not hide these by weakening validation. The next planning work should make small, testable changes and use the HTML preview plus tracked sample maps to compare behavior.
 
-Likely next implementation areas:
-
-- stricter swath clipping against mow polygons and holes;
-- controller-aware segment boundaries for headlands, swaths, and turns;
-- an execution preview that approximates FTC follow-the-carrot behavior, separate from the current exact-pose and wheel-track preview;
-- tracked regression maps for narrow boundaries, obstacle holes, separated lawns, and Google Earth-like outlines;
-- eventual mower-side service integration only after the offline output is accepted.
+The prioritized work list and the per-priority implementation plans live in [COVERAGE_PLANNER_ROADMAP.md](COVERAGE_PLANNER_ROADMAP.md). Start there before touching the lab. The roadmap is the source of truth for what to build next, in what order, and what acceptance criteria each step must meet. Update its status table when work lands.

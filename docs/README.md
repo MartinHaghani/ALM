@@ -45,6 +45,7 @@ For a fast orientation pass, read in this order:
 - [DOCKER.md](DOCKER.md): runtime versus development container behavior.
 - [SIMULATION.md](SIMULATION.md): simulation entrypoints and observed runtime shape.
 - [COVERAGE_PLANNER_LAB.md](COVERAGE_PLANNER_LAB.md): laptop-only Fields2Cover route-planning evaluation setup.
+- [COVERAGE_PLANNER_ROADMAP.md](COVERAGE_PLANNER_ROADMAP.md): prioritized coverage planner work list (P0–P9), per-priority status, and edge case catalogue.
 - [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md): fork maintenance guidance.
 - [CODE_REVIEW.md](CODE_REVIEW.md): reusable review checklist.
 - [TODO.md](TODO.md): deferred fork-specific implementation ideas.
