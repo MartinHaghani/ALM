@@ -46,5 +46,11 @@ RUN git clone --depth 1 --branch "${FIELDS2COVER_REF}" https://github.com/Fields
   && python3 -c "import fields2cover" \
   && rm -rf /tmp/Fields2Cover
 
+# Shapely (GEOS Python bindings) is used by tools/coverage_lab/lab_geometry.py for
+# footprint-aware headland erosion (P0) and obstacle-aware cell decomposition (P1).
+# libgeos-dev is already installed above for Fields2Cover, so shapely picks it up.
+RUN pip3 install --no-cache-dir "shapely>=2.0,<3" \
+  && python3 -c "import shapely; print('shapely', shapely.__version__)"
+
 WORKDIR /workspace
 ENTRYPOINT ["python3", "/workspace/tools/coverage_lab/coverage_lab.py"]
