@@ -82,6 +82,25 @@ On `obstacle_map`, the pre-P1 21 hard-fail turn warnings dropped to 13, and 9 of
 
 **P1 v1 sweep direction was wrong; corrected at 6883754.** The original BCD cut along x (vertical columns), but for stripes-along-x the correct sweep is along y (horizontal bands). The X-cut version forced every stripe to be ≤ column width, producing 149 short stripes and 30 warnings on `two_obstacles_map` where the geometry should naturally support full-width stripes wherever no obstacle blocks. The Y-cut fix gives cell shapes that match the boustrophedon flow: bands at obstacle-free y values produce full-width long stripes; bands intersecting an obstacle split into left/right sub-cells only in that obstacle's y-range. Same total cell count, very different cell shapes and stripe counts. A `swath_length` section was also added to `metrics.json` (mean/median/min/max/short_count) so this class of regression is visible without manual inspection in the future.
 
+**P1 v2 visit-order optimisation landed at 9aeccc3.** The original P1 assembled cells in the arbitrary order BCD returned them, always inserted a headland transit between consecutive cells, and never tried a direct stripe-to-stripe turn even when the cells were y-adjacent. That produced visible "teleports" the user flagged at obstacle_map pose 1889 (a transit chunk where a wheel-anchor turn would have continued the path), pose 3929 (a 197-pose perimeter transit because Cell 3 was visited last in forward direction, far from Cell 2's end), and the obstacle_off_center 3-section sequencing problem.
+
+The fix is three small changes in `_plan_one_lawn_profiles_footprint_disk`:
+
+- `optimize_cell_visit_order` runs a **multi-start greedy nearest-neighbour**: try every (starting cell, starting direction) pair, greedy-walk from each, keep the lowest-total-transit order. Each cell can be visited F2C-forward or pose-reversed. This consistently picks a starting cell whose F2C-default endpoint sits near the rest of the cells; single-start greedy was locking the planner into corner exits.
+- `try_direct_inter_cell_connector` calls the existing `plan_swath_turn_base_poses` between consecutive cells; a footprint-safe wheel-anchor or forward U-turn becomes the connector. Headland transit is now the fallback, not the default.
+- Three new metrics: `metrics.json.path_splits.within_cell_path_splits`, `metrics.json.inter_cell.direct_turn_count`, plus `metrics.json.transit.{count,total_length_m}` which now drops as direct turns replace transits. The first one is the user-flagged priority metric.
+
+Results vs the post-direction-fix run:
+
+| map | transits | direct turns | within-cell splits | path total |
+|---|---|---|---|---|
+| obstacle_map | 3 → **0** | 3 | 2 | unchanged |
+| obstacle_off_center_map | 6 → **4** | 2 | 3 | unchanged |
+| two_obstacles_map | 6 → **3** | 3 | 2 | unchanged |
+| 57-Whitburn-Cres | transit length **75.9 → 21.0 m** (−72 %) | 0 | 37 | base_link 522.8 → **467.9 m** (−11 %) |
+
+The within-cell splits on `obstacle_map` (2), `two_obstacles_map` (2), `obstacle_off_center_map` (3) and `57-Whitburn-Cres` (37) are wheel-anchor failures at stripe_spacing 0.40 m < wheel_track 0.58 m — a geometric impossibility for the current wheel-anchor maneuver, not a planner bug. They belong to P3 (richer turn library: omega, three-point Y-turn, skip-stripe ordering).
+
 ---
 
 ## Post-P0/P1 baseline
