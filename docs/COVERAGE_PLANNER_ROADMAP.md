@@ -36,8 +36,8 @@ Listed in **execution order** (top = do next). IDs are stable per the "do not re
 | 2 | **P12** | Robust dominant-direction stripe angle (replace F2C's `best_swath_length` with a weighted edge-angle histogram so noisy real-world outlines pick the visually-dominant axis, not the longest single segment) | not started | – | – |
 | 3 | **P13** | Per-cell stripe angle for tight cells (cells whose short axis < ~2× tool_width along the global angle should rotate stripes to align with the cell's long axis, eliminating impossible U-turns in narrow slivers like obstacle_off_center paths 10–17) | not started | – | – |
 | 4 | P10 | Always-connected base-link path (eliminate teleports between paths) | not started | – | – |
-| 5 | P6 | Multi-lawn navigation and dock integration | not started | – | – |
-| 6 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started | – | – |
+| 5 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started | – | – |
+| 6 | P6 | Multi-lawn navigation and dock integration | not started | – | – |
 | 7 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
 | 8 | P4 | FTC-aware execution contract | not started | – | – |
 | 9 | P9 | Path smoothing and FTC-truthful preview | not started | – | – |
