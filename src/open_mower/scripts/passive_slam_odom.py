@@ -87,6 +87,14 @@ class PassiveSlamOdom:
             self.yaw_rate = 0.0
             self.last_imu_stamp = None
             self.last_reset_wall_time = time.time()
+            # Also trigger a fresh gyro-bias calibration on the next IMU
+            # samples; otherwise the cached gyro_offset survives the reset and
+            # a slowly-drifted IMU keeps integrating phantom yaw_rate.
+            self.gyro_offset = 0.0
+            self.gyro_offset_sum = 0.0
+            self.gyro_offset_samples = 0
+            self.calibration_start = None
+            self.calibrated = self.gyro_calibration_seconds <= 0.0
 
         self.publish_odometry(rospy.Time.now())
         self.publish_status()
