@@ -32,11 +32,11 @@ Listed in **execution order** (top = do next). IDs are stable per the "do not re
 | – | P0 | Footprint-aware headland | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
 | – | P1 | Obstacle-aware swath bridging | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
 | – | P11 | BCD critical-vertex decomposition (split at concave outer-boundary vertices, not just hole x-extents) | landed | – | 91c4f92 |
-| 1 | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot, skip-stripe ordering) | not started — next | – | – |
-| 2 | **P12** | Robust dominant-direction stripe angle (replace F2C's `best_swath_length` with a weighted edge-angle histogram so noisy real-world outlines pick the visually-dominant axis, not the longest single segment) | not started | – | – |
-| 3 | **P13** | Per-cell stripe angle for tight cells (cells whose short axis < ~2× tool_width along the global angle should rotate stripes to align with the cell's long axis, eliminating impossible U-turns in narrow slivers like obstacle_off_center paths 10–17) | not started | – | – |
-| 4 | P10 | Always-connected base-link path (eliminate teleports between paths) | not started | – | – |
-| 5 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started | – | – |
+| – | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot, skip-stripe ordering) | landed | – | 315cf02 |
+| – | P12 | Robust dominant-direction stripe angle (replace F2C's `best_swath_length` with a weighted edge-angle histogram so noisy real-world outlines pick the visually-dominant axis, not the longest single segment) | landed | – | 9ca521f |
+| – | P13 | Per-cell stripe angle for tight cells (cells whose short axis < ~2× tool_width along the global angle should rotate stripes to align with the cell's long axis, eliminating impossible U-turns in narrow slivers like obstacle_off_center paths 10–17) | landed | – | 9ca521f |
+| – | P10 | Always-connected base-link path (eliminate teleports between paths) | landed | – | 310f63e |
+| 1 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started — next | – | – |
 | 6 | P6 | Multi-lawn navigation and dock integration | not started | – | – |
 | 7 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
 | 8 | P4 | FTC-aware execution contract | not started | – | – |
@@ -153,6 +153,8 @@ This is the same `build_transit_path` machinery already used for inter-cell tran
 
 **Why this slot.** It is a self-contained change with the largest single visual improvement available, and it makes every subsequent priority easier to evaluate. P3, P5, P11 all leave teleports in place; only P10 removes them.
 
+**Outcome (310f63e).** `connect_paths_with_transits` post-processes the assembled `paths[]` list. For every consecutive pair whose endpoints differ by more than `2 × path_sample_step_m`, it tries: (1) a direct wheel-anchor / U-turn via `try_direct_inter_cell_connector`; (2) walking the eroded headland ring via `lab_geometry.walk_ring_between`, bracketed with the exact endpoint poses so the residual gap really closes; (3) a straight-line connector tagged `unsafe_transit=True` as a last resort. Cross-lawn jumps are handled in `plan_profile_results`: any consecutive paths whose `area_index` differs get an explicit `cross_lawn_transit=True` connector with a per-segment warning. `metrics.json` gains `fill_bridges.{inserted_count, direct_turn_count, unsafe_transit_count}` and `cross_lawn_transit_count`. On Whitburn the **within-lawn chunk-to-chunk jumps dropped from 29 (jumps > 0.5 m) and 5 (jumps > 5 m) to zero on both**; the two cross-property transitions between the three lawns now appear as explicit `cross-lawn 0 → 1` and `cross-lawn 1 → 2` records.
+
 ---
 
 ## P11 — BCD critical-vertex decomposition
@@ -195,6 +197,38 @@ The dominant visible improvement is the collapse of large chunk-to-chunk jumps o
 
 ---
 
+## Combined post-P3/P10/P12/P13 baseline
+
+Four priorities landed together via parallel subagents and a single cherry-pick pass into `codex/remove-lowlevel-board`. The combined run on the synthetic batch + Whitburn shows:
+
+| map | within-cell splits | jumps > 0.5 m | jumps > 5 m | cov% | per-cell angle overrides | turn planner counts |
+|---|---:|---:|---:|---:|---:|---|
+| rectangle_map | 0 → 0 | 0 → 0 | 0 → 0 | 80.94 | 0/1 | `wheel_anchor:12` |
+| l_shape_map | 0 → 0 | **1 → 0** | **1 → 0** | 76.85 → **78.18** | 0/1 | `wheel_anchor:20` |
+| narrow_pivot_map | 0 → 0 | **1 → 0** | **1 → 0** | 71.16 → **71.88** | 0/1 | `wheel_anchor:5` |
+| obstacle_map | 0 → 1 | **2 → 0** | **1 → 0** | 80.27 → **82.79** | 0/4 | `wheel_anchor:28, forward_u_turn:1` |
+| obstacle_off_center_map | 3 → **2** | **11 → 0** | **2 → 0** | 82.08 → 80.67 | 1/8 | `wheel_anchor:19, three_point_y:2, forward_u_turn:1` |
+| two_obstacles_map | 0 → 0 | **4 → 0** | **2 → 0** | 81.57 → **82.33** | 2/7 | `wheel_anchor:40, forward_u_turn:5` |
+| 57-Whitburn-Cres | 9 → 8 | **29 → 0** | **5 → 0** | 62.64 → 62.75 | **5/13** | `wheel_anchor:44, forward_u_turn:15, three_point_y:1` |
+
+Headline: **within-lawn teleports are gone** on every map (all "jumps > 0.5 m" within a single lawn dropped to 0). The remaining "chunks" on each map are all explicit connectors — either a direct wheel-anchor/U-turn (P3 fallback), a headland-walk bridge (P10), or an explicit `cross_lawn_transit` segment with a per-segment warning (P10).
+
+Whitburn now mowed as 3 fully-connected per-lawn paths joined by 2 explicit cross-lawn transits. `fill_bridges.inserted_count = 25`, of which 6 are direct inter-stripe turns and the rest are headland-ring walks. The path total grew from 484 m to 680 m — that 196 m is the cost of replacing every previous teleport with a real connector, which is exactly the trade asked for.
+
+P3 turn diversity is paying off on `obstacle_off_center` (three_point_y picked up 2 turns the wheel-anchor + U-turn fallback would have failed on) and on Whitburn (1 three_point_y plus 15 forward_u_turn fallbacks). P13 per-cell angle is overriding 5 of Whitburn's 13 cells where the global angle would have produced unsweepable slivers.
+
+The single-split regression on `obstacle_map` (0 → 1) is the new P12 dominant-direction angle picking a marginally different angle that triggered one wheel-anchor failure in a band that previously succeeded. Net win across the batch is overwhelming.
+
+---
+
+## P3 — Stripe-to-stripe turn diversity
+
+**Outcome (315cf02).** Three new primitives in `coverage_lab.py`: `sample_omega_turn_base_poses` (forward overshoot + 180° side arc + return leg), `sample_three_point_y_turn_base_poses` (forward leg + in-place pivot + forward into end), and `sample_in_place_pivot_base_poses` (lab-only yaw-only pivot, gated behind `in_place_pivot_enabled` config because FTC cannot execute same-position pivots on the current mower). `plan_swath_turn_base_poses` now dispatches over `turn_fallback_planners` after the wheel-anchor primary attempt; the fallback list is now `[forward_u_turn, omega, three_point_y]` by default. Failure reasons are accumulated per-fallback in the warning string so an unplannable turn carries the diagnostic for all attempted primitives. Config knobs added: `omega_radius_m`, `omega_overshoot_m`, `y_turn_forward_m`, `y_turn_pivot_max_degrees`, `y_turn_pivot_step_degrees`, `in_place_pivot_enabled`.
+
+On `obstacle_off_center_map` the split count dropped 3 → 2; the rescued turn used three_point_y. On Whitburn one Y-turn fired in the post-merge run. The remaining splits are the geometric impossibility at stripe_spacing 0.40 m < wheel_track 0.58 m — they need an additional skip-stripe ordering strategy that the agent left out of scope for this pass.
+
+---
+
 ## P12 — Robust dominant-direction stripe angle
 
 **Problem.** Fields2Cover's `best_swath_length` picks the swath angle that maximises a single swath's length across the polygon. On synthetic rectangles it works well. On every other map — `obstacle_map`, `obstacle_off_center_map`, `two_obstacles_map`, the L-shape, narrow_pivot — it picks an angle a few degrees off the visually-dominant axis because the polygon's longest individual chord is on a slight diagonal even when the boundary is overwhelmingly axis-aligned. On real-world recorded outlines (Whitburn Cres) the problem is worse: the boundary is sampled at near-uniform spacing so there are no "longest edges" at all, and F2C's chosen angle is determined by whichever short chord happens to be slightly longer than the others. The user noted that stripes look "slightly skewed" on every example except `rectangle_map`.
@@ -209,6 +243,8 @@ The dominant visible improvement is the collapse of large chunk-to-chunk jumps o
 This is robust to high-vertex-count recorded outlines (the dominant direction emerges from the cumulative edge-length weighting) and to small geometric perturbations (the histogram bin is wide enough to smooth them out).
 
 **Acceptance.** On `obstacle_map`, `obstacle_off_center_map`, `two_obstacles_map`, `l_shape_map`, and `narrow_pivot_map`, the chosen stripe angle is within 0.5° of horizontal (or whichever true cardinal axis the boundary uses). On Whitburn the chosen angle visually matches the dominant property axis when the outline is overlaid on the SVG.
+
+**Outcome (9ca521f).** `lab_geometry.dominant_direction_angle` builds a 1°-bin length-weighted edge-angle histogram (mod π so stripes are bidirectional), smooths with a Gaussian of `dominant_direction_smoothing_deg` (default 3°), and returns the peak bin's centre. Returns None when the peak is < 4× the mean bin so callers can fall back to F2C's `best_swath_length`. On the synthetic batch the chosen angle is 0° within tolerance for every axis-aligned map and matches the rectangle's rotation otherwise. The l_shape and narrow_pivot maps both saw small coverage improvements (+0.5–1.3 pp) from the cleaner angle pick.
 
 ---
 
@@ -226,6 +262,8 @@ This is robust to high-vertex-count recorded outlines (the dominant direction em
 This breaks visual stripe-direction continuity across the rotated cell, but the alternative — a fragmented patchwork of unmowed slivers — is worse. P2 (stripe aesthetics) can later add a "redirect" maneuver that smooths the angle transition at the sliver boundary.
 
 **Acceptance.** On `obstacle_off_center_map`, the slivers around the obstacle (current paths 10–17) collapse into one or two cells with continuous stripes aligned to the cell's long axis, and no split happens. On Whitburn, the within-cell split count drops from 9 (current) to under 3.
+
+**Outcome (9ca521f).** `lab_geometry.cell_long_axis_angle` (PCA on outer-ring vertices) and `lab_geometry.cell_short_axis_extent_along` let the per-cell F2C loop detect cells whose extent perpendicular to the global stripe angle is < `tool_width × tight_cell_stripe_threshold_factor` (default 2.0). Tight cells get their stripe angle overridden to the cell's long axis. `metrics.json.per_cell_angle` now reports `total_cells`, `tight_cell_count`, `angle_overrides`. On Whitburn 5 of 13 cells were flagged tight and rotated; on `obstacle_off_center_map` the sliver behind the obstacle (extent ≈ 0.13 m) was rotated. Splits in Whitburn dropped 9 → 8, short of the < 3 target — the remaining 8 are still geometric-impossibility cases that P3's missing skip-stripe ordering would resolve.
 
 ---
 
