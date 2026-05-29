@@ -310,11 +310,12 @@ class PassiveSlamAlignment:
 
         rospy.loginfo(
             "Passive SLAM alignment ready: boundary topic %s, publishing %s -> %s. Boundary samples now align "
-            "base_link to base_link (decoupled from the area-recorder rake); footprint front-right offset of "
-            "(%.3f, %.3f) is reported for reference only.",
+            "%s to %s (decoupled from the area-recorder rake); footprint front-right offset of (%.3f, %.3f) is "
+            "reported for reference only.",
             self.boundary_sample_topic,
             self.map_frame,
             self.slam_map_frame,
+            self.base_frame,
             self.slam_base_frame,
             self.slam_record_offset["x"],
             self.slam_record_offset["y"],
