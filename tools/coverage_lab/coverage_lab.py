@@ -2712,6 +2712,35 @@ def _pose_distance(a: dict[str, Any], b: dict[str, Any]) -> float:
     return math.hypot(float(a["x"]) - float(b["x"]), float(a["y"]) - float(b["y"]))
 
 
+def _path_list_is_footprint_safe(
+    paths: list[dict[str, Any]],
+    lawn: Lawn,
+    config: dict[str, Any],
+) -> bool:
+    """Check whether every pose in every chunk of ``paths`` keeps the safety
+    footprint inside ``lawn`` (outer ring) and outside its holes. Used by the
+    visit-order optimiser to reject a reversed cell whose 180° yaw flip puts
+    the asymmetric mower footprint into a previously-safe location's mirror —
+    e.g. the front of the footprint that pointed away from an obstacle now
+    points into it after reversal.
+    """
+    footprint = safety_footprint(config)
+    if len(footprint) < 3:
+        return True
+    metric_obstacles = list(lawn.holes)
+    metric_lawns = [lawn]
+    for chunk in paths:
+        for pose in chunk.get("path", {}).get("poses", []) or []:
+            corners = transform_footprint(pose, footprint)
+            for corner in corners:
+                if not point_in_lawn(corner, lawn):
+                    return False
+                for hole in metric_obstacles:
+                    if point_in_ring(corner, hole.outline):
+                        return False
+    return True
+
+
 def _greedy_visit_order_from(
     cells: list[dict[str, Any]],
     first_cell: dict[str, Any],
@@ -2719,11 +2748,15 @@ def _greedy_visit_order_from(
 ) -> tuple[list[tuple[int, str, list[dict[str, Any]]]], float]:
     """Run a greedy nearest-neighbour visit starting from ``first_cell`` with
     the given ``first_direction``. Returns the visit order and the total inter-
-    cell transit distance accumulated.
+    cell transit distance accumulated. Cells whose reverse option is unsafe
+    (``reverse_safe == False``) are forced to forward in this walk; the caller
+    must pre-mark them.
     """
+    if first_direction == "reverse" and not first_cell.get("reverse_safe", True):
+        first_direction = "forward"
     visited: list[tuple[int, str, list[dict[str, Any]]]] = []
     if first_direction == "reverse":
-        first_paths = _reverse_cell_paths(first_cell["paths"])
+        first_paths = first_cell["reversed_paths"]
         current_end = first_cell["start"]
     else:
         first_paths = first_cell["paths"]
@@ -2738,19 +2771,20 @@ def _greedy_visit_order_from(
         best_dist = math.inf
         for candidate in remaining:
             d_fwd = _pose_distance(current_end, candidate["start"])
-            d_rev = _pose_distance(current_end, candidate["end"])
             if d_fwd < best_dist:
                 best_dist = d_fwd
                 best_cell = candidate
                 best_dir = "forward"
-            if d_rev < best_dist:
-                best_dist = d_rev
-                best_cell = candidate
-                best_dir = "reverse"
+            if candidate.get("reverse_safe", True):
+                d_rev = _pose_distance(current_end, candidate["end"])
+                if d_rev < best_dist:
+                    best_dist = d_rev
+                    best_cell = candidate
+                    best_dir = "reverse"
         assert best_cell is not None
         total_cost += best_dist
         if best_dir == "reverse":
-            paths = _reverse_cell_paths(best_cell["paths"])
+            paths = best_cell["reversed_paths"]
             current_end = best_cell["start"]
         else:
             paths = best_cell["paths"]
@@ -2763,21 +2797,25 @@ def _greedy_visit_order_from(
 
 def optimize_cell_visit_order(
     cell_fill_paths: list[list[dict[str, Any]]],
+    lawn: Lawn,
+    config: dict[str, Any],
 ) -> list[tuple[int, str, list[dict[str, Any]]]]:
     """Pick a cell visit order that minimises inter-cell transit distance.
 
     Each cell can be visited in F2C "forward" order or pose-reversed "reverse"
-    order. The strategy is multi-start greedy nearest-neighbour: try every
-    (starting cell, starting direction) pair, run a greedy walk from each,
-    and keep the one with the smallest total inter-cell transit distance.
-    This is O(N^3) with a small constant (≤ ~14 starts × ~N^2 greedy = a few
-    thousand ops for N ≤ 16), which is fast enough that we always do it.
+    order, IF the reverse keeps the footprint safe. The mower footprint is
+    asymmetric (front extends 0.82 m from base_link); the reversal rotates
+    every pose's yaw by 180°, which moves the front to where the back was.
+    A pose that was footprint-safe forward can be unsafe in reverse when the
+    cell sits near an obstacle or boundary that previously bordered the
+    rear. ``_path_list_is_footprint_safe`` checks the reversed path against
+    ``lawn`` (outer ring + interior obstacles) and disables the reverse
+    option for unsafe cells.
 
-    Greedy with a fixed start can lock the planner into a corner — picking the
-    bottom-left endpoint forward dumps the exit at the opposite corner on
-    asymmetric maps. Trying all (start, direction) pairs costs almost nothing
-    and consistently chooses a starting cell whose F2C-chosen end lands near
-    the other cells.
+    Strategy is multi-start greedy nearest-neighbour: try every (starting
+    cell, starting direction) pair (skipping reverse on cells whose reverse
+    is unsafe), run a greedy walk from each, and keep the one with the
+    smallest total inter-cell transit distance.
 
     Returns a list of (original_cell_index, direction, paths) in execution
     order, with ``paths`` already reversed when ``direction == 'reverse'``.
@@ -2790,7 +2828,18 @@ def optimize_cell_visit_order(
         start, end = _cell_endpoint_poses(paths)
         if start is None or end is None:
             continue
-        cells.append({"idx": idx, "paths": paths, "start": start, "end": end})
+        reversed_paths = _reverse_cell_paths(paths)
+        reverse_safe = _path_list_is_footprint_safe(reversed_paths, lawn, config)
+        cells.append(
+            {
+                "idx": idx,
+                "paths": paths,
+                "reversed_paths": reversed_paths,
+                "start": start,
+                "end": end,
+                "reverse_safe": reverse_safe,
+            }
+        )
 
     if not cells:
         return []
@@ -2800,7 +2849,10 @@ def optimize_cell_visit_order(
     best_visited: list[tuple[int, str, list[dict[str, Any]]]] | None = None
     best_total_cost = math.inf
     for first_cell in cells:
-        for first_direction in ("forward", "reverse"):
+        directions = ["forward"]
+        if first_cell.get("reverse_safe", True):
+            directions.append("reverse")
+        for first_direction in directions:
             visited, cost = _greedy_visit_order_from(cells, first_cell, first_direction)
             if cost < best_total_cost:
                 best_total_cost = cost
@@ -3314,7 +3366,7 @@ def _plan_one_lawn_profiles_footprint_disk(
     # together. This eliminates the long "across the property" transits the
     # previous arbitrary order produced (e.g. obstacle_map Cell 2 → Cell 3
     # used to walk the entire perimeter to reach the right-of-obstacle band).
-    visit_order = optimize_cell_visit_order(cell_fill_paths)
+    visit_order = optimize_cell_visit_order(cell_fill_paths, lawn, config)
 
     # Count within-cell path splits — places where build_zero_turn_fill_paths
     # called finish_current() because both wheel-anchor and the forward U-turn
