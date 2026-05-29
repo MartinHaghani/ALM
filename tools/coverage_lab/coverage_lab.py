@@ -1277,6 +1277,366 @@ def sample_forward_u_turn_base_poses(
     return poses
 
 
+# ---------------------------------------------------------------------------
+# P3 turn diversity: omega, three-point Y, in-place pivot primitives.
+# Each sampler returns base_link poses tagged with section/direction/
+# turn_planner/cutting_enabled so plan_swath_turn_base_poses can drop the
+# result straight into the swath connection.
+# ---------------------------------------------------------------------------
+
+
+def sample_omega_turn_base_poses(
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    sample_step: float,
+    config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Wide forward "omega" swing -- overshoot the next stripe, arc 180 degrees
+    around a side-anchor of radius ``omega_radius_m``, then drive straight back
+    to ``end_pose``. Returns [] if any sampled pose's footprint is unsafe or if
+    the geometry is degenerate."""
+    start_yaw = float(start_pose.get("yaw", 0.0))
+    end_yaw = float(end_pose.get("yaw", start_yaw + math.pi))
+    p0 = (float(start_pose["x"]), float(start_pose["y"]))
+    p3 = (float(end_pose["x"]), float(end_pose["y"]))
+
+    start_heading = (math.cos(start_yaw), math.sin(start_yaw))
+    start_left = (-start_heading[1], start_heading[0])
+    delta = (p3[0] - p0[0], p3[1] - p0[1])
+    lateral = start_left[0] * delta[0] + start_left[1] * delta[1]
+    longitudinal = start_heading[0] * delta[0] + start_heading[1] * delta[1]
+    if abs(lateral) <= EPSILON:
+        return []
+    # Omega swings to the side where the next stripe sits.
+    side_sign = 1.0 if lateral > 0.0 else -1.0
+
+    radius = max(float(config.get("omega_radius_m", 0.6)), EPSILON)
+    overshoot = max(float(config.get("omega_overshoot_m", 0.4)), 0.0)
+    step = sample_step if sample_step > EPSILON else 0.1
+
+    # Local frame: x = start_heading, y = start_left. Build path in locals
+    # then transform once.
+    # Segment 1: straight forward by overshoot along +x.
+    # Segment 2: arc 180 degrees around centre at (overshoot, side_sign*radius)
+    #   starting at (overshoot, 0) ending at (overshoot, 2*side_sign*radius),
+    #   heading flips from +x to -x.
+    # Segment 3: straight back along -x by overshoot, ending at
+    #   (0, 2*side_sign*radius).
+    # We then translate to land on end_pose: the geometry requires
+    # 2*side_sign*radius == lateral and the longitudinal closure is 0; if those
+    # don't match exactly we adjust the final straight legs by adding the
+    # required longitudinal delta to segment 3 (or skip when infeasible).
+    if abs(2.0 * side_sign * radius - lateral) > 1.5 * radius:
+        # End stripe is much farther/closer than 2*radius -- omega geometry
+        # cannot reach it without an absurd extra straight. Bail out so a
+        # different fallback can try.
+        return []
+    # Allow modest stretch by adjusting the final straight leg to absorb the
+    # difference. Compute required local end position.
+    target_local_x = longitudinal
+    target_local_y = lateral
+    # Place the arc so its endpoint local-y matches target_local_y:
+    # arc-end-y = 2*side_sign*radius. The required y-shift is delta_y =
+    # target_local_y - 2*side_sign*radius. We shift the centre laterally
+    # so this comes out, which preserves the 180-degree shape but moves the
+    # endpoint. Implementation: redefine arc center at
+    # (overshoot, side_sign*radius + delta_y/2) and recompute arc as a circle
+    # of radius hypot(radius, delta_y/2)? Simpler: scale radius effectively.
+    # We instead enforce 2*side_sign*radius == lateral by adjusting radius to
+    # lateral/(2*side_sign) when within bounds; revert to bail otherwise.
+    effective_radius = abs(lateral) / 2.0
+    if effective_radius < radius * 0.5 or effective_radius > radius * 2.5:
+        return []
+
+    # Final straight leg length absorbs longitudinal mismatch:
+    #   end-of-arc local x = overshoot, then straight back by (overshoot -
+    #   target_local_x) along -x reaches target_local_x. Allow negative if
+    #   overshoot > target_local_x (still drive backwards along -x = forward
+    #   in the new heading direction since heading flipped).
+    final_leg = overshoot - target_local_x
+    if final_leg < 0.0:
+        # End stripe is past the overshoot point; need a longer overshoot.
+        # Bail rather than silently driving backwards on segment 3.
+        return []
+
+    poses: list[dict[str, Any]] = []
+    cutting_enabled = turn_cutting_enabled(config, "forward")
+
+    def emit_local(local_x: float, local_y: float, local_yaw: float, is_last: bool) -> None:
+        world_x = p0[0] + start_heading[0] * local_x + start_left[0] * local_y
+        world_y = p0[1] + start_heading[1] * local_x + start_left[1] * local_y
+        yaw = normalize_angle(start_yaw + local_yaw)
+        if is_last:
+            world_x, world_y, yaw = p3[0], p3[1], end_yaw
+        poses.append(
+            {
+                "x": world_x,
+                "y": world_y,
+                "yaw": yaw,
+                "section": "turn",
+                "direction": "forward",
+                "turn_leg": 1,
+                "turn_planner": "omega",
+                "turn_primitive": "omega",
+                "cutting_enabled": cutting_enabled,
+                "omega_radius_m": effective_radius,
+                "omega_overshoot_m": overshoot,
+            }
+        )
+
+    # Segment 1: straight forward by overshoot in +x.
+    seg1_count = max(1, int(math.ceil(overshoot / step))) if overshoot > EPSILON else 0
+    for i in range(1, seg1_count + 1):
+        t = i / seg1_count
+        emit_local(overshoot * t, 0.0, 0.0, False)
+
+    # Segment 2: 180 degree arc, centre at (overshoot, side_sign*effective_radius).
+    arc_length = math.pi * effective_radius
+    arc_count = max(2, int(math.ceil(arc_length / step)))
+    centre_x = overshoot
+    centre_y = side_sign * effective_radius
+    # Parameter phi: starts at -side_sign*pi/2 (so the point is at
+    # (overshoot, 0)) and sweeps by side_sign*pi.
+    phi_start = -side_sign * (math.pi / 2.0)
+    for i in range(1, arc_count + 1):
+        t = i / arc_count
+        phi = phi_start + side_sign * math.pi * t
+        local_x = centre_x + effective_radius * math.cos(phi)
+        local_y = centre_y + effective_radius * math.sin(phi)
+        # Forward heading is tangent in the direction of travel.
+        # d/dphi (cos phi, sin phi) = (-sin phi, cos phi); multiplied by
+        # side_sign gives forward tangent.
+        tangent_x = -side_sign * math.sin(phi)
+        tangent_y = side_sign * math.cos(phi)
+        local_yaw = math.atan2(tangent_y, tangent_x)
+        emit_local(local_x, local_y, local_yaw, False)
+
+    # Segment 3: straight back along -x by final_leg, landing at end_pose.
+    seg3_count = max(1, int(math.ceil(final_leg / step))) if final_leg > EPSILON else 0
+    seg3_start_x = overshoot
+    for i in range(1, seg3_count + 1):
+        t = i / seg3_count
+        local_x = seg3_start_x - final_leg * t
+        local_y = 2.0 * side_sign * effective_radius
+        emit_local(local_x, local_y, math.pi, i == seg3_count)
+    if seg3_count == 0 and poses:
+        # Snap final pose to end_pose exactly when no segment 3 step was
+        # produced.
+        last = poses[-1]
+        last["x"] = p3[0]
+        last["y"] = p3[1]
+        last["yaw"] = end_yaw
+
+    if not poses:
+        return []
+    return poses
+
+
+def sample_three_point_y_turn_base_poses(
+    start_pose: dict[str, Any],
+    end_pose: dict[str, Any],
+    sample_step: float,
+    config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Three-segment "Y" turn: short forward leg curving toward end_pose's
+    side, an in-place pivot, then a forward leg into end_pose. All segments
+    move ``direction='forward'``; pivot poses are tagged ``section='pivot'``.
+    Returns [] on degenerate or infeasible geometry."""
+    start_yaw = float(start_pose.get("yaw", 0.0))
+    end_yaw = float(end_pose.get("yaw", start_yaw + math.pi))
+    p0 = (float(start_pose["x"]), float(start_pose["y"]))
+    p3 = (float(end_pose["x"]), float(end_pose["y"]))
+
+    start_heading = (math.cos(start_yaw), math.sin(start_yaw))
+    start_left = (-start_heading[1], start_heading[0])
+    delta = (p3[0] - p0[0], p3[1] - p0[1])
+    lateral = start_left[0] * delta[0] + start_left[1] * delta[1]
+    if abs(lateral) <= EPSILON:
+        return []
+    side_sign = 1.0 if lateral > 0.0 else -1.0
+
+    forward_m = max(float(config.get("y_turn_forward_m", 0.5)), EPSILON)
+    pivot_max_deg = max(float(config.get("y_turn_pivot_max_degrees", 150.0)), 1.0)
+    pivot_step_deg = max(float(config.get("y_turn_pivot_step_degrees", 5.0)), 1.0)
+    step = sample_step if sample_step > EPSILON else 0.1
+    cutting_enabled = turn_cutting_enabled(config, "forward")
+
+    # Curve the first leg slightly toward end_pose's side: aim 30 deg toward
+    # that side. We model that as an arc whose endpoint heading deviates by
+    # 30 deg from start_yaw.
+    curve_deg = 30.0
+    leg1_heading_local = side_sign * math.radians(curve_deg)
+    # End of leg1 in local frame: arc of chord length forward_m with end
+    # heading rotated by leg1_heading_local. Use simple arc geometry:
+    # heading rotates linearly from 0 to leg1_heading_local across the leg.
+    leg1_count = max(2, int(math.ceil(forward_m / step)))
+    leg1_local: list[tuple[float, float, float]] = []
+    cur_local_x = 0.0
+    cur_local_y = 0.0
+    cur_local_yaw = 0.0
+    ds = forward_m / leg1_count
+    for i in range(1, leg1_count + 1):
+        target_yaw_local = leg1_heading_local * (i / leg1_count)
+        mid_yaw = (cur_local_yaw + target_yaw_local) / 2.0
+        cur_local_x += math.cos(mid_yaw) * ds
+        cur_local_y += math.sin(mid_yaw) * ds
+        cur_local_yaw = target_yaw_local
+        leg1_local.append((cur_local_x, cur_local_y, cur_local_yaw))
+
+    # Pose at end of leg1 (in world coords)
+    leg1_end_local = leg1_local[-1]
+    leg1_end_x = p0[0] + start_heading[0] * leg1_end_local[0] + start_left[0] * leg1_end_local[1]
+    leg1_end_y = p0[1] + start_heading[1] * leg1_end_local[0] + start_left[1] * leg1_end_local[1]
+    leg1_end_yaw = normalize_angle(start_yaw + leg1_end_local[2])
+
+    # The third leg drives straight forward into end_pose ending at end_yaw.
+    # We need the leg3 start pose to be on a line of bearing end_yaw passing
+    # through end_pose, oriented opposite to motion. Pivot rotates from
+    # leg1_end_yaw to leg3_start_yaw where leg3_start_yaw points from
+    # leg1_end toward end_pose if we treat the pivot point as leg1 end.
+    # Use leg1 end as the pivot point (in-place pivot). Compute the heading
+    # from pivot to p3.
+    bearing_x = p3[0] - leg1_end_x
+    bearing_y = p3[1] - leg1_end_y
+    leg3_length = math.hypot(bearing_x, bearing_y)
+    if leg3_length <= EPSILON:
+        return []
+    bearing_yaw = math.atan2(bearing_y, bearing_x)
+    # leg3 starts with yaw = bearing_yaw and travels straight to p3. Final
+    # yaw at p3 will be bearing_yaw, but end_pose expects end_yaw. Allow a
+    # small reconciling pivot at the end if the angular gap is non-trivial.
+    pivot_delta = angle_delta(leg1_end_yaw, bearing_yaw)
+    if abs(math.degrees(pivot_delta)) > pivot_max_deg:
+        return []
+    final_yaw_gap = angle_delta(bearing_yaw, end_yaw)
+    if abs(math.degrees(final_yaw_gap)) > pivot_max_deg:
+        return []
+
+    poses: list[dict[str, Any]] = []
+
+    # Emit leg1 (forward curving).
+    for (lx, ly, lyaw) in leg1_local:
+        wx = p0[0] + start_heading[0] * lx + start_left[0] * ly
+        wy = p0[1] + start_heading[1] * lx + start_left[1] * ly
+        poses.append(
+            {
+                "x": wx,
+                "y": wy,
+                "yaw": normalize_angle(start_yaw + lyaw),
+                "section": "turn",
+                "direction": "forward",
+                "turn_leg": 1,
+                "turn_planner": "three_point_y",
+                "turn_primitive": "y_leg_forward",
+                "cutting_enabled": cutting_enabled,
+            }
+        )
+
+    # Emit pivot from leg1_end_yaw to bearing_yaw at pose (leg1_end_x, leg1_end_y).
+    pivot_step_rad = math.radians(pivot_step_deg)
+    if abs(pivot_delta) > pivot_step_rad * 0.5:
+        pivot_count = max(1, int(math.ceil(abs(pivot_delta) / pivot_step_rad)))
+        for i in range(1, pivot_count + 1):
+            yaw = normalize_angle(leg1_end_yaw + pivot_delta * (i / pivot_count))
+            poses.append(
+                {
+                    "x": leg1_end_x,
+                    "y": leg1_end_y,
+                    "yaw": yaw,
+                    "section": "pivot",
+                    "direction": "forward",
+                    "turn_leg": 2,
+                    "turn_planner": "three_point_y",
+                    "turn_primitive": "y_pivot",
+                    "cutting_enabled": False,
+                }
+            )
+
+    # Emit leg3: straight from leg1_end to p3 at bearing_yaw.
+    leg3_count = max(1, int(math.ceil(leg3_length / step)))
+    for i in range(1, leg3_count + 1):
+        t = i / leg3_count
+        wx = leg1_end_x + bearing_x * t
+        wy = leg1_end_y + bearing_y * t
+        poses.append(
+            {
+                "x": wx,
+                "y": wy,
+                "yaw": bearing_yaw,
+                "section": "turn",
+                "direction": "forward",
+                "turn_leg": 3,
+                "turn_planner": "three_point_y",
+                "turn_primitive": "y_leg_forward",
+                "cutting_enabled": cutting_enabled,
+            }
+        )
+
+    # Optional final reconciling pivot to match end_yaw exactly.
+    if abs(final_yaw_gap) > pivot_step_rad * 0.5:
+        pivot_count = max(1, int(math.ceil(abs(final_yaw_gap) / pivot_step_rad)))
+        for i in range(1, pivot_count + 1):
+            yaw = normalize_angle(bearing_yaw + final_yaw_gap * (i / pivot_count))
+            poses.append(
+                {
+                    "x": p3[0],
+                    "y": p3[1],
+                    "yaw": yaw,
+                    "section": "pivot",
+                    "direction": "forward",
+                    "turn_leg": 4,
+                    "turn_planner": "three_point_y",
+                    "turn_primitive": "y_pivot",
+                    "cutting_enabled": False,
+                }
+            )
+
+    # Snap last pose exactly to end_pose.
+    if poses:
+        poses[-1]["x"] = p3[0]
+        poses[-1]["y"] = p3[1]
+        poses[-1]["yaw"] = end_yaw
+    return poses
+
+
+def sample_in_place_pivot_base_poses(
+    start_pose: dict[str, Any],
+    target_yaw: float,
+    sample_step: float,
+    config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Rotate base_link in place by ``target_yaw - start_pose.yaw``. Lab-only:
+    poses are tagged ``lab_only=True`` because the current FTC controller
+    cannot execute same-position pivots. ``sample_step`` is accepted for
+    signature consistency but stepping uses ``pivot_yaw_step_degrees``."""
+    start_yaw = float(start_pose.get("yaw", 0.0))
+    delta = angle_delta(start_yaw, target_yaw)
+    if abs(delta) <= EPSILON:
+        return []
+    step_rad = math.radians(max(1.0, float(config.get("pivot_yaw_step_degrees", 10.0))))
+    count = max(1, int(math.ceil(abs(delta) / step_rad)))
+    x = float(start_pose["x"])
+    y = float(start_pose["y"])
+    poses: list[dict[str, Any]] = []
+    for i in range(1, count + 1):
+        yaw = normalize_angle(start_yaw + delta * (i / count))
+        poses.append(
+            {
+                "x": x,
+                "y": y,
+                "yaw": yaw,
+                "section": "pivot",
+                "direction": "forward",
+                "turn_leg": 1,
+                "turn_planner": "in_place_pivot",
+                "turn_primitive": "in_place_pivot",
+                "cutting_enabled": False,
+                "lab_only": True,
+            }
+        )
+    return poses
+
+
 def wheel_anchor_maneuver_id(
     start_pose: dict[str, Any],
     end_pose: dict[str, Any],
@@ -1916,13 +2276,65 @@ def plan_swath_turn_base_poses(
     else:
         notes.append(f"{planner} turn planner selected")
 
-    if planner in {"forward_u_turn", "u_turn", "sampled_u_turn"} or "forward_u_turn" in turn_fallback_planners(config):
-        fallback = sample_forward_u_turn_base_poses(start_pose, end_pose, sample_step, config)
-        if fallback and same_pose(fallback[-1], end_pose) and turn_is_footprint_safe(lawn, fallback, config):
-            for pose in fallback:
-                pose["turn_fallback_reason"] = "; ".join(note for note in notes if note)
-            return fallback, f"{'; '.join(note for note in notes if note)}; using footprint-safe forward U-turn fallback"
-        notes.append("no footprint-safe forward U-turn fallback")
+    fallback_list = turn_fallback_planners(config)
+    # Honour explicit primary planner selections by ensuring forward_u_turn is
+    # at least attempted when the operator requests one of its aliases.
+    if planner in {"forward_u_turn", "u_turn", "sampled_u_turn"} and "forward_u_turn" not in fallback_list:
+        fallback_list = ["forward_u_turn", *fallback_list]
+
+    # P3: dispatch table for stripe-to-stripe fallback primitives. Each entry
+    # returns a list of base_link poses (possibly empty) and the planner label
+    # used in warnings/metrics.
+    def _try_forward_u_turn() -> list[dict[str, Any]]:
+        return sample_forward_u_turn_base_poses(start_pose, end_pose, sample_step, config)
+
+    def _try_omega() -> list[dict[str, Any]]:
+        return sample_omega_turn_base_poses(start_pose, end_pose, sample_step, config)
+
+    def _try_three_point_y() -> list[dict[str, Any]]:
+        return sample_three_point_y_turn_base_poses(start_pose, end_pose, sample_step, config)
+
+    def _try_in_place_pivot() -> list[dict[str, Any]]:
+        if not bool(config.get("in_place_pivot_enabled", False)):
+            return []
+        target_yaw = float(end_pose.get("yaw", float(start_pose.get("yaw", 0.0)) + math.pi))
+        # In-place pivot can only land at start_pose's (x, y). Verify the
+        # caller's end_pose lies at the same point; otherwise this primitive
+        # cannot reach it.
+        if (
+            abs(float(start_pose["x"]) - float(end_pose["x"])) > EPSILON
+            or abs(float(start_pose["y"]) - float(end_pose["y"])) > EPSILON
+        ):
+            return []
+        return sample_in_place_pivot_base_poses(start_pose, target_yaw, sample_step, config)
+
+    fallback_handlers: dict[str, tuple[str, Any]] = {
+        "forward_u_turn": ("forward U-turn", _try_forward_u_turn),
+        "u_turn": ("forward U-turn", _try_forward_u_turn),
+        "sampled_u_turn": ("forward U-turn", _try_forward_u_turn),
+        "omega": ("omega", _try_omega),
+        "three_point_y": ("three-point Y", _try_three_point_y),
+        "in_place_pivot": ("in-place pivot", _try_in_place_pivot),
+    }
+
+    tried: set[str] = set()
+    for name in fallback_list:
+        handler = fallback_handlers.get(name)
+        if handler is None:
+            notes.append(f"unknown turn fallback planner '{name}'")
+            continue
+        label, fn = handler
+        # Skip duplicate aliases (e.g. forward_u_turn + u_turn).
+        if label in tried:
+            continue
+        tried.add(label)
+        candidate = fn()
+        if candidate and same_pose(candidate[-1], end_pose) and turn_is_footprint_safe(lawn, candidate, config):
+            reason = "; ".join(note for note in notes if note)
+            for pose in candidate:
+                pose["turn_fallback_reason"] = reason
+            return candidate, f"{reason}; using footprint-safe {label} fallback" if reason else f"using footprint-safe {label} fallback"
+        notes.append(f"no footprint-safe {label} fallback")
 
     return [], "; ".join(note for note in notes if note) or "no footprint-safe turn"
 

@@ -34,6 +34,15 @@ turn_anchor_reverse_max_spacing_factor: 4.0
 turn_anchor_envelope_tolerance_m: 0.03
 turn_fallback_planners:
   - forward_u_turn
+  - omega
+  - three_point_y
+# P3 -- turn diversity
+omega_radius_m: 0.6
+omega_overshoot_m: 0.4
+y_turn_forward_m: 0.5
+y_turn_pivot_max_degrees: 150
+y_turn_pivot_step_degrees: 5
+in_place_pivot_enabled: false  # lab-only; FTC cannot execute same-position pivots
 turn_lattice_step_m: 0.10
 turn_lattice_xy_resolution_m: 0.10
 turn_lattice_yaw_step_degrees: 15.0
