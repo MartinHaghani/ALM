@@ -3034,7 +3034,12 @@ def connect_paths_with_transits(
                 out.append(curr)
                 continue
 
-        # 3) Fallback: straight-line connector tagged unsafe_transit.
+        # 3) Fallback: validate the straight-line connector against the lawn
+        # before emitting it. If the line would cross out of the lawn or
+        # through an obstacle, leave a visible gap (just append the next path
+        # without a connector) and bump the gap-emitted counter. The user's
+        # rule is: collisions are worse than visible teleports, so when no
+        # safe transit exists, keep the gap visible.
         yaw = math.atan2(
             float(first_pose["y"]) - float(last_pose["y"]),
             float(first_pose["x"]) - float(last_pose["x"]),
@@ -3053,22 +3058,30 @@ def connect_paths_with_transits(
                     "section": "connector",
                     "transit": True,
                     "cutting_enabled": False,
-                    "unsafe_transit": True,
                 }
             )
-        tool_poses = [tool_pose_from_base_pose(p, offset) for p in base_poses]
-        fallback = make_path_record(
-            is_outline=False,
-            area_index=area_index,
-            lawn=lawn,
-            label=f"{label_base} straight (unsafe)",
-            frame_id=frame_id,
-            base_poses=base_poses,
-            tool_poses=tool_poses,
-        )
-        out.append(fallback)
-        stats["transits_inserted"] += 1
-        stats["unsafe_transits_inserted"] += 1
+        # Footprint-safety check on the candidate straight line.
+        if _path_list_is_footprint_safe(
+            [{"path": {"poses": base_poses}}], lawn, config
+        ):
+            tool_poses = [tool_pose_from_base_pose(p, offset) for p in base_poses]
+            safe_straight = make_path_record(
+                is_outline=False,
+                area_index=area_index,
+                lawn=lawn,
+                label=f"{label_base} straight",
+                frame_id=frame_id,
+                base_poses=base_poses,
+                tool_poses=tool_poses,
+            )
+            out.append(safe_straight)
+            stats["transits_inserted"] += 1
+        else:
+            # No safe transit available between these two endpoints.
+            # Append the next path as-is so the gap is visible in the
+            # report; downstream metrics still surface this as a chunk gap.
+            stats.setdefault("unsafe_gap_skipped", 0)
+            stats["unsafe_gap_skipped"] += 1
         out.append(curr)
 
     return out, stats
@@ -4159,10 +4172,16 @@ def plan_profile_results(
     # P10 cross-lawn pass: between any two consecutive paths whose area_index
     # differs, insert an explicit straight-line connector tagged
     # cross_lawn_transit=true with a warning. The primary profile only — we
-    # don't post-process comparison profiles. P6 will replace this with proper
-    # nav-polygon routing.
+    # don't post-process comparison profiles.
+    #
+    # The cross_lawn_connectors_enabled config flag (default False as of the
+    # roadmap update that dropped P6) suppresses this entirely so multi-lawn
+    # maps behave as if each mow area were its own separate map. The user-
+    # facing instruction is "treat multi-lawn as separate maps", so the
+    # planner should not emit connectors that visibly cross non-lawn space.
     primary = primary_profile_name(config)
-    if primary in results:
+    cross_lawn_enabled = bool(config.get("cross_lawn_connectors_enabled", False))
+    if cross_lawn_enabled and primary in results:
         compat = results[primary]["compat"]
         tool_width = float(config.get("tool_width", 0.4))
         sample_step = float(config["evaluation"].get("path_sample_step_m", 0.1))
