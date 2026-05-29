@@ -37,16 +37,34 @@ Listed in **execution order** (top = do next). IDs are stable per the "do not re
 | – | P13 | Per-cell stripe angle for tight cells (cells whose short axis < ~2× tool_width along the global angle should rotate stripes to align with the cell's long axis, eliminating impossible U-turns in narrow slivers like obstacle_off_center paths 10–17) | landed | – | 9ca521f |
 | – | P10 | Always-connected base-link path (eliminate teleports between paths) | landed | – | 310f63e |
 | 1 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started — next | – | – |
-| 6 | P6 | Multi-lawn navigation and dock integration | not started | – | – |
-| 7 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
-| 8 | P4 | FTC-aware execution contract | not started | – | – |
-| 9 | P9 | Path smoothing and FTC-truthful preview | not started | – | – |
-| 10 | P7 | Slope and soft-zone awareness | not started | – | – |
-| 11 | P8 | Stripe-quality regression suite | not started | – | – |
+| 2 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
+| 3 | P4 | FTC-aware execution contract | not started | – | – |
+| 4 | P9 | Path smoothing and FTC-truthful preview | not started | – | – |
+| 5 | P8 | Stripe-quality regression suite | not started | – | – |
+| – | P6 | Multi-lawn navigation and dock integration | **dropped** (multi-lawn maps are now planned as separate maps; docking is being removed from runtime) | – | – |
+| – | P7 | Slope and soft-zone awareness | **deferred** (re-evaluate after the coverage planner is stable; slope adds a variable that is not yet worth tracking) | – | – |
 
-Statuses: `not started`, `in progress`, `blocked`, `landed`. When marking `landed`, include the commit SHA or PR link in the last column.
+Statuses: `not started`, `in progress`, `blocked`, `landed`, `dropped`, `deferred`. When marking `landed`, include the commit SHA or PR link in the last column.
 
 When a priority is in progress, the assigned agent must update its row with a one-line note: "in progress — <agent or branch>".
+
+### Items dropped or deferred
+
+**P6 — Multi-lawn navigation and dock integration: dropped.** The decision is to handle multi-lawn properties as **separate maps** — each mow area is its own JSON map and planning run, with no cross-lawn connector emitted by the planner. The `cross_lawn_connectors_enabled` config flag defaults to `false`; the cross-lawn pass in `plan_profile_results` only runs when explicitly opted in. Docking is also being removed from the mower runtime, so the "dock integration" half of P6 is no longer a planner concern. If multi-lawn-as-one-map ever becomes a need again, P6 can be revived from this same entry.
+
+**P7 — Slope and soft-zone awareness: deferred.** Re-evaluate after the planner is stable on flat geometry. Slope adds a variable that is not yet worth tracking — the current Whitburn-unsimplified run still has 4 visible gaps where no safe connector exists and coverage is 59.8 %; both numbers need to improve substantially before slope handling is the limiting factor.
+
+### What each remaining priority means
+
+**P5 — Coverage closes to ≥95 %.** Today every lab map sits between 71 % and 83 % coverage on the synthetic batch and around 60 % on Whitburn-unsimplified. The gap is the band between the eroded headland centerline and the lawn boundary (P0 gives up that band to keep the footprint safe at every yaw) plus stripe-placement misalignment between adjacent BCD bands (each band runs F2C independently and anchors stripe spacing to its own y-extent, so a ~tool_width/2 gap appears at every band boundary). Concrete subtasks: (1) make `outline_count` a function of perimeter-to-area ratio so wider lawns get a 2nd headland pass; (2) allow stripes to overrun their cell's y-extent by up to `tool_width/2` into the adjacent headland, eliminating the boundary gaps; (3) add an uncovered-area overlay to the SVG so the missing area is visible per-map.
+
+**P2 — Stripe aesthetics.** Polish after the structural work. Single global stripe angle is already enforced (P12), but four cosmetic issues remain: stripe-end alignment (each stripe should terminate exactly at the lawn boundary projection along the stripe direction, not at a possibly-curved headland intersection); blade on/off scheduling promoted from `simulation_preview.json` into the path contract so the controller honours it; rotation-of-direction memory across sessions (alternate stripe angle every mow); perimeter cut closed as a loop with `tool_width/2` overlap at the join.
+
+**P4 — FTC-aware execution contract.** Mower-side. The current `PlanPath` shape is a flat `nav_msgs/Path`. `FTCPlanner` skips duplicate-position poses (so in-place pivots silently drop), has no reverse semantics, and has no blade-state modulation. Replace with a maneuver-aware shape: `Path { segments[] { kind, blade_state, direction, poses[], maneuver_metadata } }` with `kind ∈ {STRIPE, HEADLAND, TRANSIT, PIVOT, REVERSE}`. v1 keeps `FTCPlanner` and never emits pivot/reverse segments to it; the lab continues to compute them for the preview only. v1.1 evaluates extending FTC or moving to MPC.
+
+**P9 — Path smoothing and FTC-truthful preview.** Two things together. (1) Clothoid smoothing at stripe-to-headland transitions so yaw is C¹-continuous everywhere the blade is on. (2) Add an FTC-truthful preview mode that simulates `FTCPlanner`'s carrot-chase against the path and overlays the actual `base_link` trajectory; the current preview animates the exact pose path which can look clean while the controller's tracking has 30 cm of error.
+
+**P8 — Stripe-quality regression suite.** Add `coverage_lab regress`. Runs all `examples/*.json` and the tracked Google Earth maps. Compares each `metrics.json` against `tools/coverage_lab/regression_baselines.json` (committed). Fails on: any increase in `safety.unsafe_footprint_samples`, any increase in `path_splits.within_cell_path_splits`, any drop in `coverage.coverage_percent` by more than 0.5 pp, any drop in `swath_length.mean_m` by more than 5 %, any new entry in `warnings`. Update the baseline only when the diff is reviewed and explicitly accepted in the commit message. Land this after P5 so the baselines are recorded at a higher quality.
 
 ### Reorder rationale (post-P0/P1 review)
 
@@ -218,6 +236,29 @@ Whitburn now mowed as 3 fully-connected per-lawn paths joined by 2 explicit cros
 P3 turn diversity is paying off on `obstacle_off_center` (three_point_y picked up 2 turns the wheel-anchor + U-turn fallback would have failed on) and on Whitburn (1 three_point_y plus 15 forward_u_turn fallbacks). P13 per-cell angle is overriding 5 of Whitburn's 13 cells where the global angle would have produced unsweepable slivers.
 
 The single-split regression on `obstacle_map` (0 → 1) is the new P12 dominant-direction angle picking a marginally different angle that triggered one wheel-anchor failure in a band that previously succeeded. Net win across the batch is overwhelming.
+
+**Safety regression follow-up (491009b, d23691d).** The post-merge run also exposed a previously-hidden bug in cell reversal: `_reverse_cell_paths` rotates each pose's yaw by π, but the Mowrator footprint is asymmetric (front extends 0.82 m from base_link, rear is at base_link), so the asymmetric rotation moved the footprint front to where the back was and turned previously-safe poses into collisions. Counts at the merge point:
+
+  obstacle_map         0 → 142 unsafe_footprint_samples
+  obstacle_off_center  0 → 32
+  two_obstacles_map    0 → 403
+  Whitburn-simplified  0 → 920
+
+Fixed by `_path_list_is_footprint_safe` + a `reverse_safe` gate in `optimize_cell_visit_order`: any cell whose reversed pose path puts the safety footprint outside the lawn or inside an obstacle is forced to forward direction regardless of transit distance.
+
+Also fixed in the same pass: the P10 cross-lawn straight-line connector now defaults off (`cross_lawn_connectors_enabled: false`) so multi-lawn maps cleanly behave as separate plans; the within-area P10 straight-line last-resort fallback now footprint-validates before emitting and leaves a visible gap when no safe transit exists. The Whitburn run was also switched to the full-resolution `57-Whitburn-Cres-unsimplified.json` (the simplified version was a placeholder).
+
+Final safety-clean baseline:
+
+| map | unsafe samples | splits | chunks | cov% |
+|---|---:|---:|---:|---:|
+| rectangle_map | 0 | 0 | 2 | 80.94 |
+| l_shape_map | 0 | 0 | 2 | 78.18 |
+| narrow_pivot_map | 0 | 0 | 2 | 71.88 |
+| obstacle_map | 0 | 1 | 15 | 82.79 |
+| obstacle_off_center_map | 0 | 2 | 31 | 80.67 |
+| two_obstacles_map | 0 | 0 | 27 | 82.34 |
+| 57-Whitburn-Cres-unsimplified | 0 | 7 | 90 | 59.81 |
 
 ---
 
