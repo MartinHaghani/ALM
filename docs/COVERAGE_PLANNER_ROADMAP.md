@@ -32,15 +32,17 @@ Listed in **execution order** (top = do next). IDs are stable per the "do not re
 | – | P0 | Footprint-aware headland | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
 | – | P1 | Obstacle-aware swath bridging | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
 | – | P11 | BCD critical-vertex decomposition (split at concave outer-boundary vertices, not just hole x-extents) | landed | – | 91c4f92 |
-| 1 | **P10** | Always-connected base-link path (eliminate teleports between paths) | not started — next | – | – |
-| 2 | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot, skip-stripe ordering) | not started | – | – |
-| 3 | P6 | Multi-lawn navigation and dock integration | not started | – | – |
-| 4 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started | – | – |
-| 5 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
-| 6 | P4 | FTC-aware execution contract | not started | – | – |
-| 7 | P9 | Path smoothing and FTC-truthful preview | not started | – | – |
-| 8 | P7 | Slope and soft-zone awareness | not started | – | – |
-| 9 | P8 | Stripe-quality regression suite | not started | – | – |
+| 1 | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot, skip-stripe ordering) | not started — next | – | – |
+| 2 | **P12** | Robust dominant-direction stripe angle (replace F2C's `best_swath_length` with a weighted edge-angle histogram so noisy real-world outlines pick the visually-dominant axis, not the longest single segment) | not started | – | – |
+| 3 | **P13** | Per-cell stripe angle for tight cells (cells whose short axis < ~2× tool_width along the global angle should rotate stripes to align with the cell's long axis, eliminating impossible U-turns in narrow slivers like obstacle_off_center paths 10–17) | not started | – | – |
+| 4 | P10 | Always-connected base-link path (eliminate teleports between paths) | not started | – | – |
+| 5 | P6 | Multi-lawn navigation and dock integration | not started | – | – |
+| 6 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started | – | – |
+| 7 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
+| 8 | P4 | FTC-aware execution contract | not started | – | – |
+| 9 | P9 | Path smoothing and FTC-truthful preview | not started | – | – |
+| 10 | P7 | Slope and soft-zone awareness | not started | – | – |
+| 11 | P8 | Stripe-quality regression suite | not started | – | – |
 
 Statuses: `not started`, `in progress`, `blocked`, `landed`. When marking `landed`, include the commit SHA or PR link in the last column.
 
@@ -190,6 +192,40 @@ Results vs the post-P0/P1 baseline (no regressions; large wins where the symptom
 | 57-Whitburn-Cres-simplified | 64 → 63 | 7 → 10 | **14 → 4** |
 
 The dominant visible improvement is the collapse of large chunk-to-chunk jumps on the two maps that have outer-boundary notches. Remaining short-and-medium gaps are owned by P10 (always-connected base-link path).
+
+---
+
+## P12 — Robust dominant-direction stripe angle
+
+**Problem.** Fields2Cover's `best_swath_length` picks the swath angle that maximises a single swath's length across the polygon. On synthetic rectangles it works well. On every other map — `obstacle_map`, `obstacle_off_center_map`, `two_obstacles_map`, the L-shape, narrow_pivot — it picks an angle a few degrees off the visually-dominant axis because the polygon's longest individual chord is on a slight diagonal even when the boundary is overwhelmingly axis-aligned. On real-world recorded outlines (Whitburn Cres) the problem is worse: the boundary is sampled at near-uniform spacing so there are no "longest edges" at all, and F2C's chosen angle is determined by whichever short chord happens to be slightly longer than the others. The user noted that stripes look "slightly skewed" on every example except `rectangle_map`.
+
+**Solution.** Replace the swath-angle probe with a dominant-direction estimator on the eroded outer boundary:
+
+1. Walk the eroded outer ring. For each edge, record its angle modulo π (since stripes are bidirectional) weighted by edge length.
+2. Build a 1° histogram of weighted edge angles. Apply a small Gaussian smoothing kernel (~3°) so noisy single-segment edges don't create local spikes.
+3. The peak bin of the smoothed histogram is the dominant direction; use that as the global stripe angle.
+4. Fall back to F2C's `best_swath_length` only if the histogram is flat (no clear peak within 1.5× of the median bin).
+
+This is robust to high-vertex-count recorded outlines (the dominant direction emerges from the cumulative edge-length weighting) and to small geometric perturbations (the histogram bin is wide enough to smooth them out).
+
+**Acceptance.** On `obstacle_map`, `obstacle_off_center_map`, `two_obstacles_map`, `l_shape_map`, and `narrow_pivot_map`, the chosen stripe angle is within 0.5° of horizontal (or whichever true cardinal axis the boundary uses). On Whitburn the chosen angle visually matches the dominant property axis when the outline is overlaid on the SVG.
+
+---
+
+## P13 — Per-cell stripe angle for tight cells
+
+**Problem.** With a single global stripe angle, BCD sub-cells whose short axis is parallel to the global stripe angle can have a width smaller than a single tool footprint — so stripes don't fit at all — or smaller than the U-turn radius — so the wheel-anchor / forward-U-turn / trim retry all fail with `negative_reverse_distance`. On `obstacle_off_center_map` this produces the 4-line slivers around the obstacle (paths 10–17 in the current run) where the geometry forbids any maneuver. The Whitburn cells reproduce the same pathology at scale: 9 of the 9 remaining splits after trim retry are in narrow sub-cells whose long axis runs perpendicular to the chosen global stripe.
+
+**Solution.** When a cell's short-axis extent along the global stripe angle is less than `cell_local_stripe_angle_threshold_m` (default ≈ 2× tool_width, i.e. ~0.8 m), locally rotate stripes inside that cell to align with the cell's long axis:
+
+1. After BCD, compute each cell's minimum-area bounding rectangle (or fit a line via PCA on the cell ring).
+2. If the cell's short axis along the global stripe direction is below threshold, override that cell's swath angle to match its long axis.
+3. Within the cell, run F2C swath generation with the local angle.
+4. Inter-cell transitions are tagged so the visit-order optimiser still works on rotated-stripe cells. The wheel-anchor planner already handles arbitrary start/end yaws.
+
+This breaks visual stripe-direction continuity across the rotated cell, but the alternative — a fragmented patchwork of unmowed slivers — is worse. P2 (stripe aesthetics) can later add a "redirect" maneuver that smooths the angle transition at the sliver boundary.
+
+**Acceptance.** On `obstacle_off_center_map`, the slivers around the obstacle (current paths 10–17) collapse into one or two cells with continuous stripes aligned to the cell's long axis, and no split happens. On Whitburn, the within-cell split count drops from 9 (current) to under 3.
 
 ---
 
