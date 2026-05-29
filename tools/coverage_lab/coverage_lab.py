@@ -2851,6 +2851,177 @@ def try_direct_inter_cell_connector(
     )
 
 
+def connect_paths_with_transits(
+    paths: list[dict[str, Any]],
+    *,
+    lawn: Lawn,
+    area_index: int,
+    headland_ring: list[tuple[float, float]],
+    config: dict[str, Any],
+    label_prefix: str = "transit",
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Walk consecutive entries in ``paths`` and insert a connector between any
+    pair whose endpoints differ by more than ``2 * path_sample_step_m``.
+
+    Strategy per gap:
+      1. If both endpoints are within a "near" threshold (``tool_width``) we
+         treat the connection as already-present and emit nothing.
+      2. Try ``try_direct_inter_cell_connector`` first (wheel-anchor / U-turn).
+      3. Walk along ``headland_ring`` via ``lab_geometry.walk_ring_between``,
+         tagging poses as ``section='connector'``, ``transit=True``,
+         ``cutting_enabled=False`` so the segment is excluded from coverage
+         and turn metrics.
+      4. If the ring walk fails too, emit a straight-line connector tagged
+         ``unsafe_transit=True``.
+
+    Returns ``(new_paths, stats)`` where ``stats`` carries the insertion
+    counts.
+    """
+    stats = {
+        "transits_inserted": 0,
+        "direct_turns_inserted": 0,
+        "unsafe_transits_inserted": 0,
+    }
+    if len(paths) < 2:
+        return list(paths), stats
+
+    sample_step = float(config["evaluation"].get("path_sample_step_m", 0.1))
+    tool_width = float(config.get("tool_width", 0.4))
+    gap_threshold = 2.0 * sample_step
+    near_threshold = tool_width
+    frame_id = config.get("frame_id", "map")
+    offset = tool_center_offset(config)
+
+    out: list[dict[str, Any]] = [paths[0]]
+    for idx in range(1, len(paths)):
+        prev = out[-1]
+        curr = paths[idx]
+        prev_poses = prev.get("path", {}).get("poses") or []
+        curr_poses = curr.get("path", {}).get("poses") or []
+        if not prev_poses or not curr_poses:
+            out.append(curr)
+            continue
+        last_pose = prev_poses[-1]
+        first_pose = curr_poses[0]
+        gap = _pose_distance(last_pose, first_pose)
+        if gap <= gap_threshold or gap <= near_threshold:
+            out.append(curr)
+            continue
+
+        label_base = f"{label_prefix} {idx}"
+
+        # 1) Try a direct inter-cell turn first.
+        connector = None
+        try:
+            connector = try_direct_inter_cell_connector(
+                lawn=lawn,
+                area_index=area_index,
+                label=f"{label_base} turn",
+                from_pose=last_pose,
+                to_pose=first_pose,
+                config=config,
+                context={
+                    "area_index": area_index,
+                    "from_cell_index": None,
+                    "to_cell_index": None,
+                    "source": "connect_paths_with_transits",
+                },
+            )
+        except Exception:
+            connector = None
+        if connector is not None:
+            out.append(connector)
+            stats["direct_turns_inserted"] += 1
+            out.append(curr)
+            continue
+
+        # 2) Walk along the headland ring.
+        if headland_ring and len(headland_ring) >= 2:
+            transit = build_transit_path(
+                lawn=lawn,
+                area_index=area_index,
+                label=f"{label_base} ring",
+                headland_outer_ring=headland_ring,
+                from_pose=last_pose,
+                to_pose=first_pose,
+                config=config,
+            )
+            if transit is not None and transit.get("path", {}).get("poses"):
+                transit_base = transit["path"]["poses"]
+                # Bracket with the exact endpoint poses so the bridge truly
+                # closes the gap: walk_ring_between snaps endpoints onto the
+                # ring, which can leave a residual jump up to the ring offset.
+                head = {
+                    "x": float(last_pose["x"]),
+                    "y": float(last_pose["y"]),
+                    "yaw": float(last_pose.get("yaw", transit_base[0].get("yaw", 0.0))),
+                    "section": "connector",
+                    "transit": True,
+                    "cutting_enabled": False,
+                }
+                tail = {
+                    "x": float(first_pose["x"]),
+                    "y": float(first_pose["y"]),
+                    "yaw": float(first_pose.get("yaw", transit_base[-1].get("yaw", 0.0))),
+                    "section": "connector",
+                    "transit": True,
+                    "cutting_enabled": False,
+                }
+                bracketed = [head] + list(transit_base) + [tail]
+                for pose in bracketed:
+                    pose["section"] = "connector"
+                    pose["transit"] = True
+                    pose["cutting_enabled"] = False
+                transit["path"]["poses"] = bracketed
+                transit_tool = transit.get("tool_path", {}).get("poses") or []
+                head_tool = tool_pose_from_base_pose(head, offset)
+                tail_tool = tool_pose_from_base_pose(tail, offset)
+                transit["tool_path"]["poses"] = [head_tool] + list(transit_tool) + [tail_tool]
+                out.append(transit)
+                stats["transits_inserted"] += 1
+                out.append(curr)
+                continue
+
+        # 3) Fallback: straight-line connector tagged unsafe_transit.
+        yaw = math.atan2(
+            float(first_pose["y"]) - float(last_pose["y"]),
+            float(first_pose["x"]) - float(last_pose["x"]),
+        )
+        steps = max(2, int(math.ceil(gap / max(sample_step, 1e-3))) + 1)
+        base_poses: list[dict[str, Any]] = []
+        for k in range(steps):
+            t = k / float(steps - 1)
+            x = float(last_pose["x"]) + t * (float(first_pose["x"]) - float(last_pose["x"]))
+            y = float(last_pose["y"]) + t * (float(first_pose["y"]) - float(last_pose["y"]))
+            base_poses.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "yaw": yaw,
+                    "section": "connector",
+                    "transit": True,
+                    "cutting_enabled": False,
+                    "unsafe_transit": True,
+                }
+            )
+        tool_poses = [tool_pose_from_base_pose(p, offset) for p in base_poses]
+        fallback = make_path_record(
+            is_outline=False,
+            area_index=area_index,
+            lawn=lawn,
+            label=f"{label_base} straight (unsafe)",
+            frame_id=frame_id,
+            base_poses=base_poses,
+            tool_poses=tool_poses,
+        )
+        out.append(fallback)
+        stats["transits_inserted"] += 1
+        stats["unsafe_transits_inserted"] += 1
+        out.append(curr)
+
+    return out, stats
+
+
 def plan_one_lawn_profiles(lawn: Lawn, area_index: int, config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     try:
         import fields2cover as f2c
@@ -3201,6 +3372,19 @@ def _plan_one_lawn_profiles_footprint_disk(
         primary_paths.extend(fill_paths)
         last_terminal = fill_paths[-1]["path"]["poses"][-1] if fill_paths[-1]["path"]["poses"] else last_terminal
 
+    # P10: post-process the assembled primary_paths so consecutive entries
+    # always share endpoints. Inserts a direct turn, a ring walk, or (last
+    # resort) a straight-line connector tagged unsafe_transit between any
+    # two consecutive entries whose endpoints don't already match.
+    primary_paths, connect_stats = connect_paths_with_transits(
+        primary_paths,
+        lawn=lawn,
+        area_index=area_index,
+        headland_ring=transit_ring,
+        config=config,
+        label_prefix=f"{lawn.area.name} fill-bridge",
+    )
+
     result_profiles[primary]["paths"] = primary_paths
     result_profiles[primary]["warnings"].extend(cell_fill_warnings)
     for profile_name in profile_names:
@@ -3211,6 +3395,11 @@ def _plan_one_lawn_profiles_footprint_disk(
         result_profiles[profile_name]["debug_area"]["stripe_trim_attempts"] = trim_attempts
         result_profiles[profile_name]["debug_area"]["stripe_trim_successes"] = trim_successes
         result_profiles[profile_name]["debug_area"]["stripe_trim_total_distance_m"] = trim_total_distance_m
+        result_profiles[profile_name]["debug_area"]["fill_bridges_inserted"] = connect_stats["transits_inserted"]
+        result_profiles[profile_name]["debug_area"]["fill_bridge_direct_turns"] = connect_stats["direct_turns_inserted"]
+        result_profiles[profile_name]["debug_area"]["fill_bridge_unsafe_transits"] = connect_stats.get(
+            "unsafe_transits_inserted", 0
+        )
         result_profiles[profile_name]["debug_area"]["visit_order"] = [
             {"slot": i, "cell_index": ci, "direction": d}
             for i, (ci, d, _) in enumerate(visit_order)
@@ -3739,6 +3928,11 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
         "tight_cell_count": 0,
         "angle_overrides": 0,
     }
+    fill_bridges_metrics: dict[str, Any] = {
+        "inserted_count": 0,
+        "direct_turn_count": 0,
+        "unsafe_transit_count": 0,
+    }
     seen_strategy: set[str] = set()
     for area in debug.get("areas", []):
         if not isinstance(area, dict):
@@ -3763,6 +3957,14 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
             if bool(entry.get("tight", False)):
                 per_cell_angle_metrics["tight_cell_count"] += 1
                 per_cell_angle_metrics["angle_overrides"] += 1
+        fill_bridges_metrics["inserted_count"] += int(area.get("fill_bridges_inserted", 0) or 0)
+        fill_bridges_metrics["direct_turn_count"] += int(area.get("fill_bridge_direct_turns", 0) or 0)
+        fill_bridges_metrics["unsafe_transit_count"] += int(area.get("fill_bridge_unsafe_transits", 0) or 0)
+    cross_lawn_transit_count = sum(
+        1
+        for path in paths
+        if any(pose.get("cross_lawn_transit") for pose in path.get("path", {}).get("poses", []))
+    )
     if len(seen_strategy) == 1:
         headland_metrics["strategy"] = next(iter(seen_strategy))
     elif seen_strategy:
@@ -3852,6 +4054,8 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
         "path_splits": split_metrics,
         "stripe_trim": trim_metrics,
         "per_cell_angle": per_cell_angle_metrics,
+        "fill_bridges": fill_bridges_metrics,
+        "cross_lawn_transit_count": cross_lawn_transit_count,
     }
 
 
@@ -3899,6 +4103,89 @@ def plan_profile_results(
             results[profile_name]["debug"]["warnings"].extend(
                 [f"area {area_index}: {w}" for w in area_result["warnings"]]
             )
+
+    # P10 cross-lawn pass: between any two consecutive paths whose area_index
+    # differs, insert an explicit straight-line connector tagged
+    # cross_lawn_transit=true with a warning. The primary profile only — we
+    # don't post-process comparison profiles. P6 will replace this with proper
+    # nav-polygon routing.
+    primary = primary_profile_name(config)
+    if primary in results:
+        compat = results[primary]["compat"]
+        tool_width = float(config.get("tool_width", 0.4))
+        sample_step = float(config["evaluation"].get("path_sample_step_m", 0.1))
+        frame_id = config.get("frame_id", "map")
+        offset = tool_center_offset(config)
+        in_paths = compat.get("paths", [])
+        if len(in_paths) >= 2:
+            out_paths: list[dict[str, Any]] = [in_paths[0]]
+            cross_lawn_warnings: list[str] = []
+            for idx in range(1, len(in_paths)):
+                prev = out_paths[-1]
+                curr = in_paths[idx]
+                prev_area = prev.get("area_index")
+                curr_area = curr.get("area_index")
+                prev_poses = prev.get("path", {}).get("poses") or []
+                curr_poses = curr.get("path", {}).get("poses") or []
+                if (
+                    prev_area is None
+                    or curr_area is None
+                    or prev_area == curr_area
+                    or not prev_poses
+                    or not curr_poses
+                ):
+                    out_paths.append(curr)
+                    continue
+                last_pose = prev_poses[-1]
+                first_pose = curr_poses[0]
+                gap = _pose_distance(last_pose, first_pose)
+                if gap < tool_width:
+                    out_paths.append(curr)
+                    continue
+                # Build straight-line cross-lawn connector. Use the lawn of the
+                # *previous* area as the "owner" so make_path_record has a
+                # valid area_id; the pose tag carries the real signal.
+                owner_lawn_index = prev_area if 0 <= prev_area < len(model.lawns) else curr_area
+                owner_lawn = model.lawns[owner_lawn_index]
+                yaw = math.atan2(
+                    float(first_pose["y"]) - float(last_pose["y"]),
+                    float(first_pose["x"]) - float(last_pose["x"]),
+                )
+                steps = max(2, int(math.ceil(gap / max(sample_step, 1e-3))) + 1)
+                base_poses: list[dict[str, Any]] = []
+                for k in range(steps):
+                    t = k / float(steps - 1)
+                    x = float(last_pose["x"]) + t * (float(first_pose["x"]) - float(last_pose["x"]))
+                    y = float(last_pose["y"]) + t * (float(first_pose["y"]) - float(last_pose["y"]))
+                    base_poses.append(
+                        {
+                            "x": x,
+                            "y": y,
+                            "yaw": yaw,
+                            "section": "connector",
+                            "transit": True,
+                            "cutting_enabled": False,
+                            "cross_lawn_transit": True,
+                        }
+                    )
+                tool_poses = [tool_pose_from_base_pose(p, offset) for p in base_poses]
+                record = make_path_record(
+                    is_outline=False,
+                    area_index=prev_area,
+                    lawn=owner_lawn,
+                    label=f"cross-lawn {prev_area} → {curr_area}",
+                    frame_id=frame_id,
+                    base_poses=base_poses,
+                    tool_poses=tool_poses,
+                )
+                out_paths.append(record)
+                cross_lawn_warnings.append(
+                    f"cross-lawn transit: area {prev_area} -> area {curr_area}, distance {gap:.2f} m"
+                )
+                out_paths.append(curr)
+            compat["paths"] = out_paths
+            results[primary]["debug"]["warnings"].extend(cross_lawn_warnings)
+
     return results
 
 
