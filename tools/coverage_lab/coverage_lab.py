@@ -1954,22 +1954,92 @@ def build_headland_paths(
     return paths
 
 
+def _trim_pair_meters_from_tail(
+    base_poses: list[dict[str, Any]],
+    tool_poses: list[dict[str, Any]],
+    trim_m: float,
+    floor_idx: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Drop synchronised trailing poses from base/tool until ~trim_m of arc
+    length has been removed, but never below ``floor_idx``."""
+    if trim_m <= 0 or len(base_poses) <= floor_idx + 1:
+        return list(base_poses), list(tool_poses)
+    nb = list(base_poses)
+    nt = list(tool_poses)
+    removed = 0.0
+    while len(nb) > floor_idx + 1 and removed < trim_m:
+        last = nb[-1]
+        prev = nb[-2]
+        d = math.hypot(float(last["x"]) - float(prev["x"]),
+                       float(last["y"]) - float(prev["y"]))
+        if d <= 0:
+            nb.pop()
+            if nt:
+                nt.pop()
+            continue
+        if removed + d > trim_m + 1e-9:
+            break
+        removed += d
+        nb.pop()
+        if nt:
+            nt.pop()
+    return nb, nt
+
+
+def _trim_pair_meters_from_head(
+    base_poses: list[dict[str, Any]],
+    tool_poses: list[dict[str, Any]],
+    trim_m: float,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if trim_m <= 0 or len(base_poses) < 2:
+        return list(base_poses), list(tool_poses)
+    nb = list(base_poses)
+    nt = list(tool_poses)
+    removed = 0.0
+    while len(nb) > 1 and removed < trim_m:
+        first = nb[0]
+        nxt = nb[1]
+        d = math.hypot(float(first["x"]) - float(nxt["x"]),
+                       float(first["y"]) - float(nxt["y"]))
+        if d <= 0:
+            nb.pop(0)
+            if nt:
+                nt.pop(0)
+            continue
+        if removed + d > trim_m + 1e-9:
+            break
+        removed += d
+        nb.pop(0)
+        if nt:
+            nt.pop(0)
+    return nb, nt
+
+
 def build_zero_turn_fill_paths(
     lawn: Lawn,
     area_index: int,
     swaths_json: list[dict[str, Any]],
     config: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[str]]:
+) -> tuple[list[dict[str, Any]], list[str], dict[str, Any]]:
     offset = tool_center_offset(config)
     sample_step = float(config["evaluation"].get("path_sample_step_m", 0.1))
+    trim_max_m = float(config.get("turn_trim_max_m", 1.5))
+    trim_step_m = float(config.get("turn_trim_step_m", 0.1))
     paths: list[dict[str, Any]] = []
     warnings: list[str] = []
     base_poses: list[dict[str, Any]] = []
     tool_poses: list[dict[str, Any]] = []
     chunk_index = 1
+    last_stripe_start_idx = 0
+    stats: dict[str, Any] = {
+        "trim_attempts": 0,
+        "trim_successes": 0,
+        "splits": 0,
+        "trim_total_distance_m": 0.0,
+    }
 
     def finish_current() -> None:
-        nonlocal base_poses, tool_poses, chunk_index
+        nonlocal base_poses, tool_poses, chunk_index, last_stripe_start_idx
         if not base_poses:
             return
         suffix = "" if chunk_index == 1 and not paths else f" {chunk_index}"
@@ -1986,6 +2056,7 @@ def build_zero_turn_fill_paths(
         )
         base_poses = []
         tool_poses = []
+        last_stripe_start_idx = 0
         chunk_index += 1
 
     previous_swath_index: int | None = None
@@ -1998,28 +2069,86 @@ def build_zero_turn_fill_paths(
         swath_base_poses = poses_to_base_link(swath_tool_poses, offset)
 
         if not base_poses:
+            last_stripe_start_idx = 0
             for base_pose, tool_pose in zip(swath_base_poses, swath_tool_poses):
                 append_pose_pair(base_poses, tool_poses, base_pose, tool_pose)
             previous_swath_index = swath_index
             continue
 
+        turn_context = {
+            "area_index": area_index,
+            "from_swath_index": previous_swath_index,
+            "to_swath_index": swath_index,
+        }
         turn_poses, turn_warning = plan_swath_turn_base_poses(
             lawn,
             base_poses[-1],
             swath_base_poses[0],
             sample_step,
             config,
-            {
-                "area_index": area_index,
-                "from_swath_index": previous_swath_index,
-                "to_swath_index": swath_index,
-            },
+            turn_context,
         )
-        if turn_warning:
+
+        # Stripe-end trimming retry. If the turn failed and the failure is the
+        # kind a shorter stripe could resolve (boundary-hit footprint, target
+        # outside the cell), retry with progressively trimmed stripe ends.
+        # Trim symmetrically: current stripe's tail and next stripe's head by
+        # the same distance, so the U-turn happens further from the boundary.
+        # Never trim past the current stripe's start within base_poses.
+        next_swath_base = swath_base_poses
+        next_swath_tool = swath_tool_poses
+        trimmed_base_poses: list[dict[str, Any]] | None = None
+        trimmed_tool_poses: list[dict[str, Any]] | None = None
+        trim_applied = 0.0
+        if not turn_poses and trim_max_m > 0:
+            trim = trim_step_m
+            while trim <= trim_max_m + 1e-9:
+                stats["trim_attempts"] += 1
+                cand_base, cand_tool = _trim_pair_meters_from_tail(
+                    base_poses, tool_poses, trim, floor_idx=last_stripe_start_idx
+                )
+                cand_next_base, cand_next_tool = _trim_pair_meters_from_head(
+                    swath_base_poses, swath_tool_poses, trim
+                )
+                if (
+                    len(cand_base) <= last_stripe_start_idx + 1
+                    or len(cand_next_base) < 2
+                ):
+                    break
+                retry_turn, _retry_warn = plan_swath_turn_base_poses(
+                    lawn,
+                    cand_base[-1],
+                    cand_next_base[0],
+                    sample_step,
+                    config,
+                    turn_context,
+                )
+                if retry_turn:
+                    trimmed_base_poses = cand_base
+                    trimmed_tool_poses = cand_tool
+                    next_swath_base = cand_next_base
+                    next_swath_tool = cand_next_tool
+                    turn_poses = retry_turn
+                    trim_applied = trim
+                    stats["trim_successes"] += 1
+                    stats["trim_total_distance_m"] += trim
+                    break
+                trim += trim_step_m
+
+        if trim_applied > 0 and trimmed_base_poses is not None:
+            base_poses = trimmed_base_poses
+            tool_poses = trimmed_tool_poses if trimmed_tool_poses is not None else tool_poses
+            warnings.append(
+                f"swath {previous_swath_index} to {swath_index}: "
+                f"trimmed {trim_applied:.2f} m from stripe ends to fit U-turn"
+            )
+        elif turn_warning and not turn_poses:
             warnings.append(
                 f"swath {previous_swath_index} to {swath_index}: {turn_warning}"
             )
+
         if not turn_poses:
+            stats["splits"] += 1
             finish_current()
             for base_pose, tool_pose in zip(swath_base_poses, swath_tool_poses):
                 append_pose_pair(base_poses, tool_poses, base_pose, tool_pose)
@@ -2029,12 +2158,13 @@ def build_zero_turn_fill_paths(
         for base_pose in turn_poses:
             append_pose_pair(base_poses, tool_poses, base_pose, tool_pose_from_base_pose(base_pose, offset))
 
-        for base_pose, tool_pose in zip(swath_base_poses, swath_tool_poses):
+        last_stripe_start_idx = len(base_poses)
+        for base_pose, tool_pose in zip(next_swath_base, next_swath_tool):
             append_pose_pair(base_poses, tool_poses, base_pose, tool_pose)
         previous_swath_index = swath_index
 
     finish_current()
-    return paths, warnings
+    return paths, warnings, stats
 
 
 def robot_for_config(config: dict[str, Any], f2c: Any) -> Any:
@@ -2124,20 +2254,32 @@ def build_transit_path(
 
 
 def _reverse_cell_paths(paths: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return a deep-copy of ``paths`` with chunk order reversed and each chunk's
-    poses reversed. Used by the visit-order optimiser when entering a cell from
-    its "end" side gives a cleaner inter-cell connection than entering from its
-    F2C-default "start" side. Wheel-anchor maneuver metadata is intentionally
-    not relabelled here — it stays on the original sample but is no longer the
-    direction of execution; that's a known cosmetic limitation flagged for P3.
+    """Return a deep-copy of ``paths`` with chunk order reversed, each chunk's
+    poses reversed, AND each pose's yaw rotated 180° so the mower faces the
+    direction it actually moves. Used by the visit-order optimiser when
+    entering a cell from its "end" side gives a cleaner inter-cell connection
+    than entering from its F2C-default "start" side. Wheel-anchor maneuver
+    metadata (pivot_wheel, anchor_point, phase) is left attached to its
+    original sample even though execution direction has flipped — that is a
+    known cosmetic limitation flagged for P3.
     """
     out: list[dict[str, Any]] = []
     for original in reversed(paths):
         clone = copy.deepcopy(original)
-        if clone.get("path", {}).get("poses"):
-            clone["path"]["poses"] = list(reversed(clone["path"]["poses"]))
-        if clone.get("tool_path", {}).get("poses"):
-            clone["tool_path"]["poses"] = list(reversed(clone["tool_path"]["poses"]))
+        for key in ("path", "tool_path"):
+            poses = clone.get(key, {}).get("poses") if isinstance(clone.get(key), dict) else None
+            if not poses:
+                continue
+            new_poses = []
+            for pose in reversed(poses):
+                p2 = dict(pose)
+                if "yaw" in p2 and p2["yaw"] is not None:
+                    try:
+                        p2["yaw"] = normalize_angle(float(p2["yaw"]) + math.pi)
+                    except (TypeError, ValueError):
+                        pass
+                new_poses.append(p2)
+            clone[key]["poses"] = new_poses
         out.append(clone)
     return out
 
@@ -2478,6 +2620,7 @@ def _plan_one_lawn_profiles_footprint_disk(
     cell_fill_paths: list[list[dict[str, Any]]] = []
     cell_swaths_json_all: list[dict[str, Any]] = []
     cell_fill_warnings: list[str] = []
+    cell_trim_stats: list[dict[str, Any]] = []
     swath_index_offset = 0
     for cell_i, cell_polygon in enumerate(all_cells):
         try:
@@ -2504,11 +2647,12 @@ def _plan_one_lawn_profiles_footprint_disk(
         if not cell_swaths_json:
             cell_fill_paths.append([])
             continue
-        cell_paths, cell_warns = build_zero_turn_fill_paths(lawn, area_index, cell_swaths_json, config)
+        cell_paths, cell_warns, cell_stats = build_zero_turn_fill_paths(lawn, area_index, cell_swaths_json, config)
         cell_fill_warnings.extend(
             f"cell {cell_i}: {w}" for w in cell_warns
         )
         cell_fill_paths.append(cell_paths)
+        cell_trim_stats.append(cell_stats)
 
     for profile_name in profile_names:
         result_profiles[profile_name]["debug_area"]["swaths"] = copy.deepcopy(cell_swaths_json_all)
@@ -2534,8 +2678,13 @@ def _plan_one_lawn_profiles_footprint_disk(
 
     # Count within-cell path splits — places where build_zero_turn_fill_paths
     # called finish_current() because both wheel-anchor and the forward U-turn
-    # fallback failed. A cell with k chunks contributes k-1 splits.
+    # fallback failed even after retry-with-trim. A cell with k chunks
+    # contributes k-1 splits.
     split_count = sum(max(0, len(paths) - 1) for paths in cell_fill_paths)
+    # Aggregate stripe-end trim retry stats across cells.
+    trim_attempts = sum(int(s.get("trim_attempts", 0)) for s in cell_trim_stats)
+    trim_successes = sum(int(s.get("trim_successes", 0)) for s in cell_trim_stats)
+    trim_total_distance_m = sum(float(s.get("trim_total_distance_m", 0.0)) for s in cell_trim_stats)
     inter_cell_direct_turns = 0
     transit_count = 0
     transit_length = 0.0
@@ -2590,6 +2739,9 @@ def _plan_one_lawn_profiles_footprint_disk(
         result_profiles[profile_name]["debug_area"]["transit_total_length_m"] = transit_length
         result_profiles[profile_name]["debug_area"]["inter_cell_direct_turns"] = inter_cell_direct_turns
         result_profiles[profile_name]["debug_area"]["within_cell_path_splits"] = split_count
+        result_profiles[profile_name]["debug_area"]["stripe_trim_attempts"] = trim_attempts
+        result_profiles[profile_name]["debug_area"]["stripe_trim_successes"] = trim_successes
+        result_profiles[profile_name]["debug_area"]["stripe_trim_total_distance_m"] = trim_total_distance_m
         result_profiles[profile_name]["debug_area"]["visit_order"] = [
             {"slot": i, "cell_index": ci, "direction": d}
             for i, (ci, d, _) in enumerate(visit_order)
@@ -2729,7 +2881,7 @@ def _plan_one_lawn_profiles_f2c(
         return result_profiles
 
     primary = primary_profile_name(config)
-    fill_paths, fill_warnings = build_zero_turn_fill_paths(lawn, area_index, swaths_json, config)
+    fill_paths, fill_warnings, _fill_stats = build_zero_turn_fill_paths(lawn, area_index, swaths_json, config)
     result_profiles[primary]["warnings"].extend(fill_warnings)
     if fill_paths:
         result_profiles[primary]["paths"].extend(fill_paths)
@@ -3112,6 +3264,7 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
     transit_metrics: dict[str, Any] = {"count": 0, "total_length_m": 0.0}
     inter_cell_metrics: dict[str, Any] = {"direct_turn_count": 0}
     split_metrics: dict[str, Any] = {"within_cell_path_splits": 0}
+    trim_metrics: dict[str, Any] = {"attempts": 0, "successes": 0, "total_distance_m": 0.0}
     seen_strategy: set[str] = set()
     for area in debug.get("areas", []):
         if not isinstance(area, dict):
@@ -3126,6 +3279,9 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
         transit_metrics["total_length_m"] += float(area.get("transit_total_length_m", 0.0) or 0.0)
         inter_cell_metrics["direct_turn_count"] += int(area.get("inter_cell_direct_turns", 0) or 0)
         split_metrics["within_cell_path_splits"] += int(area.get("within_cell_path_splits", 0) or 0)
+        trim_metrics["attempts"] += int(area.get("stripe_trim_attempts", 0) or 0)
+        trim_metrics["successes"] += int(area.get("stripe_trim_successes", 0) or 0)
+        trim_metrics["total_distance_m"] += float(area.get("stripe_trim_total_distance_m", 0.0) or 0.0)
     if len(seen_strategy) == 1:
         headland_metrics["strategy"] = next(iter(seen_strategy))
     elif seen_strategy:
@@ -3213,6 +3369,7 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
         "transit": transit_metrics,
         "inter_cell": inter_cell_metrics,
         "path_splits": split_metrics,
+        "stripe_trim": trim_metrics,
     }
 
 
