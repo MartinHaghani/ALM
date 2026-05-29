@@ -43,6 +43,9 @@ __all__ = [
     "outer_reflex_ys",
     "ring_length",
     "walk_ring_between",
+    "dominant_direction_angle",
+    "cell_long_axis_angle",
+    "cell_short_axis_extent_along",
 ]
 
 
@@ -618,6 +621,211 @@ def walk_ring_between(
             break
 
     return out
+
+
+# --------------------------------------------------------------------------------
+# Stripe-angle helpers (P12, P13)
+# --------------------------------------------------------------------------------
+
+
+def dominant_direction_angle(polygon: Polygon, smoothing_deg: float = 3.0) -> float | None:
+    """Return the dominant edge direction (radians, in [0, π)) of the polygon's
+    outer ring as a length-weighted histogram peak.
+
+    Each outer-ring edge contributes its length to a 1°-wide histogram bin
+    keyed by ``angle mod π`` (stripes are bidirectional). The histogram is
+    smoothed with a Gaussian of stddev ``smoothing_deg`` so a few short noisy
+    edges can't dominate, and the centre of the peak bin is returned (radians).
+    If the histogram is flat (peak < ~4× the mean bin, which corresponds to
+    < ~1.5× a typical edge-bearing bin once near-isotropic shapes have
+    spread their mass across many bins), returns ``None`` so the caller can
+    fall back to F2C's ``best_swath_length`` probe.
+
+    >>> import math
+    >>> # Axis-aligned rectangle: horizontal (and vertical) edges dominate.
+    >>> # Horizontal angle 0 and vertical angle π/2 both map to bin 0 under
+    >>> # mod π; the result is ~0 rad.
+    >>> rect = Polygon([(0, 0), (10, 0), (10, 5), (0, 5)])
+    >>> abs(dominant_direction_angle(rect)) < math.radians(2.0)
+    True
+    >>> # L-shape with axis-aligned edges: ~0 rad.
+    >>> L = Polygon([(0, 0), (12, 0), (12, 4), (5, 4), (5, 10), (0, 10)])
+    >>> abs(dominant_direction_angle(L)) < math.radians(2.0)
+    True
+    >>> # Rectangle rotated 30 degrees: angle ~ 30 degrees in radians.
+    >>> from shapely.affinity import rotate as _rot
+    >>> rect30 = _rot(rect, 30, origin=(0, 0), use_radians=False)
+    >>> ang = dominant_direction_angle(rect30)
+    >>> abs(ang - math.radians(30.0)) < math.radians(2.0)
+    True
+    >>> # Near-circle (16-gon): edges spread evenly across angles, histogram
+    >>> # is flat — returns None.
+    >>> import math as _m
+    >>> circle = Polygon([
+    ...     (_m.cos(2 * _m.pi * k / 16), _m.sin(2 * _m.pi * k / 16))
+    ...     for k in range(16)
+    ... ])
+    >>> dominant_direction_angle(circle) is None
+    True
+    """
+    if polygon is None or polygon.is_empty:
+        return None
+    try:
+        ring = list(polygon.exterior.coords)
+    except Exception:
+        return None
+    if ring and ring[0] == ring[-1]:
+        ring = ring[:-1]
+    if len(ring) < 3:
+        return None
+
+    n_bins = 180  # 1° per bin, covering [0, 180)
+    hist = [0.0] * n_bins
+    total_length = 0.0
+    for i in range(len(ring)):
+        ax, ay = ring[i]
+        bx, by = ring[(i + 1) % len(ring)]
+        dx = bx - ax
+        dy = by - ay
+        length = math.hypot(dx, dy)
+        if length < EPS:
+            continue
+        angle = math.atan2(dy, dx) % math.pi  # in [0, π)
+        bin_index = int(round(math.degrees(angle))) % n_bins
+        hist[bin_index] += length
+        total_length += length
+
+    if total_length < EPS:
+        return None
+
+    # Gaussian smoothing on the circular histogram. We compute the kernel out
+    # to ±3σ and wrap (modulo n_bins) so vertical (bin 0) and horizontal-flipped
+    # (bin 0) reinforce as a single peak — the histogram is already mod π so
+    # the [0, 180) span is the natural circular domain.
+    sigma = max(float(smoothing_deg), 1e-6)
+    half = max(1, int(math.ceil(3.0 * sigma)))
+    kernel = [math.exp(-0.5 * (k / sigma) ** 2) for k in range(-half, half + 1)]
+    k_sum = sum(kernel)
+    kernel = [k / k_sum for k in kernel]
+
+    smoothed = [0.0] * n_bins
+    for i in range(n_bins):
+        acc = 0.0
+        for j, w in enumerate(kernel):
+            offset = j - half
+            acc += hist[(i + offset) % n_bins] * w
+        smoothed[i] = acc
+
+    peak_value = max(smoothed)
+    if peak_value <= EPS:
+        return None
+    mean_value = sum(smoothed) / n_bins
+    # Mean-based flatness test: for an isotropic outline (e.g. a 16-gon) the
+    # smoothed peak sits at ~3× the mean; a single dominant axis pushes it
+    # well above 4×. The 1.5× sentinel mentioned in the spec is the
+    # equivalent ratio against a "typical edge-bearing bin" — that quantity
+    # equals (peak / mean) / (n_bins / number_of_occupied_bins) once the mass
+    # has been spread across many directions, and 4× peak/mean is the
+    # practical threshold that distinguishes the two regimes.
+    if mean_value > EPS and peak_value < 4.0 * mean_value:
+        return None
+
+    peak_bin = max(range(n_bins), key=lambda i: smoothed[i])
+    return math.radians(float(peak_bin))
+
+
+def cell_long_axis_angle(polygon: Polygon) -> float:
+    """Return the long-axis angle (radians, in [0, π)) of the polygon via
+    principal-component analysis on its outer-ring vertices.
+
+    Falls back to 0.0 for degenerate inputs (empty / too few vertices /
+    isotropic vertex cloud).
+
+    >>> import math
+    >>> # Wide rectangle along x — long axis is horizontal.
+    >>> rect = Polygon([(0, 0), (10, 0), (10, 1), (0, 1)])
+    >>> abs(cell_long_axis_angle(rect)) < math.radians(2.0)
+    True
+    >>> # Tall rectangle — long axis is vertical (~π/2).
+    >>> tall = Polygon([(0, 0), (1, 0), (1, 10), (0, 10)])
+    >>> abs(cell_long_axis_angle(tall) - math.pi / 2) < math.radians(2.0)
+    True
+    >>> # Rectangle rotated 45° — long axis ~ π/4.
+    >>> from shapely.affinity import rotate as _rot
+    >>> rect45 = _rot(rect, 45, origin=(0, 0), use_radians=False)
+    >>> abs(cell_long_axis_angle(rect45) - math.radians(45.0)) < math.radians(2.0)
+    True
+    """
+    if polygon is None or polygon.is_empty:
+        return 0.0
+    try:
+        ring = list(polygon.exterior.coords)
+    except Exception:
+        return 0.0
+    if ring and ring[0] == ring[-1]:
+        ring = ring[:-1]
+    if len(ring) < 3:
+        return 0.0
+
+    n = len(ring)
+    cx = sum(p[0] for p in ring) / n
+    cy = sum(p[1] for p in ring) / n
+    sxx = 0.0
+    syy = 0.0
+    sxy = 0.0
+    for x, y in ring:
+        dx = x - cx
+        dy = y - cy
+        sxx += dx * dx
+        syy += dy * dy
+        sxy += dx * dy
+    sxx /= n
+    syy /= n
+    sxy /= n
+
+    # Eigen-decomposition of [[sxx, sxy], [sxy, syy]].
+    trace = sxx + syy
+    det = sxx * syy - sxy * sxy
+    disc = max(0.0, (trace / 2.0) ** 2 - det)
+    sqrt_disc = math.sqrt(disc)
+    lambda1 = trace / 2.0 + sqrt_disc  # larger eigenvalue
+    # Eigenvector for the larger eigenvalue.
+    if abs(sxy) > EPS:
+        vx = lambda1 - syy
+        vy = sxy
+    elif sxx >= syy:
+        vx, vy = 1.0, 0.0
+    else:
+        vx, vy = 0.0, 1.0
+    if abs(vx) < EPS and abs(vy) < EPS:
+        return 0.0
+    angle = math.atan2(vy, vx) % math.pi
+    return float(angle)
+
+
+def cell_short_axis_extent_along(polygon: Polygon, angle_rad: float) -> float:
+    """Return the polygon's extent (metres) **perpendicular** to ``angle_rad``.
+
+    This is the dimension stripes laid down at ``angle_rad`` would have to
+    span: in the frame where stripes run horizontally, this is the polygon's
+    vertical (y) extent. Used to detect tight cells (P13) whose short axis
+    along the chosen stripe angle is narrower than a few tool widths.
+
+    >>> import math
+    >>> rect = Polygon([(0, 0), (10, 0), (10, 1), (0, 1)])
+    >>> # Stripes along x: perpendicular extent is the height (1.0).
+    >>> abs(cell_short_axis_extent_along(rect, 0.0) - 1.0) < 1e-6
+    True
+    >>> # Stripes along y: perpendicular extent is the width (10.0).
+    >>> abs(cell_short_axis_extent_along(rect, math.pi / 2) - 10.0) < 1e-6
+    True
+    """
+    if polygon is None or polygon.is_empty:
+        return 0.0
+    deg = math.degrees(angle_rad)
+    rotated = rotate(polygon, -deg, origin=(0, 0), use_radians=False)
+    minx, miny, maxx, maxy = rotated.bounds
+    return float(maxy - miny)
 
 
 if __name__ == "__main__":

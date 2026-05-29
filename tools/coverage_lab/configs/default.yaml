@@ -14,6 +14,13 @@ headland_strategy: footprint_disk
 #   sub-regions before running F2C swath generation, and stitches them with
 #   explicit transit segments along the headland.
 cell_decomposition: true
+# P12: dominant-direction stripe angle uses a weighted edge-angle histogram
+# on the eroded outer boundary, with this Gaussian smoothing stddev (degrees).
+dominant_direction_smoothing_deg: 3.0
+# P13: when a BCD cell's extent perpendicular to the global stripe angle is
+# less than this factor × tool_width, rotate stripes inside that cell to
+# align with the cell's long axis.
+tight_cell_stripe_threshold_factor: 2.0
 outline_count: 1
 outline_clearance_m: auto
 outline_offset: 0.0

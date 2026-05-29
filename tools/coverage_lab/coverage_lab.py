@@ -2979,10 +2979,24 @@ def _plan_one_lawn_profiles_footprint_disk(
             )
         return result_profiles
 
-    # Decide swath angle. If configured fixed, use it directly. Otherwise run F2C
-    # swath generation once on the union mainland to pick the best angle, then
-    # use that fixed angle for per-cell planning.
+    # Decide swath angle. If configured fixed, use it directly. Otherwise
+    # P12: try the dominant-direction histogram on the eroded outer boundary
+    # first; that is robust to noisy real-world outlines where F2C's
+    # best_swath_length probe ends up keying off whichever short chord happens
+    # to be marginally longer than its neighbours. Fall back to the F2C
+    # probe (then 0 rad) only when the histogram is flat.
     fixed_angle = configured_swath_angle(config)
+    if fixed_angle is None:
+        smoothing_deg = float(
+            config.get("dominant_direction_smoothing_deg", 3.0) or 3.0
+        )
+        try:
+            fixed_angle = lab_geometry.dominant_direction_angle(
+                mainland_polygons[0], smoothing_deg=smoothing_deg
+            )
+        except Exception as exc:  # pragma: no cover - best-effort heuristic
+            warnings.append(f"dominant-direction angle estimator failed: {exc}")
+            fixed_angle = None
     if fixed_angle is None:
         try:
             probe_cells = make_f2c_cells_from_polygon(mainland_polygons[0], f2c)
@@ -3029,17 +3043,59 @@ def _plan_one_lawn_profiles_footprint_disk(
     }
 
     primary = primary_profile_name(config)
+    # P13: when a cell's extent perpendicular to the global stripe angle is
+    # narrower than ``tight_cell_stripe_threshold_factor * tool_width``, rotate
+    # stripes inside that cell to its PCA long axis so the wheel-anchor
+    # planner has room to manoeuvre.
+    tight_factor = float(
+        config.get("tight_cell_stripe_threshold_factor", 2.0) or 0.0
+    )
+    tight_threshold_m = tool_width * tight_factor
+    per_cell_angles: list[dict[str, Any]] = []
     cell_fill_paths: list[list[dict[str, Any]]] = []
     cell_swaths_json_all: list[dict[str, Any]] = []
     cell_fill_warnings: list[str] = []
     cell_trim_stats: list[dict[str, Any]] = []
     swath_index_offset = 0
     for cell_i, cell_polygon in enumerate(all_cells):
+        # Decide this cell's stripe angle.
+        try:
+            cell_extent = lab_geometry.cell_short_axis_extent_along(
+                cell_polygon, fixed_angle
+            )
+        except Exception:
+            cell_extent = float("inf")
+        is_tight = (
+            tight_threshold_m > 0.0
+            and cell_extent < tight_threshold_m
+        )
+        if is_tight:
+            try:
+                cell_angle = lab_geometry.cell_long_axis_angle(cell_polygon)
+            except Exception:
+                cell_angle = fixed_angle
+        else:
+            cell_angle = fixed_angle
+        per_cell_angles.append(
+            {
+                "cell_index": cell_i,
+                "angle_rad": float(cell_angle),
+                "tight": bool(is_tight),
+                "extent_m": float(cell_extent if cell_extent != float("inf") else 0.0),
+            }
+        )
+
+        cell_fixed_config = copy.deepcopy(fixed_config)
+        cell_fixed_config["fields2cover"]["swath_angle"] = {
+            "mode": "fixed",
+            "degrees": math.degrees(cell_angle),
+        }
+
         try:
             cell_f2c = make_f2c_cells_from_polygon(cell_polygon, f2c)
-            cell_swaths = generate_swaths(cell_f2c, fixed_config, f2c)
+            cell_swaths = generate_swaths(cell_f2c, cell_fixed_config, f2c)
             try:
-                cell_swaths = sort_swaths(cell_swaths, fixed_config, f2c)
+                cell_swaths = sort_swaths(cell_swaths, cell_fixed_config, f2c)
             except TypeError as exc:
                 warnings.append(
                     f"Fields2Cover swath ordering failed in cell {cell_i}; using generated order: {exc}"
@@ -3068,6 +3124,7 @@ def _plan_one_lawn_profiles_footprint_disk(
 
     for profile_name in profile_names:
         result_profiles[profile_name]["debug_area"]["swaths"] = copy.deepcopy(cell_swaths_json_all)
+        result_profiles[profile_name]["debug_area"]["per_cell_angles"] = copy.deepcopy(per_cell_angles)
 
     if not cell_swaths_json_all:
         for profile_name in profile_names:
@@ -3677,6 +3734,11 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
     inter_cell_metrics: dict[str, Any] = {"direct_turn_count": 0}
     split_metrics: dict[str, Any] = {"within_cell_path_splits": 0}
     trim_metrics: dict[str, Any] = {"attempts": 0, "successes": 0, "total_distance_m": 0.0}
+    per_cell_angle_metrics: dict[str, Any] = {
+        "total_cells": 0,
+        "tight_cell_count": 0,
+        "angle_overrides": 0,
+    }
     seen_strategy: set[str] = set()
     for area in debug.get("areas", []):
         if not isinstance(area, dict):
@@ -3694,6 +3756,13 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
         trim_metrics["attempts"] += int(area.get("stripe_trim_attempts", 0) or 0)
         trim_metrics["successes"] += int(area.get("stripe_trim_successes", 0) or 0)
         trim_metrics["total_distance_m"] += float(area.get("stripe_trim_total_distance_m", 0.0) or 0.0)
+        for entry in area.get("per_cell_angles", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            per_cell_angle_metrics["total_cells"] += 1
+            if bool(entry.get("tight", False)):
+                per_cell_angle_metrics["tight_cell_count"] += 1
+                per_cell_angle_metrics["angle_overrides"] += 1
     if len(seen_strategy) == 1:
         headland_metrics["strategy"] = next(iter(seen_strategy))
     elif seen_strategy:
@@ -3782,6 +3851,7 @@ def compute_metrics(model: OpenMowerMap, compat: dict[str, Any], debug: dict[str
         "inter_cell": inter_cell_metrics,
         "path_splits": split_metrics,
         "stripe_trim": trim_metrics,
+        "per_cell_angle": per_cell_angle_metrics,
     }
 
 
