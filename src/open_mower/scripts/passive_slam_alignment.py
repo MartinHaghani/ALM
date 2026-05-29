@@ -309,7 +309,9 @@ class PassiveSlamAlignment:
         rospy.Service("~reset", Trigger, self.reset)
 
         rospy.loginfo(
-            "Passive SLAM alignment ready: boundary topic %s, publishing %s -> %s. Boundary record offset from %s is (%.3f, %.3f).",
+            "Passive SLAM alignment ready: boundary topic %s, publishing %s -> %s. Boundary samples now align "
+            "base_link to base_link (decoupled from the area-recorder rake); footprint front-right offset of "
+            "(%.3f, %.3f) is reported for reference only.",
             self.boundary_sample_topic,
             self.map_frame,
             self.slam_map_frame,
@@ -375,7 +377,6 @@ class PassiveSlamAlignment:
         try:
             stamp = msg.header.stamp if msg.header.stamp != rospy.Time() else rospy.Time(0)
             slam_base_pose = self.lookup_pose(self.slam_map_frame, self.slam_base_frame, stamp=stamp, allow_historical=True)
-            slam_record_point = project_point(slam_base_pose, self.slam_record_offset)
             self.set_tf_health("boundary", "ok")
         except Exception as exc:  # pylint: disable=broad-except
             self.set_tf_health("boundary", "missing")
@@ -384,8 +385,18 @@ class PassiveSlamAlignment:
                 self.last_error = "boundary sample skipped: {}".format(exc)
             return
 
-        gps_record_point = point_from_point_msg(msg.gps_point)
+        # Use base_link pose pairs (GPS vs SLAM) instead of points projected
+        # through a fixed footprint offset. The rake-based area recorder now
+        # picks different points along the right side per tick, so projecting
+        # SLAM through a hardcoded front-right offset would no longer match
+        # the recorded GPS point. The rigid-transform fit produces the same
+        # answer whether you use offset points (with the same offset on both
+        # sides) or raw base poses, with only a small loss of yaw lever-arm
+        # observability that is dominated by the spatial spread of boundary
+        # samples in practice.
         gps_pose = pose_from_pose_msg(msg.fused_pose)
+        gps_record_point = {"x": gps_pose["x"], "y": gps_pose["y"]}
+        slam_record_point = {"x": slam_base_pose["x"], "y": slam_base_pose["y"]}
         boundary_sample = {
             "gps": gps_record_point,
             "gps_pose": gps_pose,

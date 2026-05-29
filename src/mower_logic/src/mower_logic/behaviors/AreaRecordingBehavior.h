@@ -108,13 +108,33 @@ class AreaRecordingBehavior : public Behavior {
   visualization_msgs::Marker marker;
   geometry_msgs::Point32 footprint_front_left;
   geometry_msgs::Point32 footprint_front_right;
+  // Rake of body-frame points sampled along the entire right/left side of the
+  // footprint, from rear to front. Used to capture the actual outermost point
+  // touching the boundary during a zero-turn pivot.
+  std::vector<geometry_msgs::Point32> right_side_rake;
+  std::vector<geometry_msgs::Point32> left_side_rake;
+  int rake_point_count = 9;
 
  private:
+  enum class RakeSide { RIGHT, LEFT };
+
   bool recordNewPolygon(RecordedPolygon& polygon, xbot_msgs::MapOverlay& resultOverlay, uint8_t preview_point_mode);
   bool getDockingPosition(geometry_msgs::Pose& pos);
   bool recordingGpsQualityOk(const xbot_msgs::AbsolutePose& pose, std::string& reason) const;
   geometry_msgs::Point32 projectPoint(const geometry_msgs::Pose& pose, const geometry_msgs::Point32& offset) const;
-  void addRecordedPoint(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose, uint32_t index, bool auto_collected);
+  // Pick the rake point whose world-frame position projects furthest outward
+  // (perpendicular-right or perpendicular-left of the travel direction). If
+  // last_vertex is null, falls back to heading-perpendicular.
+  geometry_msgs::Point32 selectOutermostRakePoint(RakeSide side, const geometry_msgs::Pose& pose,
+                                                  const geometry_msgs::Point32* last_vertex,
+                                                  geometry_msgs::Point32& base_link_offset_out) const;
+  // Drop inward-notch vertices (a vertex that lies on the inward side of the
+  // chord between its neighbors). Runs up to 3 passes; the polygon is open
+  // (not yet closed) when this is called.
+  void prunePolygon(geometry_msgs::Polygon& polygon, RakeSide side) const;
+  void addRecordedPoint(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose, uint32_t index, bool auto_collected,
+                        const geometry_msgs::Point32& outline_world_point,
+                        const geometry_msgs::Point32& outline_base_offset, RakeSide outline_side);
   void gps_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);
   void loadFootprintRecordingPoints();
   void publishBoundarySamples(const std::vector<mower_map::BoundarySample>& samples, uint8_t area_type);
