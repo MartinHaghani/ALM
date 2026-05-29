@@ -15,6 +15,7 @@
 #include "geometry_msgs/PoseWithCovarianceStamped.h"
 #include "geometry_msgs/TwistWithCovarianceStamped.h"
 #include "ros/ros.h"
+#include "std_srvs/Trigger.h"
 #include "xbot_msgs/AbsolutePose.h"
 #include "xbot_msgs/WheelTick.h"
 #include "xbot_positioning/GPSControlSrv.h"
@@ -223,6 +224,27 @@ bool setPose(xbot_positioning::SetPoseSrvRequest &req, xbot_positioning::SetPose
     return true;
 }
 
+// Drop the cached gyro bias and re-run the 5-second IMU averaging calibration
+// the next time IMU samples arrive. Caller must keep the robot stationary
+// during the calibration window or the new bias will also be wrong. The
+// Kalman filter state is not touched; once recalibration finishes the EKF
+// keeps using its current pose with the corrected gyro bias.
+bool recalibrateGyro(std_srvs::TriggerRequest &req, std_srvs::TriggerResponse &res) {
+    if (skip_gyro_calibration) {
+        res.success = false;
+        res.message = "skip_gyro_calibration is set; refusing to re-calibrate. Restart the node without that flag if you really want to recalibrate.";
+        return true;
+    }
+    has_gyro = false;
+    gyro_offset = 0;
+    gyro_offset_samples = 0;
+    gyro_calibration_start = ros::Time(0);
+    ROS_WARN_STREAM("Gyro recalibration requested; keep the robot stationary for ~5 s.");
+    res.success = true;
+    res.message = "Gyro recalibration started; keep the robot stationary for ~5 s.";
+    return true;
+}
+
 void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {
     if (!gps_enabled) {
         ROS_INFO_STREAM_THROTTLE(gps_message_throttle, "dropping GPS update, since gps_enabled = false.");
@@ -329,6 +351,8 @@ int main(int argc, char **argv) {
 
     ros::ServiceServer gps_service = n.advertiseService("xbot_positioning/set_gps_state", setGpsState);
     ros::ServiceServer pose_service = n.advertiseService("xbot_positioning/set_robot_pose", setPose);
+    ros::ServiceServer recalibrate_service =
+        n.advertiseService("xbot_positioning/recalibrate_gyro", recalibrateGyro);
 
     paramNh.param("skip_gyro_calibration", skip_gyro_calibration, false);
     paramNh.param("gyro_offset", gyro_offset, 0.0);
