@@ -268,6 +268,7 @@ void AreaRecordingBehavior::enter() {
   marker_pub = n->advertise<visualization_msgs::Marker>("area_recorder/progress_visualization", 10);
   map_overlay_pub = n->advertise<xbot_msgs::MapOverlay>("xbot_monitoring/map_overlay", 10);
   marker_array_pub = n->advertise<visualization_msgs::MarkerArray>("area_recorder/progress_visualization_array", 10);
+  painted_occupancy_pub = n->advertise<nav_msgs::OccupancyGrid>("area_recorder/painted_area", 1, true);
 
   ROS_INFO_STREAM("Starting recording area");
 
@@ -300,6 +301,7 @@ void AreaRecordingBehavior::exit() {
   marker_pub.shutdown();
   marker_array_pub.shutdown();
   boundary_sample_pub.shutdown();
+  painted_occupancy_pub.shutdown();
   joy_sub.shutdown();
   gps_pose_sub.shutdown();
   dock_sub.shutdown();
@@ -378,8 +380,6 @@ geometry_msgs::Point32 AreaRecordingBehavior::projectPoint(const geometry_msgs::
 void AreaRecordingBehavior::loadFootprintRecordingPoints() {
   // Sensible Mowrator-rectangle defaults; overridden below if the costmap
   // footprint param is available.
-  footprint_front_left = makePoint(0.82, 0.34);
-  footprint_front_right = makePoint(0.82, -0.34);
   double right_rear_x = 0.0;
   double right_front_x = 0.82;
   double right_y = -0.34;
@@ -387,10 +387,14 @@ void AreaRecordingBehavior::loadFootprintRecordingPoints() {
   double left_front_x = 0.82;
   double left_y = 0.34;
 
-  ros::param::param<int>("mower_logic/area_recording_rake_points", rake_point_count, 9);
-  if (rake_point_count < 3) {
-    rake_point_count = 3;
-  }
+  ros::param::param<double>("mower_logic/area_recording_paint_cell_size_m", paint_cell_size_m, 0.05);
+  if (paint_cell_size_m < 0.01) paint_cell_size_m = 0.01;
+  if (paint_cell_size_m > 0.5) paint_cell_size_m = 0.5;
+  ros::param::param<double>("mower_logic/area_recording_simplify_epsilon_m", paint_simplify_epsilon_m, 0.04);
+  if (paint_simplify_epsilon_m < 0.0) paint_simplify_epsilon_m = 0.0;
+  ros::param::param<double>("mower_logic/area_recording_boundary_sample_spacing_m", boundary_sample_min_spacing_m,
+                            0.15);
+  if (boundary_sample_min_spacing_m < 0.05) boundary_sample_min_spacing_m = 0.05;
 
   XmlRpc::XmlRpcValue footprint;
   const bool have_footprint = ros::param::get("/move_base_flex/global_costmap/footprint", footprint) ||
@@ -440,207 +444,114 @@ void AreaRecordingBehavior::loadFootprintRecordingPoints() {
     ROS_WARN_STREAM("Area recorder could not parse footprint param; using Mowrator fallback rectangle.");
   }
 
-  footprint_front_right = makePoint(right_front_x, right_y);
-  footprint_front_left = makePoint(left_front_x, left_y);
+  right_side_rear = makePoint(right_rear_x, right_y);
+  right_side_front = makePoint(right_front_x, right_y);
+  left_side_rear = makePoint(left_rear_x, left_y);
+  left_side_front = makePoint(left_front_x, left_y);
 
-  // Build evenly-spaced rakes along each side edge, rear -> front. Endpoints
-  // are always included, so for the default 9-point Mowrator rake the front
-  // and rear corners and the geometric center are all sampled.
-  right_side_rake.clear();
-  left_side_rake.clear();
-  right_side_rake.reserve(rake_point_count);
-  left_side_rake.reserve(rake_point_count);
-  for (int i = 0; i < rake_point_count; ++i) {
-    const double t = (rake_point_count == 1) ? 0.5 : static_cast<double>(i) / (rake_point_count - 1);
-    right_side_rake.push_back(makePoint(right_rear_x + t * (right_front_x - right_rear_x), right_y));
-    left_side_rake.push_back(makePoint(left_rear_x + t * (left_front_x - left_rear_x), left_y));
-  }
-
-  ROS_INFO_STREAM("Area recorder rakes: right [(" << right_rear_x << "," << right_y << ")..(" << right_front_x
-                                                  << "," << right_y << ")], left [(" << left_rear_x << "," << left_y
-                                                  << ")..(" << left_front_x << "," << left_y << ")], "
-                                                  << rake_point_count << " points each.");
+  ROS_INFO_STREAM("Area recorder painted-area params: cell=" << paint_cell_size_m << " m, simplify_eps="
+                                                              << paint_simplify_epsilon_m << " m. Right side ["
+                                                              << right_rear_x << ".." << right_front_x << "] y=" << right_y
+                                                              << ", left side [" << left_rear_x << ".." << left_front_x
+                                                              << "] y=" << left_y << ".");
 }
 
-geometry_msgs::Point32 AreaRecordingBehavior::selectOutermostRakePoint(
-    RakeSide side, const geometry_msgs::Pose& pose, const geometry_msgs::Point32* last_vertex,
-    geometry_msgs::Point32& base_link_offset_out) const {
-  const auto& rake = (side == RakeSide::RIGHT) ? right_side_rake : left_side_rake;
-  if (rake.empty()) {
-    base_link_offset_out = makePoint(0.0, 0.0);
-    return makePoint(pose.position.x, pose.position.y);
+void AreaRecordingBehavior::emitMotionBoundarySample(const xbot_msgs::AbsolutePose& pose, uint8_t area_type,
+                                                     uint32_t index) {
+  // Single-sample emission used by the painted-area recording path. Replaces
+  // the previous per-vertex sample emission because polygon vertices no
+  // longer come from a per-tick rake selection -- they come from contour
+  // extraction at finish time. The alignment helper consumes one sample per
+  // ~min_sample_spacing m of motion regardless.
+  mower_map::BoundarySample sample;
+  sample.header = pose.header;
+  if (sample.header.stamp == ros::Time()) {
+    sample.header.stamp = ros::Time::now();
   }
-
-  // Outward direction: perpendicular-right (or left) of the mower's travel
-  // vector from the last accepted vertex to the current base_link position.
-  // This is what makes the algorithm correctly pick the rear-most rake point
-  // when the mower reverses into a 90 deg internal corner: the right-of-travel
-  // direction flips when travel reverses.
-  //
-  // When there is no last vertex yet, or the mower hasn't moved measurably
-  // since the last vertex (e.g. pivoting in place), fall back to the
-  // body-heading perpendicular so we still have a defined outward direction.
-  double outward_x = 0.0;
-  double outward_y = 0.0;
-  bool have_travel = false;
-  if (last_vertex != nullptr) {
-    const double tx = pose.position.x - last_vertex->x;
-    const double ty = pose.position.y - last_vertex->y;
-    const double tlen = std::hypot(tx, ty);
-    if (tlen > 1e-3) {
-      const double inv = 1.0 / tlen;
-      if (side == RakeSide::RIGHT) {
-        outward_x = ty * inv;
-        outward_y = -tx * inv;
-      } else {
-        outward_x = -ty * inv;
-        outward_y = tx * inv;
-      }
-      have_travel = true;
-    }
-  }
-  if (!have_travel) {
-    const double yaw = yawFromPose(pose);
-    if (side == RakeSide::RIGHT) {
-      outward_x = std::sin(yaw);
-      outward_y = -std::cos(yaw);
-    } else {
-      outward_x = -std::sin(yaw);
-      outward_y = std::cos(yaw);
-    }
-  }
-
-  // Project each rake point to world frame and pick the one with the largest
-  // outward projection relative to the base_link position.
-  int best_idx = 0;
-  double best_proj = -std::numeric_limits<double>::infinity();
-  geometry_msgs::Point32 best_world = makePoint(pose.position.x, pose.position.y);
-  for (size_t i = 0; i < rake.size(); ++i) {
-    const auto world_pt = projectPoint(pose, rake[i]);
-    const double dx = world_pt.x - pose.position.x;
-    const double dy = world_pt.y - pose.position.y;
-    const double proj = dx * outward_x + dy * outward_y;
-    if (proj > best_proj) {
-      best_proj = proj;
-      best_idx = static_cast<int>(i);
-      best_world = world_pt;
-    }
-  }
-
-  base_link_offset_out = rake[best_idx];
-  return best_world;
-}
-
-void AreaRecordingBehavior::prunePolygon(geometry_msgs::Polygon& polygon, RakeSide /*side*/) const {
-  // Drop vertices that lie on the interior side of the chord between their
-  // neighbors by more than `tol`. These are the inward notches that can creep
-  // in from sample-to-sample variation even though the per-tick selection
-  // picks the most-outward rake point.
-  //
-  // Interior side is detected from the polygon's signed area, so this works
-  // regardless of whether the user drove around the boundary clockwise or
-  // counter-clockwise.
-  if (polygon.points.size() < 4) return;
-
-  auto signed_area_2x = [](const geometry_msgs::Polygon& p) {
-    double s = 0.0;
-    const size_t n = p.points.size();
-    for (size_t i = 0; i < n; ++i) {
-      const auto& a = p.points[i];
-      const auto& b = p.points[(i + 1) % n];
-      s += (static_cast<double>(a.x) * b.y - static_cast<double>(b.x) * a.y);
-    }
-    return s;
-  };
-
-  const double tol = 0.02;  // metres
-  for (int pass = 0; pass < 3; ++pass) {
-    if (polygon.points.size() < 4) break;
-    const double area2 = signed_area_2x(polygon);
-    // CCW (area2 > 0): interior is LEFT of directed edges.
-    // CW (area2 < 0): interior is RIGHT.
-    const double interior_sign = (area2 >= 0.0) ? 1.0 : -1.0;
-
-    bool removed = false;
-    std::vector<geometry_msgs::Point32> kept;
-    kept.reserve(polygon.points.size());
-    kept.push_back(polygon.points.front());
-    for (size_t i = 1; i + 1 < polygon.points.size(); ++i) {
-      const auto& prev = kept.back();
-      const auto& cur = polygon.points[i];
-      const auto& nxt = polygon.points[i + 1];
-      const double ex = nxt.x - prev.x;
-      const double ey = nxt.y - prev.y;
-      const double vx = cur.x - prev.x;
-      const double vy = cur.y - prev.y;
-      const double edge_len = std::hypot(ex, ey);
-      if (edge_len < 1e-6) {
-        kept.push_back(cur);
-        continue;
-      }
-      // Signed perpendicular distance from cur to the line prev->nxt; positive
-      // means cur lies on the LEFT of the directed edge.
-      const double signed_d = (ex * vy - ey * vx) / edge_len;
-      if (signed_d * interior_sign > tol) {
-        removed = true;
-      } else {
-        kept.push_back(cur);
-      }
-    }
-    kept.push_back(polygon.points.back());
-    polygon.points = std::move(kept);
-    if (!removed) break;
-  }
-}
-
-void AreaRecordingBehavior::addRecordedPoint(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose,
-                                             uint32_t index, bool auto_collected,
-                                             const geometry_msgs::Point32& outline_world_point,
-                                             const geometry_msgs::Point32& /*outline_base_offset*/,
-                                             RakeSide outline_side) {
-  const auto base_point = makePoint(pose.pose.pose.position.x, pose.pose.pose.position.y);
-  // For the side currently being recorded, write the rake-selected world
-  // point. For the inactive side, fall back to the static corner offset (the
-  // pre-rake behaviour). This keeps every polygon populated each tick so
-  // closure logic and downstream consumers are unaffected, while the polygon
-  // that actually gets saved (front_right for mowing outlines, front_left for
-  // obstacles) carries the outermost rake point.
-  const auto static_front_right = projectPoint(pose.pose.pose, footprint_front_right);
-  const auto static_front_left = projectPoint(pose.pose.pose, footprint_front_left);
-  const auto front_right_point = (outline_side == RakeSide::RIGHT) ? outline_world_point : static_front_right;
-  const auto front_left_point = (outline_side == RakeSide::LEFT) ? outline_world_point : static_front_left;
-
-  polygon.base.points.push_back(base_point);
-  polygon.front_left.points.push_back(front_left_point);
-  polygon.front_right.points.push_back(front_right_point);
-
-  auto make_sample = [&](uint8_t point_mode, const geometry_msgs::Point32& point) {
-    mower_map::BoundarySample sample;
-    sample.header = pose.header;
-    if (sample.header.stamp == ros::Time()) {
-      sample.header.stamp = ros::Time::now();
-    }
-    sample.header.frame_id = "map";
-    sample.point_mode = point_mode;
-    sample.point_index = index;
-    sample.fused_pose = pose.pose.pose;
-    sample.gps_point = point;
-    sample.gps_flags = pose.flags;
-    sample.gps_accuracy = pose.position_accuracy;
+  sample.header.frame_id = "map";
+  sample.area_type = area_type;
+  sample.point_mode = mower_map::BoundarySample::POINT_FRONT_RIGHT;  // historical channel selector used by alignment
+  sample.point_index = index;
+  sample.fused_pose = pose.pose.pose;
+  sample.gps_point = makePoint(pose.pose.pose.position.x, pose.pose.pose.position.y);
+  sample.gps_flags = pose.flags;
+  sample.gps_accuracy = pose.position_accuracy;
+  sample.rtk_fixed = (sample.gps_flags & xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED) != 0;
+  sample.auto_collected = true;
+  if (has_gps_pose && (ros::Time::now() - last_gps_pose_time).toSec() <= kGpsPoseFreshSec) {
+    sample.gps_flags = last_gps_pose.flags;
+    sample.gps_accuracy = last_gps_pose.position_accuracy;
     sample.rtk_fixed = (sample.gps_flags & xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED) != 0;
-    sample.auto_collected = auto_collected;
+  }
+  boundary_sample_pub.publish(sample);
+}
 
-    if (has_gps_pose && (ros::Time::now() - last_gps_pose_time).toSec() <= kGpsPoseFreshSec) {
-      sample.gps_flags = last_gps_pose.flags;
-      sample.gps_accuracy = last_gps_pose.position_accuracy;
-      sample.rtk_fixed = (sample.gps_flags & xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED) != 0;
+void AreaRecordingBehavior::publishPaintedContourOverlay(const PaintedArea& painted,
+                                                         xbot_msgs::MapOverlay& result_overlay) const {
+  if (painted.empty() || result_overlay.polygons.empty()) return;
+  auto& poly_viz = result_overlay.polygons.back();
+  poly_viz.polygon.points.clear();
+  auto contour = painted.extract_outer_contour();
+  if (contour.size() < 4) return;
+  contour = PaintedArea::douglas_peucker(contour, paint_simplify_epsilon_m);
+  poly_viz.polygon.points.reserve(contour.size());
+  for (const auto& p : contour) {
+    geometry_msgs::Point32 pt;
+    pt.x = p.first;
+    pt.y = p.second;
+    pt.z = 0.0;
+    poly_viz.polygon.points.push_back(pt);
+  }
+  map_overlay_pub.publish(result_overlay);
+}
+
+void AreaRecordingBehavior::publishPaintedOccupancyGrid(const PaintedArea& painted) {
+  if (painted.empty()) return;
+  int min_i, min_j, max_i, max_j;
+  if (!painted.get_bounds(min_i, min_j, max_i, max_j)) return;
+  // Pad the bounds slightly so the grid extent stays a few cells away from
+  // painted edges (helps the WebUI render the boundary cleanly).
+  const int pad = 4;
+  min_i -= pad;
+  max_i += pad;
+  min_j -= pad;
+  max_j += pad;
+  const int width = max_i - min_i + 1;
+  const int height = max_j - min_j + 1;
+  // Cap grid size to keep network and CPU costs bounded for very large
+  // recordings; oversize grids get downsampled.
+  const int kMaxCells = 600 * 600;
+  int downsample = 1;
+  while (static_cast<int64_t>(width / downsample) * (height / downsample) > kMaxCells) {
+    ++downsample;
+  }
+  const int out_w = std::max(1, width / downsample);
+  const int out_h = std::max(1, height / downsample);
+
+  nav_msgs::OccupancyGrid grid;
+  grid.header.stamp = ros::Time::now();
+  grid.header.frame_id = "map";
+  grid.info.resolution = painted.cell_size() * downsample;
+  grid.info.width = static_cast<uint32_t>(out_w);
+  grid.info.height = static_cast<uint32_t>(out_h);
+  grid.info.origin.position.x = painted.cell_corner_x(min_i);
+  grid.info.origin.position.y = painted.cell_corner_y(min_j);
+  grid.info.origin.position.z = 0.0;
+  grid.info.origin.orientation.w = 1.0;
+  grid.data.assign(static_cast<std::size_t>(out_w) * out_h, 0);
+  for (int j = 0; j < out_h; ++j) {
+    for (int i = 0; i < out_w; ++i) {
+      // A downsampled cell is occupied if any source cell within it was painted.
+      bool any = false;
+      for (int dj = 0; dj < downsample && !any; ++dj) {
+        for (int di = 0; di < downsample && !any; ++di) {
+          if (painted.is_painted(min_i + i * downsample + di, min_j + j * downsample + dj)) any = true;
+        }
+      }
+      grid.data[j * out_w + i] = any ? 100 : 0;
     }
-    return sample;
-  };
-
-  polygon.base_samples.push_back(make_sample(mower_map::BoundarySample::POINT_BASE, base_point));
-  polygon.front_left_samples.push_back(make_sample(mower_map::BoundarySample::POINT_FRONT_LEFT, front_left_point));
-  polygon.front_right_samples.push_back(make_sample(mower_map::BoundarySample::POINT_FRONT_RIGHT, front_right_point));
+  }
+  painted_occupancy_pub.publish(grid);
 }
 
 void AreaRecordingBehavior::publishBoundarySamples(const std::vector<mower_map::BoundarySample>& samples,
@@ -746,7 +657,7 @@ void AreaRecordingBehavior::record_mowing_received(std_msgs::Bool state_msg) {
 bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
                                              xbot_msgs::MapOverlay& resultOverlay,
                                              uint8_t preview_point_mode) {
-  ROS_INFO_STREAM("recordNewPolygon");
+  ROS_INFO_STREAM("recordNewPolygon (painted-area mode)");
 
   bool success = true;
   marker = visualization_msgs::Marker();
@@ -779,7 +690,30 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
     poly_viz.color = "blue";
     resultOverlay.polygons.push_back(poly_viz);
   }
-  auto& poly_viz = resultOverlay.polygons.back();
+
+  // For obstacles we trace the left side (lawn/obstacle on the mower's
+  // left); for outlines we trace the right side. The painted area covers the
+  // full rake segment swept by the active side over the recording.
+  const RakeSide active_side = (preview_point_mode == mower_map::BoundarySample::POINT_FRONT_LEFT)
+                                   ? RakeSide::LEFT
+                                   : RakeSide::RIGHT;
+  const uint8_t boundary_area_type = (active_side == RakeSide::LEFT) ? mower_map::BoundarySample::AREA_OBSTACLE
+                                                                     : mower_map::BoundarySample::AREA_MOW;
+  const geometry_msgs::Point32 rake_rear_body = (active_side == RakeSide::RIGHT) ? right_side_rear : left_side_rear;
+  const geometry_msgs::Point32 rake_front_body =
+      (active_side == RakeSide::RIGHT) ? right_side_front : left_side_front;
+
+  PaintedArea painted(paint_cell_size_m);
+  bool have_prev_segment = false;
+  geometry_msgs::Point32 prev_rear_world;
+  geometry_msgs::Point32 prev_front_world;
+  uint32_t boundary_sample_index = 0;
+  geometry_msgs::Point32 last_boundary_sample_pos;
+  bool have_last_boundary_sample_pos = false;
+  ros::Time last_overlay_publish(0);
+  ros::Time last_grid_publish(0);
+  const ros::Duration overlay_period(0.5);
+  const ros::Duration grid_period(0.5);
 
   while (true) {
     if (!ros::ok() || aborted) {
@@ -790,115 +724,110 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
 
     updateRate.sleep();
 
-    if (!has_odom) continue;
+    if (!has_odom) {
+      if (!poly_recording_enabled) break;
+      continue;
+    }
 
     const auto pose_snapshot = last_pose;
     const auto pose_in_map = pose_snapshot.pose.pose;
 
-    // For obstacles we trace the left side (lawn/obstacle on the mower's
-    // left); for outlines we trace the right side. `preview_point_mode` is
-    // set by the caller based on whether this is an outline or obstacle.
-    const RakeSide active_side = (preview_point_mode == mower_map::BoundarySample::POINT_FRONT_LEFT)
-                                     ? RakeSide::LEFT
-                                     : RakeSide::RIGHT;
-
-    // Look up the last accepted vertex on the active side; selectOutermost
-    // uses it to determine the local travel-perpendicular outward direction.
-    const auto& active_poly =
-        (active_side == RakeSide::RIGHT) ? polygon.front_right.points : polygon.front_left.points;
-    geometry_msgs::Point32 last_v;
-    const geometry_msgs::Point32* last_vertex_ptr = nullptr;
-    if (!active_poly.empty()) {
-      last_v = active_poly.back();
-      last_vertex_ptr = &last_v;
-    }
-    geometry_msgs::Point32 active_base_offset;
-    const auto preview_point = selectOutermostRakePoint(active_side, pose_in_map, last_vertex_ptr, active_base_offset);
-
     std::string gps_quality_reason;
-    if (!recordingGpsQualityOk(pose_snapshot, gps_quality_reason)) {
-      ROS_WARN_THROTTLE(2.0, "Area recorder skipping polygon point: %s", gps_quality_reason.c_str());
-      continue;
+    const bool gps_ok = recordingGpsQualityOk(pose_snapshot, gps_quality_reason);
+    if (!gps_ok) {
+      // Skip painting and sample emission while GPS is degraded; the painted
+      // region must only reflect periods where the recorded pose is trusted.
+      ROS_WARN_THROTTLE(2.0, "Area recorder skipping painted tick: %s", gps_quality_reason.c_str());
+      // Force re-init of the swept-quad bridge when GPS comes back so the
+      // mower does not paint a phantom strip across the gap.
+      have_prev_segment = false;
+    } else {
+      // Project the current rake segment into world frame and paint the
+      // quadrilateral swept since the previous valid tick.
+      const auto curr_rear_world = projectPoint(pose_in_map, rake_rear_body);
+      const auto curr_front_world = projectPoint(pose_in_map, rake_front_body);
+      if (have_prev_segment) {
+        painted.paint_swept_quad(prev_rear_world.x, prev_rear_world.y, prev_front_world.x, prev_front_world.y,
+                                 curr_rear_world.x, curr_rear_world.y, curr_front_world.x, curr_front_world.y);
+      } else {
+        painted.paint_segment(curr_rear_world.x, curr_rear_world.y, curr_front_world.x, curr_front_world.y);
+      }
+      prev_rear_world = curr_rear_world;
+      prev_front_world = curr_front_world;
+      have_prev_segment = true;
+
+      // Record one base-link breadcrumb per tick on polygon.base so that nav
+      // areas (which save polygon.base) still get the driven path.
+      const auto base_point = makePoint(pose_in_map.position.x, pose_in_map.position.y);
+      polygon.base.points.push_back(base_point);
+
+      // Emit a BoundarySample for the alignment helper every
+      // boundary_sample_min_spacing_m of base_link motion.
+      const geometry_msgs::Point32 base_pos_pt = base_point;
+      bool should_emit_sample = !have_last_boundary_sample_pos;
+      if (have_last_boundary_sample_pos) {
+        const double dx = base_pos_pt.x - last_boundary_sample_pos.x;
+        const double dy = base_pos_pt.y - last_boundary_sample_pos.y;
+        should_emit_sample = std::hypot(dx, dy) >= boundary_sample_min_spacing_m;
+      }
+      if (should_emit_sample) {
+        emitMotionBoundarySample(pose_snapshot, boundary_area_type, boundary_sample_index++);
+        last_boundary_sample_pos = base_pos_pt;
+        have_last_boundary_sample_pos = true;
+      }
     }
 
-    if (polygon.base.points.empty()) {
-      // add the first point
-      geometry_msgs::Point32 pt = preview_point;
-
-      addRecordedPoint(polygon, pose_snapshot, 0, auto_point_collecting, preview_point, active_base_offset,
-                       active_side);
-      {
-        geometry_msgs::Point vpt;
-        vpt.x = pt.x;
-        vpt.y = pt.y;
-        marker.points.push_back(vpt);
-      }
-
-      marker.header.seq++;
-      marker.header.stamp = ros::Time::now();
-      marker.header.frame_id = "map";
-
-      marker_pub.publish(marker);
-
-      poly_viz.polygon.points.push_back(pt);
-      map_overlay_pub.publish(resultOverlay);
-    } else {
-      auto last = poly_viz.polygon.points.back();
-      tf2::Vector3 last_point(last.x, last.y, 0.0);
-      tf2::Vector3 current_point(preview_point.x, preview_point.y, 0.0);
-
-      bool is_new_point_far_enough = (current_point - last_point).length() > NEW_POINT_MIN_DISTANCE;
-      bool is_point_auto_collected = auto_point_collecting && is_new_point_far_enough;
-      bool is_point_manual_collected = !auto_point_collecting && collect_point && is_new_point_far_enough;
-
-      if (is_point_auto_collected || is_point_manual_collected) {
-        geometry_msgs::Point32 pt = preview_point;
-        addRecordedPoint(polygon, pose_snapshot, polygon.base.points.size(), is_point_auto_collected, preview_point,
-                         active_base_offset, active_side);
-        {
-          geometry_msgs::Point vpt;
-          vpt.x = pt.x;
-          vpt.y = pt.y;
-          marker.points.push_back(vpt);
-        }
-
-        marker.header.seq++;
-        marker.header.stamp = ros::Time::now();
-        marker.header.frame_id = "map";
-
-        marker_pub.publish(marker);
-
-        poly_viz.polygon.points.push_back(pt);
-        map_overlay_pub.publish(resultOverlay);
-
-        if (is_point_manual_collected) {
-          collect_point = false;
-        }
-      }
+    // Refresh the live preview polygon and occupancy grid roughly twice a
+    // second so the UI shows the painted area growing without flooding the
+    // network.
+    const ros::Time now = ros::Time::now();
+    if (!painted.empty() && now - last_overlay_publish >= overlay_period) {
+      publishPaintedContourOverlay(painted, resultOverlay);
+      last_overlay_publish = now;
+    }
+    if (!painted.empty() && now - last_grid_publish >= grid_period) {
+      publishPaintedOccupancyGrid(painted);
+      last_grid_publish = now;
     }
 
     if (!poly_recording_enabled) {
-      if (polygon.base.points.size() > 2) {
-        // Prune the active outline polygon's inward notches before closure.
-        // The base polygon is unchanged and the inactive side is just static
-        // corner offsets, so pruning them would not help.
-        if (active_side == RakeSide::RIGHT) {
-          prunePolygon(polygon.front_right, RakeSide::RIGHT);
-        } else {
-          prunePolygon(polygon.front_left, RakeSide::LEFT);
-        }
-
-        // After pruning, the three polygons may differ in vertex count.
-        // Re-align base / inactive-side to the pruned active-side length is
-        // overkill; downstream only reads the active-side polygon for the
-        // user-selected area type, so just close each individually.
-        polygon.base.points.push_back(polygon.base.points.front());
-        polygon.front_left.points.push_back(polygon.front_left.points.front());
-        polygon.front_right.points.push_back(polygon.front_right.points.front());
-      } else {
+      ROS_INFO_STREAM("Finished Recording polygon; extracting painted contour ("
+                      << painted.cell_count() << " painted cells)");
+      auto contour = painted.extract_outer_contour();
+      if (contour.size() < 4) {
+        ROS_WARN_STREAM("Painted area has no usable contour; recording failed.");
         success = false;
+        break;
       }
-      ROS_INFO_STREAM("Finished Recording polygon");
+      contour = PaintedArea::douglas_peucker(contour, paint_simplify_epsilon_m);
+
+      auto& side_poly = (active_side == RakeSide::RIGHT) ? polygon.front_right : polygon.front_left;
+      side_poly.points.clear();
+      side_poly.points.reserve(contour.size());
+      for (const auto& pt : contour) {
+        geometry_msgs::Point32 p;
+        p.x = pt.first;
+        p.y = pt.second;
+        p.z = 0.0;
+        side_poly.points.push_back(p);
+      }
+
+      // Mirror the painted contour into the inactive side too, so that any
+      // downstream consumer that reads either side gets the same polygon.
+      auto& inactive_poly = (active_side == RakeSide::RIGHT) ? polygon.front_left : polygon.front_right;
+      inactive_poly.points = side_poly.points;
+
+      // The base polygon (used when saving as a navigation area) is the
+      // raw base_link breadcrumb path. Close it explicitly.
+      if (polygon.base.points.size() > 2) {
+        polygon.base.points.push_back(polygon.base.points.front());
+      } else {
+        // Replace the (possibly empty) base path with the painted contour
+        // when there is no meaningful base trail recorded.
+        polygon.base.points = side_poly.points;
+      }
+
+      publishPaintedContourOverlay(painted, resultOverlay);
       break;
     }
   }
@@ -906,15 +835,15 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
   marker.action = visualization_msgs::Marker::DELETE;
   marker_pub.publish(marker);
 
-  // close poly
-  poly_viz.closed = true;
-  poly_viz.line_width = 0.05;
-  if (resultOverlay.polygons.size() == 1) {
-    poly_viz.color = "green";
-  } else {
-    poly_viz.color = "red";
+  // close the live preview polygon overlay and recolour it to indicate the
+  // final shape.
+  if (!resultOverlay.polygons.empty()) {
+    auto& poly_viz = resultOverlay.polygons.back();
+    poly_viz.closed = true;
+    poly_viz.line_width = 0.05;
+    poly_viz.color = (resultOverlay.polygons.size() == 1) ? "green" : "red";
+    map_overlay_pub.publish(resultOverlay);
   }
-  map_overlay_pub.publish(resultOverlay);
 
   return success;
 }

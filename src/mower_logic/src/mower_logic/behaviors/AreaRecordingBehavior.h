@@ -25,12 +25,14 @@
 #include "Behavior.h"
 #include "DockingBehavior.h"
 #include "IdleBehavior.h"
+#include "PaintedArea.h"
 #include "geometry_msgs/Twist.h"
 #include "mower_map/AddMowingAreaSrv.h"
 #include "mower_map/BoundarySample.h"
 #include "mower_map/MapArea.h"
 #include "mower_map/SetDockingPointSrv.h"
 #include "mower_msgs/EmergencyStopSrv.h"
+#include "nav_msgs/OccupancyGrid.h"
 #include "ros/ros.h"
 #include "sensor_msgs/Joy.h"
 #include "std_msgs/Bool.h"
@@ -73,6 +75,7 @@ class AreaRecordingBehavior : public Behavior {
   ros::Publisher map_overlay_pub;
   ros::Publisher marker_pub;
   ros::Publisher marker_array_pub;
+  ros::Publisher painted_occupancy_pub;
 
   ros::Subscriber joy_sub, pose_sub, gps_pose_sub;
 
@@ -106,14 +109,23 @@ class AreaRecordingBehavior : public Behavior {
 
   visualization_msgs::MarkerArray markers;
   visualization_msgs::Marker marker;
-  geometry_msgs::Point32 footprint_front_left;
-  geometry_msgs::Point32 footprint_front_right;
-  // Rake of body-frame points sampled along the entire right/left side of the
-  // footprint, from rear to front. Used to capture the actual outermost point
-  // touching the boundary during a zero-turn pivot.
-  std::vector<geometry_msgs::Point32> right_side_rake;
-  std::vector<geometry_msgs::Point32> left_side_rake;
-  int rake_point_count = 9;
+  // Body-frame world-aligned coordinates of the right- and left-side rake
+  // endpoints (rear and front). The rake is the entire side of the footprint,
+  // not a single corner -- the area recorder paints the swept rake region
+  // each tick and fits a polygon around the painted area on finish.
+  geometry_msgs::Point32 right_side_rear;
+  geometry_msgs::Point32 right_side_front;
+  geometry_msgs::Point32 left_side_rear;
+  geometry_msgs::Point32 left_side_front;
+  // Painted-area cell size in meters; configurable via ROS param.
+  double paint_cell_size_m = 0.05;
+  // Douglas-Peucker simplification epsilon (meters); applied to the
+  // extracted contour to reduce vertex count.
+  double paint_simplify_epsilon_m = 0.04;
+  // Minimum spacing (meters) between consecutive BoundarySample emissions
+  // during recording, so the alignment helper still gets paired GPS/SLAM
+  // samples driven by mower motion (decoupled from polygon vertex selection).
+  double boundary_sample_min_spacing_m = 0.15;
 
  private:
   enum class RakeSide { RIGHT, LEFT };
@@ -122,19 +134,18 @@ class AreaRecordingBehavior : public Behavior {
   bool getDockingPosition(geometry_msgs::Pose& pos);
   bool recordingGpsQualityOk(const xbot_msgs::AbsolutePose& pose, std::string& reason) const;
   geometry_msgs::Point32 projectPoint(const geometry_msgs::Pose& pose, const geometry_msgs::Point32& offset) const;
-  // Pick the rake point whose world-frame position projects furthest outward
-  // (perpendicular-right or perpendicular-left of the travel direction). If
-  // last_vertex is null, falls back to heading-perpendicular.
-  geometry_msgs::Point32 selectOutermostRakePoint(RakeSide side, const geometry_msgs::Pose& pose,
-                                                  const geometry_msgs::Point32* last_vertex,
-                                                  geometry_msgs::Point32& base_link_offset_out) const;
-  // Drop inward-notch vertices (a vertex that lies on the inward side of the
-  // chord between its neighbors). Runs up to 3 passes; the polygon is open
-  // (not yet closed) when this is called.
-  void prunePolygon(geometry_msgs::Polygon& polygon, RakeSide side) const;
-  void addRecordedPoint(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose, uint32_t index, bool auto_collected,
-                        const geometry_msgs::Point32& outline_world_point,
-                        const geometry_msgs::Point32& outline_base_offset, RakeSide outline_side);
+  // Publish a BoundarySample for the current base_link pose, with the area
+  // type set to the active outline area (mowing or obstacle). Called at a
+  // spacing-gated rate during recording so passive_slam_alignment receives a
+  // steady stream of paired GPS/SLAM samples without depending on polygon
+  // vertex selection.
+  void emitMotionBoundarySample(const xbot_msgs::AbsolutePose& pose, uint8_t area_type, uint32_t index);
+  // Publish the current painted-area outer contour as a MapOverlay polygon
+  // for the live recording preview.
+  void publishPaintedContourOverlay(const PaintedArea& painted, xbot_msgs::MapOverlay& result_overlay) const;
+  // Publish the current painted-area cells as a downsampled OccupancyGrid
+  // for visualisation tools that want a heatmap-style preview.
+  void publishPaintedOccupancyGrid(const PaintedArea& painted);
   void gps_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);
   void loadFootprintRecordingPoints();
   void publishBoundarySamples(const std::vector<mower_map::BoundarySample>& samples, uint8_t area_type);
