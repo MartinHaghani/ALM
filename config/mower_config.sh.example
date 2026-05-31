@@ -218,10 +218,10 @@ export OM_USE_F9R_SENSOR_FUSION=False
 # export OM_CONFIDENCE_SCAN_MATCH_NEAR_M=0.15
 # export OM_CONFIDENCE_SCAN_MATCH_FAR_M=0.35
 
-# Area recording stores mowing outlines from the mower front-right footprint corner,
-# navigation outlines from base_link, and obstacle outlines from the front-left
-# footprint corner. Existing maps should be cleared and rerecorded after enabling
-# boundary-based GPS/LIDAR alignment.
+# Area recording saves mowing outlines from the exterior boundary of the full
+# mower footprint swept along RTK-fixed poses. Obstacles require a closed loop and
+# are saved from the largest interior hole in that swept footprint. Existing maps
+# should be cleared and rerecorded after deploying the swept-footprint recorder.
 
 
 ################################
@@ -291,6 +291,13 @@ export OM_OUTLINE_COUNT=4
 
 # How many outlines should the fill (lanes) overlap
 export OM_OUTLINE_OVERLAP_COUNT=0
+
+# Full-footprint swept-union area recording. Smaller pose/yaw steps preserve more
+# detail but add union work when the recording is saved.
+# export OM_AREA_RECORDING_POSE_STEP_M=0.03
+# export OM_AREA_RECORDING_YAW_STEP_RAD=0.05
+# export OM_AREA_RECORDING_SIMPLIFY_EPSILON_M=0.03
+# export OM_AREA_RECORDING_MIN_POLYGON_AREA_M2=0.25
 
 # Mowing angle offset -180 deg - +180 deg, 0 = east, -90 = north. If mowing angle offset is not absolute it gets added to the auto detected angle which is set by the first 2 m of recorded outline.
 export OM_MOWING_ANGLE_OFFSET=0

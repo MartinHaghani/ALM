@@ -32,6 +32,10 @@ mower_logic:
   docking_retry_count: 4
   docking_redock: false
   outline_overlap_count: 0
+  area_recording_pose_step_m: 0.03
+  area_recording_yaw_step_rad: 0.05
+  area_recording_simplify_epsilon_m: 0.03
+  area_recording_min_polygon_area_m2: 0.25
   mow_angle_offset: 0
   mow_angle_offset_is_absolute: false
   mow_angle_increment: 0

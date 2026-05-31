@@ -850,6 +850,34 @@
           "description": "How many outlines should the mover drive. It's not recommended to set this below 4.",
           "x-environment-variable": "OM_OUTLINE_COUNT"
         },
+        "OM_AREA_RECORDING_POSE_STEP_M": {
+          "type": "number",
+          "default": 0.03,
+          "title": "Area Recording Pose Step",
+          "description": "Maximum interpolation distance in meters between retained RTK-fixed poses when area recording builds the full-footprint swept union.",
+          "x-environment-variable": "OM_AREA_RECORDING_POSE_STEP_M"
+        },
+        "OM_AREA_RECORDING_YAW_STEP_RAD": {
+          "type": "number",
+          "default": 0.05,
+          "title": "Area Recording Yaw Step",
+          "description": "Maximum interpolation yaw step in radians between retained RTK-fixed poses when area recording builds the full-footprint swept union.",
+          "x-environment-variable": "OM_AREA_RECORDING_YAW_STEP_RAD"
+        },
+        "OM_AREA_RECORDING_SIMPLIFY_EPSILON_M": {
+          "type": "number",
+          "default": 0.03,
+          "title": "Area Recording Simplification",
+          "description": "Simplification tolerance in meters for the selected swept-union boundary. Invalid simplifications are rejected and the unsimplified boundary is kept.",
+          "x-environment-variable": "OM_AREA_RECORDING_SIMPLIFY_EPSILON_M"
+        },
+        "OM_AREA_RECORDING_MIN_POLYGON_AREA_M2": {
+          "type": "number",
+          "default": 0.25,
+          "title": "Area Recording Minimum Polygon Area",
+          "description": "Minimum accepted saved area in square meters for swept-union mowing outlines and obstacle holes.",
+          "x-environment-variable": "OM_AREA_RECORDING_MIN_POLYGON_AREA_M2"
+        },
         "OM_TOOL_WIDTH": {
           "type": "number",
           "title": "Mowing Tool Width",

@@ -25,6 +25,7 @@
 #include "Behavior.h"
 #include "DockingBehavior.h"
 #include "IdleBehavior.h"
+#include "SweptAreaRecorder.h"
 #include "geometry_msgs/Twist.h"
 #include "mower_map/AddMowingAreaSrv.h"
 #include "mower_map/BoundarySample.h"
@@ -54,6 +55,7 @@ class AreaRecordingBehavior : public Behavior {
     geometry_msgs::Polygon base;
     geometry_msgs::Polygon front_left;
     geometry_msgs::Polygon front_right;
+    std::vector<std::vector<geometry_msgs::Pose>> swept_pose_segments;
     std::vector<mower_map::BoundarySample> base_samples;
     std::vector<mower_map::BoundarySample> front_left_samples;
     std::vector<mower_map::BoundarySample> front_right_samples;
@@ -103,19 +105,28 @@ class AreaRecordingBehavior : public Behavior {
   ros::Time manual_mowing_stop_guard_until = ros::Time(0);
   bool manual_mowing_stop_pending = false;
   double max_recording_gps_accuracy = 0.2;
+  mower_logic::area_recording::SweptAreaOptions swept_area_options;
 
   visualization_msgs::MarkerArray markers;
   visualization_msgs::Marker marker;
+  std::vector<geometry_msgs::Point32> footprint_polygon;
   geometry_msgs::Point32 footprint_front_left;
   geometry_msgs::Point32 footprint_front_right;
 
  private:
   bool recordNewPolygon(RecordedPolygon& polygon, xbot_msgs::MapOverlay& resultOverlay, uint8_t preview_point_mode);
   bool getDockingPosition(geometry_msgs::Pose& pos);
+  bool buildSweptBoundary(const RecordedPolygon& polygon,
+                          mower_logic::area_recording::BoundarySelection selection,
+                          const std::string& label,
+                          geometry_msgs::Polygon& result) const;
+  bool recordedPolygonValid(const geometry_msgs::Polygon& polygon, const std::string& label) const;
   bool recordingGpsQualityOk(const xbot_msgs::AbsolutePose& pose, std::string& reason) const;
   geometry_msgs::Point32 projectPoint(const geometry_msgs::Pose& pose, const geometry_msgs::Point32& offset) const;
   void addRecordedPoint(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose, uint32_t index, bool auto_collected);
+  void addSweptPose(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose, bool start_new_segment);
   void gps_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);
+  void loadAreaRecordingParams();
   void loadFootprintRecordingPoints();
   void publishBoundarySamples(const std::vector<mower_map::BoundarySample>& samples, uint8_t area_type);
   void pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);

@@ -107,6 +107,12 @@
             <param name="hw/services/power/drive_voltage_mismatch_warn_v" value="$(optenv OM_DRIVE_VOLTAGE_MISMATCH_WARN_V 1.0)"/>
             <param name="mower_logic/outline_count" value="$(env OM_OUTLINE_COUNT)"/>
             <param name="mower_logic/outline_overlap_count" value="$(optenv OM_OUTLINE_OVERLAP_COUNT 0)"/>
+            <param name="mower_logic/area_recording_pose_step_m" value="$(optenv OM_AREA_RECORDING_POSE_STEP_M 0.03)"/>
+            <param name="mower_logic/area_recording_yaw_step_rad" value="$(optenv OM_AREA_RECORDING_YAW_STEP_RAD 0.05)"/>
+            <param name="mower_logic/area_recording_simplify_epsilon_m"
+                   value="$(optenv OM_AREA_RECORDING_SIMPLIFY_EPSILON_M 0.03)"/>
+            <param name="mower_logic/area_recording_min_polygon_area_m2"
+                   value="$(optenv OM_AREA_RECORDING_MIN_POLYGON_AREA_M2 0.25)"/>
             <param name="mower_logic/outline_offset" value="$(env OM_OUTLINE_OFFSET)"/>
             <param name="mower_logic/mow_angle_offset" value="$(optenv OM_MOWING_ANGLE_OFFSET 0)"/>
             <param name="mower_logic/mow_angle_offset_is_absolute"
@@ -238,6 +244,12 @@
                value="$(optenv OM_CHARGE_CRITICAL_HIGH_CURRENT -1)"/>
         <param name="mower_logic/outline_count" value="$(env OM_OUTLINE_COUNT)"/>
         <param name="mower_logic/outline_overlap_count" value="$(optenv OM_OUTLINE_OVERLAP_COUNT 0)"/>
+        <param name="mower_logic/area_recording_pose_step_m" value="$(optenv OM_AREA_RECORDING_POSE_STEP_M 0.03)"/>
+        <param name="mower_logic/area_recording_yaw_step_rad" value="$(optenv OM_AREA_RECORDING_YAW_STEP_RAD 0.05)"/>
+        <param name="mower_logic/area_recording_simplify_epsilon_m"
+               value="$(optenv OM_AREA_RECORDING_SIMPLIFY_EPSILON_M 0.03)"/>
+        <param name="mower_logic/area_recording_min_polygon_area_m2"
+               value="$(optenv OM_AREA_RECORDING_MIN_POLYGON_AREA_M2 0.25)"/>
         <param name="mower_logic/outline_offset" value="$(env OM_OUTLINE_OFFSET)"/>
         <param name="mower_logic/mow_angle_offset" value="$(optenv OM_MOWING_ANGLE_OFFSET 0)"/>
         <param name="mower_logic/mow_angle_offset_is_absolute"

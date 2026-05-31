@@ -45,7 +45,7 @@ This summary is grounded in:
 2. The supported Mowrator hardware layer exposes direct hardware state and control topics under `/hw/...`, including `/hw/power` battery voltage telemetry from the left drive, right drive, and mower/blade ESCs.
 3. `xbot_positioning` consumes GPS, IMU, and measured twist data to produce the mower pose.
 4. `mower_map_service` provides map storage, occupancy-grid publication, docking and mowing-area services, and an RPC method named `map.replace`.
-5. `mower_logic` coordinates mower behaviors such as idle, mowing, parking at the recorded docking point, and area recording, using `mower_map`, `slic3r_coverage_planner`, MBF actions, and `/hw` services.
+5. `mower_logic` coordinates mower behaviors such as idle, mowing, parking at the recorded docking point, and area recording, using `mower_map`, `slic3r_coverage_planner`, MBF actions, and `/hw` services. Area recording saves mowing and obstacle polygons by unioning the full costmap footprint swept along RTK-fixed pose segments; navigation-area recording remains a `base_link` breadcrumb polygon.
 6. Navigation runs through `mbf_costmap_nav` with configuration loaded from `src/open_mower/params/`.
 7. Operator and UI-facing pieces include teleop input, `xbot_monitoring`, `xbot_remote`, optional heatmap generation, rosbridge, the existing Flutter UI at `/`, and the React combined GPS/LIDAR map plus sensor viewer at `/next/`.
 

@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <costmap_2d/footprint.h>
 #include <cmath>
 #include <limits>
 
@@ -69,27 +70,55 @@ void stopManualMowing(bool& manual_mowing, ros::Time& manual_mowing_stop_guard_u
   applyManualMowingState(false);
 }
 
-bool footprintPointFromXml(XmlRpc::XmlRpcValue& entry, double& x, double& y) {
-  if (entry.getType() != XmlRpc::XmlRpcValue::TypeArray || entry.size() < 2) {
-    return false;
-  }
+geometry_msgs::Point32 pointToPoint32(const geometry_msgs::Point& point) {
+  return makePoint(point.x, point.y);
+}
 
-  const auto value_to_double = [](XmlRpc::XmlRpcValue& value, double& result) {
-    if (value.getType() == XmlRpc::XmlRpcValue::TypeDouble) {
-      result = static_cast<double>(value);
-      return true;
-    }
-    if (value.getType() == XmlRpc::XmlRpcValue::TypeInt) {
-      result = static_cast<int>(value);
-      return true;
-    }
-    return false;
-  };
-
-  if (!value_to_double(entry[0], x) || !value_to_double(entry[1], y)) {
-    return false;
+double normalizeAngle(double angle) {
+  while (angle > M_PI) {
+    angle -= 2.0 * M_PI;
   }
-  return std::isfinite(x) && std::isfinite(y);
+  while (angle < -M_PI) {
+    angle += 2.0 * M_PI;
+  }
+  return angle;
+}
+
+double poseDistance2D(const geometry_msgs::Pose& a, const geometry_msgs::Pose& b) {
+  return std::hypot(a.position.x - b.position.x, a.position.y - b.position.y);
+}
+
+std::size_t sweptPoseCount(const std::vector<std::vector<geometry_msgs::Pose>>& swept_pose_segments) {
+  std::size_t count = 0;
+  for (const auto& segment : swept_pose_segments) {
+    count += segment.size();
+  }
+  return count;
+}
+
+std::size_t uniquePolygonVertexCount(const geometry_msgs::Polygon& polygon) {
+  std::vector<geometry_msgs::Point32> unique;
+  unique.reserve(polygon.points.size());
+  for (std::size_t i = 0; i < polygon.points.size(); ++i) {
+    const auto& point = polygon.points[i];
+    if (i + 1 == polygon.points.size() && !polygon.points.empty() && point.x == polygon.points.front().x &&
+        point.y == polygon.points.front().y) {
+      continue;
+    }
+    const auto it = std::find_if(unique.begin(), unique.end(), [&](const geometry_msgs::Point32& existing) {
+      return existing.x == point.x && existing.y == point.y;
+    });
+    if (it == unique.end()) {
+      unique.push_back(point);
+    }
+  }
+  return unique.size();
+}
+
+bool polygonFinite(const geometry_msgs::Polygon& polygon) {
+  return std::all_of(polygon.points.begin(), polygon.points.end(), [](const geometry_msgs::Point32& point) {
+    return std::isfinite(point.x) && std::isfinite(point.y);
+  });
 }
 }
 
@@ -197,32 +226,52 @@ Behavior* AreaRecordingBehavior::execute() {
     }
 
     if (!error && has_outline && (is_mowing_area || is_navigation_area)) {
+      bool ready_to_add_area = true;
       if (is_mowing_area) {
         ROS_INFO_STREAM("Area recording completed. Adding mowing area.");
-        result.area = recorded_outline.front_right;
+        ready_to_add_area = buildSweptBoundary(recorded_outline,
+                                               mower_logic::area_recording::BoundarySelection::LARGEST_EXTERIOR,
+                                               "mowing outline",
+                                               result.area);
       } else if (is_navigation_area) {
         ROS_INFO_STREAM("Area recording completed. Adding navigation area.");
         result.area = recorded_outline.base;
+        ready_to_add_area = recordedPolygonValid(result.area, "navigation area");
       }
       result.obstacles.clear();
-      for (const auto& obstacle : recorded_obstacles) {
-        result.obstacles.push_back(obstacle.front_left);
-      }
-      mower_map::AddMowingAreaSrv srv;
-      srv.request.isNavigationArea = !is_mowing_area;
-      srv.request.area = result;
-      if (add_mowing_area_client.call(srv)) {
-        ROS_INFO_STREAM("Area added successfully");
-        if (is_mowing_area) {
-          publishBoundarySamples(recorded_outline.front_right_samples, mower_map::BoundarySample::AREA_MOW);
-        } else {
-          publishBoundarySamples(recorded_outline.base_samples, mower_map::BoundarySample::AREA_NAV);
-        }
+      if (ready_to_add_area) {
         for (const auto& obstacle : recorded_obstacles) {
-          publishBoundarySamples(obstacle.front_left_samples, mower_map::BoundarySample::AREA_OBSTACLE);
+          geometry_msgs::Polygon obstacle_polygon;
+          if (!buildSweptBoundary(obstacle,
+                                  mower_logic::area_recording::BoundarySelection::LARGEST_INTERIOR_HOLE,
+                                  "obstacle",
+                                  obstacle_polygon)) {
+            ready_to_add_area = false;
+            break;
+          }
+          result.obstacles.push_back(obstacle_polygon);
+        }
+      }
+
+      if (ready_to_add_area) {
+        mower_map::AddMowingAreaSrv srv;
+        srv.request.isNavigationArea = !is_mowing_area;
+        srv.request.area = result;
+        if (add_mowing_area_client.call(srv)) {
+          ROS_INFO_STREAM("Area added successfully");
+          if (is_mowing_area) {
+            publishBoundarySamples(recorded_outline.front_right_samples, mower_map::BoundarySample::AREA_MOW);
+          } else {
+            publishBoundarySamples(recorded_outline.base_samples, mower_map::BoundarySample::AREA_NAV);
+          }
+          for (const auto& obstacle : recorded_obstacles) {
+            publishBoundarySamples(obstacle.front_left_samples, mower_map::BoundarySample::AREA_OBSTACLE);
+          }
+        } else {
+          ROS_ERROR_STREAM("error adding area");
         }
       } else {
-        ROS_ERROR_STREAM("error adding area");
+        ROS_WARN_STREAM("Area recording was not saved because the recorded geometry was invalid.");
       }
     }
 
@@ -257,6 +306,7 @@ void AreaRecordingBehavior::enter() {
   paused = aborted = false;
 
   ros::param::param<double>("/xbot_positioning/max_gps_accuracy", max_recording_gps_accuracy, 0.2);
+  loadAreaRecordingParams();
   loadFootprintRecordingPoints();
 
   add_mowing_area_client = n->serviceClient<mower_map::AddMowingAreaSrv>("mower_map_service/add_mowing_area");
@@ -363,6 +413,31 @@ bool AreaRecordingBehavior::recordingGpsQualityOk(const xbot_msgs::AbsolutePose&
   return true;
 }
 
+void AreaRecordingBehavior::loadAreaRecordingParams() {
+  ros::param::param<double>("/mower_logic/area_recording_pose_step_m", swept_area_options.pose_step_m, 0.03);
+  ros::param::param<double>("/mower_logic/area_recording_yaw_step_rad", swept_area_options.yaw_step_rad, 0.05);
+  ros::param::param<double>("/mower_logic/area_recording_simplify_epsilon_m",
+                            swept_area_options.simplify_epsilon_m,
+                            0.03);
+  ros::param::param<double>("/mower_logic/area_recording_min_polygon_area_m2",
+                            swept_area_options.min_polygon_area_m2,
+                            0.25);
+
+  swept_area_options.pose_step_m = std::max(0.005, std::min(0.5, swept_area_options.pose_step_m));
+  swept_area_options.yaw_step_rad = std::max(0.005, std::min(0.5, swept_area_options.yaw_step_rad));
+  swept_area_options.simplify_epsilon_m = std::max(0.0, std::min(0.5, swept_area_options.simplify_epsilon_m));
+  swept_area_options.min_polygon_area_m2 =
+      std::max(0.001, std::min(100.0, swept_area_options.min_polygon_area_m2));
+
+  ROS_INFO_STREAM("Area recorder swept geometry params: pose_step_m=" << swept_area_options.pose_step_m
+                                                                      << ", yaw_step_rad="
+                                                                      << swept_area_options.yaw_step_rad
+                                                                      << ", simplify_epsilon_m="
+                                                                      << swept_area_options.simplify_epsilon_m
+                                                                      << ", min_polygon_area_m2="
+                                                                      << swept_area_options.min_polygon_area_m2);
+}
+
 geometry_msgs::Point32 AreaRecordingBehavior::projectPoint(const geometry_msgs::Pose& pose,
                                                            const geometry_msgs::Point32& offset) const {
   const double yaw = yawFromPose(pose);
@@ -374,54 +449,104 @@ geometry_msgs::Point32 AreaRecordingBehavior::projectPoint(const geometry_msgs::
 }
 
 void AreaRecordingBehavior::loadFootprintRecordingPoints() {
+  footprint_polygon.clear();
+  footprint_polygon.push_back(makePoint(0.0, 0.34));
+  footprint_polygon.push_back(makePoint(0.82, 0.34));
+  footprint_polygon.push_back(makePoint(0.82, -0.34));
+  footprint_polygon.push_back(makePoint(0.0, -0.34));
   footprint_front_left = makePoint(0.82, 0.34);
   footprint_front_right = makePoint(0.82, -0.34);
 
   XmlRpc::XmlRpcValue footprint;
-  if (!ros::param::get("/move_base_flex/global_costmap/footprint", footprint) &&
-      !ros::param::get("/global_costmap/footprint", footprint) && !ros::param::get("/footprint", footprint)) {
-    ROS_WARN_STREAM("Area recorder could not find costmap footprint; using Mowrator fallback corners.");
+  std::string footprint_param_name;
+  for (const auto& param_name :
+       {std::string("/move_base_flex/global_costmap/footprint"),
+        std::string("/global_costmap/footprint"),
+        std::string("/footprint")}) {
+    if (ros::param::get(param_name, footprint)) {
+      footprint_param_name = param_name;
+      break;
+    }
+  }
+
+  if (footprint_param_name.empty()) {
+    ROS_WARN_STREAM("Area recorder could not find costmap footprint; using Mowrator fallback footprint.");
     return;
   }
 
-  if (footprint.getType() != XmlRpc::XmlRpcValue::TypeArray || footprint.size() < 3) {
-    ROS_WARN_STREAM("Area recorder footprint parameter is invalid; using Mowrator fallback corners.");
+  std::vector<geometry_msgs::Point> costmap_footprint;
+  try {
+    if (footprint.getType() == XmlRpc::XmlRpcValue::TypeString) {
+      const std::string footprint_string = static_cast<std::string>(footprint);
+      if (!costmap_2d::makeFootprintFromString(footprint_string, costmap_footprint)) {
+        ROS_WARN_STREAM("Area recorder footprint parameter " << footprint_param_name
+                                                             << " is invalid; using Mowrator fallback footprint.");
+        return;
+      }
+    } else if (footprint.getType() == XmlRpc::XmlRpcValue::TypeArray) {
+      costmap_footprint = costmap_2d::makeFootprintFromXMLRPC(footprint, footprint_param_name);
+    } else {
+      ROS_WARN_STREAM("Area recorder footprint parameter " << footprint_param_name
+                                                           << " has unsupported type; using Mowrator fallback footprint.");
+      return;
+    }
+  } catch (const std::exception& error) {
+    ROS_WARN_STREAM("Area recorder footprint parameter " << footprint_param_name << " is invalid (" << error.what()
+                                                         << "); using Mowrator fallback footprint.");
     return;
   }
 
+  if (costmap_footprint.size() < 3) {
+    ROS_WARN_STREAM("Area recorder footprint parameter " << footprint_param_name
+                                                         << " has fewer than 3 points; using Mowrator fallback footprint.");
+    return;
+  }
+
+  std::vector<geometry_msgs::Point32> parsed_footprint;
+  parsed_footprint.reserve(costmap_footprint.size());
   bool found = false;
   double max_x = -std::numeric_limits<double>::infinity();
   double front_left_y = -std::numeric_limits<double>::infinity();
   double front_right_y = std::numeric_limits<double>::infinity();
-  for (int i = 0; i < footprint.size(); ++i) {
-    double x = 0.0;
-    double y = 0.0;
-    if (!footprintPointFromXml(footprint[i], x, y)) {
+  for (const auto& point : costmap_footprint) {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
       continue;
     }
 
-    if (!found || x > max_x + 1e-6) {
-      max_x = x;
-      front_left_y = y;
-      front_right_y = y;
+    parsed_footprint.push_back(pointToPoint32(point));
+
+    if (!found || point.x > max_x + 1e-6) {
+      max_x = point.x;
+      front_left_y = point.y;
+      front_right_y = point.y;
       found = true;
-    } else if (std::abs(x - max_x) <= 1e-6) {
-      front_left_y = std::max(front_left_y, y);
-      front_right_y = std::min(front_right_y, y);
+    } else if (std::abs(point.x - max_x) <= 1e-6) {
+      front_left_y = std::max(front_left_y, point.y);
+      front_right_y = std::min(front_right_y, point.y);
     }
   }
 
   if (!found) {
-    ROS_WARN_STREAM("Area recorder could not parse any footprint points; using Mowrator fallback corners.");
+    ROS_WARN_STREAM("Area recorder could not parse any footprint points; using Mowrator fallback footprint.");
     return;
   }
 
+  mower_logic::area_recording::SweptAreaRecorder recorder(parsed_footprint);
+  std::string footprint_error;
+  if (!recorder.validFootprint(&footprint_error)) {
+    ROS_WARN_STREAM("Area recorder footprint parameter is invalid (" << footprint_error
+                                                                     << "); using Mowrator fallback footprint.");
+    return;
+  }
+
+  footprint_polygon = parsed_footprint;
   footprint_front_left = makePoint(max_x, front_left_y);
   footprint_front_right = makePoint(max_x, front_right_y);
-  ROS_INFO_STREAM("Area recorder footprint points: front-left=(" << footprint_front_left.x << ", "
-                                                                << footprint_front_left.y << "), front-right=("
-                                                                << footprint_front_right.x << ", "
-                                                                << footprint_front_right.y << ")");
+  ROS_INFO_STREAM("Area recorder footprint loaded from " << footprint_param_name << " with " << footprint_polygon.size()
+                                                         << " points; front-left=("
+                                                         << footprint_front_left.x << ", " << footprint_front_left.y
+                                                         << "), front-right=(" << footprint_front_right.x << ", "
+                                                         << footprint_front_right.y << ")");
 }
 
 void AreaRecordingBehavior::addRecordedPoint(RecordedPolygon& polygon,
@@ -463,6 +588,105 @@ void AreaRecordingBehavior::addRecordedPoint(RecordedPolygon& polygon,
   polygon.base_samples.push_back(make_sample(mower_map::BoundarySample::POINT_BASE, base_point));
   polygon.front_left_samples.push_back(make_sample(mower_map::BoundarySample::POINT_FRONT_LEFT, front_left_point));
   polygon.front_right_samples.push_back(make_sample(mower_map::BoundarySample::POINT_FRONT_RIGHT, front_right_point));
+}
+
+void AreaRecordingBehavior::addSweptPose(RecordedPolygon& polygon,
+                                         const xbot_msgs::AbsolutePose& pose,
+                                         bool start_new_segment) {
+  if (start_new_segment || polygon.swept_pose_segments.empty()) {
+    polygon.swept_pose_segments.emplace_back();
+  }
+
+  auto& segment = polygon.swept_pose_segments.back();
+  const auto& pose_in_map = pose.pose.pose;
+  if (!std::isfinite(pose_in_map.position.x) || !std::isfinite(pose_in_map.position.y)) {
+    return;
+  }
+
+  if (!segment.empty()) {
+    const auto& previous = segment.back();
+    const double distance = poseDistance2D(previous, pose_in_map);
+    const double yaw_delta = std::abs(normalizeAngle(yawFromPose(pose_in_map) - yawFromPose(previous)));
+    const bool moved_far_enough = distance >= swept_area_options.pose_step_m;
+    const bool rotated_far_enough = yaw_delta >= swept_area_options.yaw_step_rad;
+    if (!moved_far_enough && !rotated_far_enough) {
+      return;
+    }
+  }
+
+  segment.push_back(pose_in_map);
+}
+
+bool AreaRecordingBehavior::buildSweptBoundary(const RecordedPolygon& polygon,
+                                               mower_logic::area_recording::BoundarySelection selection,
+                                               const std::string& label,
+                                               geometry_msgs::Polygon& result) const {
+  mower_logic::area_recording::SweptAreaRecorder recorder(footprint_polygon);
+  const auto swept_result = recorder.buildBoundary(polygon.swept_pose_segments, swept_area_options, selection);
+  if (!swept_result.success) {
+    ROS_WARN_STREAM("Area recorder failed to create " << label << ": " << swept_result.error
+                                                      << " (input poses="
+                                                      << sweptPoseCount(polygon.swept_pose_segments)
+                                                      << ", swept segments="
+                                                      << swept_result.pose_segment_count
+                                                      << ", interpolated poses="
+                                                      << swept_result.interpolated_pose_count
+                                                      << ", footprint polygons="
+                                                      << swept_result.footprint_polygon_count
+                                                      << ", union exteriors="
+                                                      << swept_result.exterior_ring_count
+                                                      << ", union holes="
+                                                      << swept_result.interior_hole_count << ")");
+    return false;
+  }
+
+  result = swept_result.polygon;
+  ROS_INFO_STREAM("Area recorder created " << label << " from full-footprint swept union: input poses="
+                                           << swept_result.input_pose_count
+                                           << ", swept segments=" << swept_result.pose_segment_count
+                                           << ", interpolated poses=" << swept_result.interpolated_pose_count
+                                           << ", footprint polygons=" << swept_result.footprint_polygon_count
+                                           << ", union exteriors=" << swept_result.exterior_ring_count
+                                           << ", union holes=" << swept_result.interior_hole_count
+                                           << ", union_area_m2=" << swept_result.union_area_m2
+                                           << ", largest_exterior_area_m2=" << swept_result.largest_exterior_area_m2
+                                           << ", largest_hole_area_m2=" << swept_result.largest_hole_area_m2
+                                           << ", selected_area_m2=" << swept_result.selected_area_m2
+                                           << ", selected_perimeter_m=" << swept_result.selected_perimeter_m
+                                           << ", selected_bbox_m=" << swept_result.selected_bbox_width_m << "x"
+                                           << swept_result.selected_bbox_height_m
+                                           << ", selected_bbox_fill_ratio="
+                                           << swept_result.selected_bbox_fill_ratio
+                                           << ", saved_vertices=" << result.points.size());
+  if (swept_result.pose_segment_count > 1) {
+    ROS_WARN_STREAM("Area recorder diagnostics for " << label << ": recording has "
+                                                     << swept_result.pose_segment_count
+                                                     << " swept segments; GPS quality dropouts are not bridged.");
+  }
+  if (swept_result.exterior_ring_count > 1) {
+    ROS_WARN_STREAM("Area recorder diagnostics for " << label << ": swept union has "
+                                                     << swept_result.exterior_ring_count
+                                                     << " disconnected exterior components; only the largest boundary was saved.");
+  }
+  if (selection == mower_logic::area_recording::BoundarySelection::LARGEST_EXTERIOR &&
+      swept_result.selected_bbox_area_m2 > 0.0 && swept_result.selected_bbox_fill_ratio < 0.45) {
+    ROS_WARN_STREAM("Area recorder diagnostics for " << label << ": selected exterior fills only "
+                                                     << swept_result.selected_bbox_fill_ratio
+                                                     << " of its bounding box; this often means the swept loop is open or has a gap.");
+  }
+  return true;
+}
+
+bool AreaRecordingBehavior::recordedPolygonValid(const geometry_msgs::Polygon& polygon, const std::string& label) const {
+  if (!polygonFinite(polygon)) {
+    ROS_WARN_STREAM("Area recorder failed to create " << label << ": polygon contains non-finite points");
+    return false;
+  }
+  if (uniquePolygonVertexCount(polygon) < 3) {
+    ROS_WARN_STREAM("Area recorder failed to create " << label << ": polygon has fewer than 3 unique vertices");
+    return false;
+  }
+  return true;
 }
 
 void AreaRecordingBehavior::publishBoundarySamples(const std::vector<mower_map::BoundarySample>& samples,
@@ -602,6 +826,18 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
     resultOverlay.polygons.push_back(poly_viz);
   }
   auto& poly_viz = resultOverlay.polygons.back();
+  bool start_new_swept_segment = true;
+  auto finish_recording = [&]() {
+    if (polygon.base.points.size() > 2) {
+      // add first point to close the preview/breadcrumb polygons
+      polygon.base.points.push_back(polygon.base.points.front());
+      polygon.front_left.points.push_back(polygon.front_left.points.front());
+      polygon.front_right.points.push_back(polygon.front_right.points.front());
+    } else if (sweptPoseCount(polygon.swept_pose_segments) < 2) {
+      success = false;
+    }
+    ROS_INFO_STREAM("Finished Recording polygon");
+  };
 
   while (true) {
     if (!ros::ok() || aborted) {
@@ -613,6 +849,10 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
     updateRate.sleep();
 
     if (!has_odom) continue;
+    if (!poly_recording_enabled) {
+      finish_recording();
+      break;
+    }
 
     const auto pose_snapshot = last_pose;
     const auto pose_in_map = pose_snapshot.pose.pose;
@@ -626,8 +866,11 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
     std::string gps_quality_reason;
     if (!recordingGpsQualityOk(pose_snapshot, gps_quality_reason)) {
       ROS_WARN_THROTTLE(2.0, "Area recorder skipping polygon point: %s", gps_quality_reason.c_str());
+      start_new_swept_segment = true;
       continue;
     }
+    addSweptPose(polygon, pose_snapshot, start_new_swept_segment);
+    start_new_swept_segment = false;
 
     if (polygon.base.points.empty()) {
       // add the first point
@@ -686,15 +929,7 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
     }
 
     if (!poly_recording_enabled) {
-      if (polygon.base.points.size() > 2) {
-        // add first point to close the poly
-        polygon.base.points.push_back(polygon.base.points.front());
-        polygon.front_left.points.push_back(polygon.front_left.points.front());
-        polygon.front_right.points.push_back(polygon.front_right.points.front());
-      } else {
-        success = false;
-      }
-      ROS_INFO_STREAM("Finished Recording polygon");
+      finish_recording();
       break;
     }
   }

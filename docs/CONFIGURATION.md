@@ -179,7 +179,7 @@ Observed examples:
 
 These settings start the passive SLAM manager, a SLAM-only local odometry helper, and the passive alignment helper used by the combined `/next/` map. Mapping starts stopped by default so the operator can choose the first map origin from the WebUI. When mapping is started, the manager resets the SLAM-only odometry origin and starts `slam_toolbox`; the alignment helper clears old samples and learns a visualization-only `map -> slam_map` transform. It prefers saved mowing-boundary samples from `/area_recorder/boundary_samples`, then falls back to synchronized RTK-fixed `map -> base_link` and `slam_map -> slam_base_link` motion samples if no usable boundary path exists. Boundary samples default to a larger retention window than generic motion samples so long yard recordings are not truncated, and the status topic sends a decimated calibration trace for the WebUI. Live GPS and SLAM robot status poses are time-synchronized when their TF stamps are close enough, reducing motion-only marker separation caused by GPS/fusion latency. The default passive tree while mapping is `map -> slam_map -> slam_odom -> slam_base_link -> slam_lidar`; the raw C1 scan from `/hw/lidar` is republished as `/slam_toolbox/scan` in `slam_lidar`. The mower's existing `map -> base_link -> lidar` localization remains separate and authoritative for normal mower behavior, so passive SLAM does not feed costmaps, planning, or control.
 
-Area recording uses the costmap footprint for boundary reference points. Mowing outlines are stored from the front-right footprint corner, navigation outlines stay at `base_link`, and obstacle outlines are stored from the front-left footprint corner. Polygon recording now skips new points unless the raw GPS pose is RTK fixed and within `/xbot_positioning/max_gps_accuracy`, so short GPS dropouts do not silently become corrupted mower-map edges. Existing maps should be cleared and rerecorded after enabling the boundary-based GPS/LIDAR alignment path.
+Area recording now saves mowing and obstacle geometry from the full costmap footprint swept along RTK-fixed mower poses. Mowing outlines use the largest exterior boundary of that swept union. Obstacles require a closed loop and use the largest interior hole boundary of the swept union. Navigation areas remain the existing `base_link` breadcrumb polygon. Polygon recording skips new trusted geometry unless the raw GPS pose is RTK fixed and within `/xbot_positioning/max_gps_accuracy`; GPS dropouts start a new swept segment so the final saved polygon does not bridge through bad data. Existing maps should be cleared and rerecorded after deploying this behavior. See [AREA_RECORDING_SWEEP.md](AREA_RECORDING_SWEEP.md) before tuning the area-recording params.
 
 ### Localization confidence settings
 
@@ -210,6 +210,7 @@ Observed examples:
 - mower motor temperature thresholds
 - GPS wait and timeout settings
 - automatic mode
+- swept area recording controls: `OM_AREA_RECORDING_POSE_STEP_M`, `OM_AREA_RECORDING_YAW_STEP_RAD`, `OM_AREA_RECORDING_SIMPLIFY_EPSILON_M`, and `OM_AREA_RECORDING_MIN_POLYGON_AREA_M2`
 - legacy rain settings, ignored by the supported Mowrator runtime
 - recording and snapshot settings
 

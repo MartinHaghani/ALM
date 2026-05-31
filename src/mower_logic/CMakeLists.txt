@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(mower_logic)
 
-## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
+## Clipper2 and the swept-area recorder require C++17.
+add_compile_options(-std=c++17)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
+        costmap_2d
         dynamic_reconfigure
         ftc_local_planner
         mbf_msgs
@@ -137,6 +138,35 @@ include_directories(
         ${CRYPTOPP_INCLUDE_DIRS}
 )
 
+set(CLIPPER2_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/clipper2)
+
+add_library(mower_logic_clipper2
+        ${CLIPPER2_DIR}/include/clipper2/clipper.core.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.engine.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.export.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.minkowski.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.offset.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.rectclip.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.triangulation.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.version.h
+        ${CLIPPER2_DIR}/src/clipper.engine.cpp
+        ${CLIPPER2_DIR}/src/clipper.offset.cpp
+        ${CLIPPER2_DIR}/src/clipper.rectclip.cpp
+        ${CLIPPER2_DIR}/src/clipper.triangulation.cpp
+)
+target_include_directories(mower_logic_clipper2 PUBLIC ${CLIPPER2_DIR}/include)
+target_compile_definitions(mower_logic_clipper2 PUBLIC CLIPPER2_MAX_DECIMAL_PRECISION=8)
+target_link_libraries(mower_logic_clipper2 m)
+
+add_library(mower_logic_swept_area
+        src/mower_logic/behaviors/SweptAreaRecorder.h
+        src/mower_logic/behaviors/SweptAreaRecorder.cpp
+)
+add_dependencies(mower_logic_swept_area ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
+target_include_directories(mower_logic_swept_area PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(mower_logic_swept_area mower_logic_clipper2 ${catkin_LIBRARIES})
+
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
 #   src/${PROJECT_NAME}/mower_logic.cpp
@@ -184,7 +214,7 @@ add_executable(mower_logic
         src/mower_logic/behaviors/AreaRecordingBehavior.cpp
 )
 add_dependencies(mower_logic ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
-target_link_libraries(mower_logic ${catkin_LIBRARIES} ${CRYPTOPP_LIBRARIES})
+target_link_libraries(mower_logic mower_logic_swept_area ${catkin_LIBRARIES} ${CRYPTOPP_LIBRARIES})
 
 add_executable(monitoring src/monitoring/monitoring.cpp)
 add_dependencies(monitoring ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
@@ -242,6 +272,13 @@ target_link_libraries(monitoring ${catkin_LIBRARIES})
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_swept_area_recorder test/test_swept_area_recorder.cpp)
+  if(TARGET test_swept_area_recorder)
+    target_link_libraries(test_swept_area_recorder mower_logic_swept_area ${catkin_LIBRARIES})
+  endif()
+endif()
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
