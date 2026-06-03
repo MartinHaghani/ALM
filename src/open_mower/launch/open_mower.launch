@@ -6,6 +6,7 @@
     <include if="$(eval optenv('OM_NO_LOCALIZATION', 'False').lower() != 'true')" file="$(find open_mower)/launch/include/_localization.launch"/>
     <include if="$(eval optenv('OM_USE_PASSIVE_SLAM', 'False').lower() == 'true')" file="$(find open_mower)/launch/include/_passive_slam.launch"/>
     <include if="$(eval optenv('OM_USE_LOCALIZATION_CONFIDENCE', 'True').lower() == 'true')" file="$(find open_mower)/launch/include/_localization_confidence.launch"/>
+    <include if="$(eval optenv('OM_USE_LOCALIZATION_FUSION', 'True').lower() == 'true')" file="$(find open_mower)/launch/include/_localization_fusion.launch"/>
     <include if="$(eval optenv('OM_NO_ROSBRIDGE', 'False').lower() != 'true')" file="$(find open_mower)/launch/include/_rosbridge.launch"/>
     <include if="$(eval optenv('OM_NO_TELEOP', 'False').lower() != 'true')" file="$(find open_mower)/launch/include/_teleop.launch"/>
     <include if="$(eval optenv('OM_NO_RECORDING', 'False').lower() != 'true')" file="$(find open_mower)/launch/include/_record.launch">

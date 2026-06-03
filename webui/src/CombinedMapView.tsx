@@ -27,14 +27,23 @@ import { Activity, AlertTriangle, Crosshair, Layers, Pause, Play, Square, Trash2
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Ros } from "roslib";
 
-import type { NextWebUiConfig } from "./config";
+import type { MowerFootprintPoint, NextWebUiConfig } from "./config";
 import { callSetBoolService, callTriggerService } from "./rosServices";
 import { applyTransform, composeTransform, lookupTransform2D, lookupTransform2DAt, yawFromQuaternion, type Transform2D } from "./tfMath";
-import type { AbsolutePose, MapPoint, MowerMapArea, NavSatFix, OccupancyGrid, SlamAlignmentPose } from "./types";
+import type {
+  AbsolutePose,
+  LocalizationFusionStatus,
+  MapPoint,
+  MowerMapArea,
+  NavSatFix,
+  OccupancyGrid,
+  SlamAlignmentPose,
+} from "./types";
 import { useGpsFix } from "./useGpsFix";
 import { useGpsStatus } from "./useGpsStatus";
 import { useLaserScan } from "./useLaserScan";
 import { useLocalizationConfidenceStatus } from "./useLocalizationConfidenceStatus";
+import { useLocalizationFusionStatus } from "./useLocalizationFusionStatus";
 import { useMowerMap } from "./useMowerMap";
 import { useOccupancyGrid } from "./useOccupancyGrid";
 import { useSlamAlignmentStatus } from "./useSlamAlignmentStatus";
@@ -106,7 +115,6 @@ function createSatelliteLayer(config: NextWebUiConfig) {
   return new TileLayer({
     source: new XYZ({
       attributions: config.satelliteAttribution,
-      maxZoom: config.satelliteMaxZoom,
       url: config.satelliteTileUrl,
     }),
   });
@@ -296,6 +304,52 @@ function localToMercator(anchor: ProjectionAnchor, point: Pick<MapPoint, "x" | "
   const lonLat = localToLonLat(anchor, point);
   const coordinate = lonLat ? fromLonLat(lonLat) : null;
   return coordinate ? [coordinate[0], coordinate[1]] : null;
+}
+
+function transformFootprintPoint(pose: Transform2D, point: MowerFootprintPoint): MapPoint {
+  const cosYaw = Math.cos(pose.yaw);
+  const sinYaw = Math.sin(pose.yaw);
+  return {
+    x: pose.x + cosYaw * point[0] - sinYaw * point[1],
+    y: pose.y + sinYaw * point[0] + cosYaw * point[1],
+  };
+}
+
+function footprintToMercatorRing(
+  anchor: ProjectionAnchor,
+  pose: Transform2D,
+  footprint: MowerFootprintPoint[],
+): Array<[number, number]> | null {
+  const coordinates = footprint.map((point) => localToMercator(anchor, transformFootprintPoint(pose, point)));
+  if (coordinates.some((coordinate) => coordinate === null)) {
+    return null;
+  }
+  return coordinates as Array<[number, number]>;
+}
+
+function footprintFrontEdgeToMercator(
+  anchor: ProjectionAnchor,
+  pose: Transform2D,
+  footprint: MowerFootprintPoint[],
+): Array<[number, number]> | null {
+  if (footprint.length < 2) {
+    return null;
+  }
+  const maxX = Math.max(...footprint.map((point) => point[0]));
+  const frontPoints = footprint
+    .filter((point) => Math.abs(point[0] - maxX) < 0.000001)
+    .sort((a, b) => b[1] - a[1]);
+  if (frontPoints.length < 2) {
+    return null;
+  }
+  const edge = [
+    localToMercator(anchor, transformFootprintPoint(pose, frontPoints[0])),
+    localToMercator(anchor, transformFootprintPoint(pose, frontPoints[frontPoints.length - 1])),
+  ];
+  if (edge.some((coordinate) => coordinate === null)) {
+    return null;
+  }
+  return edge as Array<[number, number]>;
 }
 
 function distance2D(a: Pick<MapPoint, "x" | "y"> | null, b: Pick<MapPoint, "x" | "y"> | null): number {
@@ -495,40 +549,67 @@ function positionFeatureStyle(feature: FeatureLike): Style | Style[] {
       zIndex: 36,
     });
   }
+  if (kind === "finalFootprint") {
+    const confidence = Math.max(0, Math.min(1, Number(feature.get("confidence") ?? 0)));
+    return new Style({
+      fill: new Fill({ color: `rgba(255, 255, 255, ${0.14 + confidence * 0.16})` }),
+      stroke: new Stroke({ color: "rgba(23, 32, 42, 0.92)", width: 2.5 }),
+      zIndex: 1000,
+    });
+  }
+  if (kind === "finalFootprintFront") {
+    return new Style({
+      stroke: new Stroke({ color: "#2459a6", width: 4 }),
+      zIndex: 1001,
+    });
+  }
 
   const isLidar = kind === "lidarRobot";
-  const color = isLidar ? "#5b4bb7" : "#0f7a7a";
-  const label = isLidar ? "LIDAR" : "GPS";
+  const palette = isLidar
+    ? {
+        color: "#5b4bb7",
+        halo: "91, 75, 183",
+        label: "LIDAR",
+        zHalo: 40,
+        zMarker: 42,
+      }
+    : {
+        color: "#0f7a7a",
+        halo: "15, 122, 122",
+        label: "GPS",
+        zHalo: 39,
+        zMarker: 41,
+      };
   const yaw = Number(feature.get("yaw") ?? 0);
   const showLabel = Boolean(feature.get("showLabel"));
   const confidence = Math.max(0, Math.min(1, Number(feature.get("confidence") ?? 0)));
   return [
     new Style({
       image: new CircleStyle({
-        fill: new Fill({ color: isLidar ? `rgba(91, 75, 183, ${0.08 + confidence * 0.16})` : `rgba(15, 122, 122, ${0.08 + confidence * 0.16})` }),
+        fill: new Fill({ color: `rgba(${palette.halo}, ${0.08 + confidence * 0.16})` }),
         radius: 20 + confidence * 7,
-        stroke: new Stroke({ color: isLidar ? "rgba(91, 75, 183, 0.22)" : "rgba(15, 122, 122, 0.22)", width: 1.5 }),
+        stroke: new Stroke({ color: `rgba(${palette.halo}, 0.22)`, width: 1.5 }),
       }),
-      zIndex: isLidar ? 40 : 39,
+      zIndex: palette.zHalo,
     }),
     new Style({
-    image: new RegularShape({
-      fill: new Fill({ color }),
-      points: 3,
-      radius: 14,
-      rotation: Math.PI / 2 - yaw,
-      stroke: new Stroke({ color: "#ffffff", width: 2.5 }),
-    }),
-    text: showLabel
-      ? new Text({
-          fill: new Fill({ color }),
-          font: "800 12px Inter, system-ui, sans-serif",
-          offsetY: -25,
-          stroke: new Stroke({ color: "rgba(255,255,255,0.94)", width: 4 }),
-          text: label,
-        })
-      : undefined,
-    zIndex: isLidar ? 42 : 41,
+      image: new RegularShape({
+        fill: new Fill({ color: palette.color }),
+        points: 3,
+        radius: 14,
+        rotation: Math.PI / 2 - yaw,
+        stroke: new Stroke({ color: "#ffffff", width: 2.5 }),
+      }),
+      text: showLabel
+        ? new Text({
+            fill: new Fill({ color: palette.color }),
+            font: "800 12px Inter, system-ui, sans-serif",
+            offsetY: -25,
+            stroke: new Stroke({ color: "rgba(255,255,255,0.94)", width: 4 }),
+            text: palette.label,
+          })
+        : undefined,
+      zIndex: palette.zMarker,
     }),
   ];
 }
@@ -600,6 +681,23 @@ function reasonSummary(reasons?: string[]): string {
   return reasons && reasons.length > 0 ? reasons.map((reason) => reason.replace(/_/g, " ")).join(", ") : "none";
 }
 
+function fusionWeight(status: LocalizationFusionStatus | null, source: string): number | null {
+  const fromAccepted = status?.accepted_source_weights?.[source];
+  if (Number.isFinite(fromAccepted)) {
+    return Number(fromAccepted);
+  }
+  const fromWeights = status?.source_weights?.[source];
+  if (Number.isFinite(fromWeights)) {
+    return Number(fromWeights);
+  }
+  const fromSource = status?.sources?.[source]?.weight;
+  return Number.isFinite(fromSource) ? Number(fromSource) : null;
+}
+
+function statusLabel(value: string | null | undefined): string {
+  return value ? value.replace(/_/g, " ") : "--";
+}
+
 export function CombinedMapView({ config, connected, error, now, ros, url }: CombinedMapViewProps) {
   const [layers, setLayers] = useState<LayerSettings>(() => ({
     calibration: config.defaultLayerCalibration,
@@ -653,6 +751,10 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
     ros,
     topicName: config.gpsFusedPoseTopic,
   });
+  const { stats: unifiedPoseStats, status: unifiedPose } = useGpsStatus({
+    ros,
+    topicName: config.localizationFusionPoseTopic,
+  });
   const { mapData, stats: mowerMapStats } = useMowerMap({
     ros,
     topicName: config.mowerMapTopic,
@@ -686,12 +788,19 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
     ros,
     topicName: config.localizationConfidenceTopic,
   });
+  const { stats: fusionStats, status: fusionStatus } = useLocalizationFusionStatus({
+    ros,
+    topicName: config.localizationFusionStatusTopic,
+  });
 
   const alignmentIsFresh = alignmentStats.lastMessageAt !== null && now - alignmentStats.lastMessageAt <= GPS_STALE_MS;
   const confidenceIsFresh = confidenceStats.lastMessageAt !== null && now - confidenceStats.lastMessageAt <= GPS_STALE_MS;
+  const fusionStatusIsFresh = fusionStats.lastMessageAt !== null && now - fusionStats.lastMessageAt <= GPS_STALE_MS;
+  const freshFusionStatus = fusionStatusIsFresh ? fusionStatus : null;
   const gpsConfidence = confidenceIsFresh ? confidenceStatus?.gps.position_confidence : null;
   const lidarLocalConfidence = confidenceIsFresh ? confidenceStatus?.lidar.local_confidence : null;
   const lidarGlobalConfidence = confidenceIsFresh ? confidenceStatus?.lidar.global_confidence : null;
+  const unifiedConfidence = freshFusionStatus?.confidence;
   const boundarySkipCount = Object.values(alignmentStatus?.boundary_sample_skip_counts ?? {}).reduce(
     (total, value) => total + (Number.isFinite(value) ? Number(value) : 0),
     0,
@@ -704,11 +813,21 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
     () => lookupTransform2D(transforms, "map", "base_link", tfLookupOptions),
     [tfLookupOptions, transforms],
   );
+  const mapToUnifiedBaseTf = useMemo(
+    () => lookupTransform2D(transforms, "map", config.localizationFusionBaseFrame, tfLookupOptions),
+    [config.localizationFusionBaseFrame, tfLookupOptions, transforms],
+  );
   const fusedPoseTransform = useMemo(() => poseFromAbsolutePose(fusedPose), [fusedPose]);
   const freshFusedPose =
     fusedPoseStats.lastMessageAt !== null && now - fusedPoseStats.lastMessageAt <= GPS_STALE_MS
       ? fusedPoseTransform
       : null;
+  const unifiedPoseTransform = useMemo(() => poseFromAbsolutePose(unifiedPose), [unifiedPose]);
+  const freshUnifiedPose =
+    unifiedPoseStats.lastMessageAt !== null && now - unifiedPoseStats.lastMessageAt <= GPS_STALE_MS
+      ? unifiedPoseTransform
+      : null;
+  const unifiedMapPose = freshUnifiedPose ?? mapToUnifiedBaseTf;
   const gpsPose = statusGpsPose ?? mapToOperationalBase ?? freshFusedPose;
   const tfMapToSlam = useMemo(
     () => lookupTransform2D(transforms, "map", config.slamMapFrame, tfLookupOptions),
@@ -754,8 +873,10 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
   const slamRunning = managerIsFresh && Boolean(managerStatus?.slam_running);
   const slamState = managerLabel(connected, managerIsFresh, mappingEnabled, slamRunning);
   const separation = distance2D(gpsPose, mapToSlamBase);
+  const unifiedGpsSeparation = distance2D(unifiedMapPose, gpsPose);
+  const unifiedLidarSeparation = distance2D(unifiedMapPose, mapToSlamBase);
   const gridCanvas = useMemo(() => createOccupiedGridCanvas(grid), [grid]);
-  const followZoom = Math.min(DEFAULT_FOLLOW_ZOOM, config.satelliteMaxZoom);
+  const followZoom = DEFAULT_FOLLOW_ZOOM;
 
   const centerMapOnLatestFix = useCallback(() => {
     const map = mapRef.current;
@@ -763,7 +884,8 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
       return;
     }
 
-    const markerCenter = projectionAnchor && gpsPose ? localToMercator(projectionAnchor, gpsPose) : null;
+    const preferredPose = unifiedMapPose ?? gpsPose;
+    const markerCenter = projectionAnchor && preferredPose ? localToMercator(projectionAnchor, preferredPose) : null;
     const center = markerCenter ?? (lonLat ? fromLonLat(lonLat) : null);
     if (!center) {
       return;
@@ -774,7 +896,7 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
     if ((view.getZoom() ?? 0) < followZoom) {
       view.setZoom(followZoom);
     }
-  }, [followZoom, gpsPose, lonLat, projectionAnchor]);
+  }, [followZoom, gpsPose, lonLat, projectionAnchor, unifiedMapPose]);
 
   useEffect(() => {
     const rawPoseTransform = poseFromAbsolutePose(rawPose);
@@ -865,7 +987,6 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
       target: mapElementRef.current,
       view: new View({
         center: fromLonLat([0, 0]),
-        maxZoom: config.satelliteMaxZoom,
         zoom: 2,
       }),
     });
@@ -903,7 +1024,6 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
     config.satelliteArcGisLayers,
     config.satelliteArcGisRestUrl,
     config.satelliteAttribution,
-    config.satelliteMaxZoom,
     config.satelliteSourceType,
     config.satelliteTileUrl,
   ]);
@@ -1029,6 +1149,23 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
         );
       }
     }
+    if (projectionAnchor && unifiedMapPose) {
+      const footprintRing = footprintToMercatorRing(projectionAnchor, unifiedMapPose, config.mowerFootprint);
+      const frontEdge = footprintFrontEdgeToMercator(projectionAnchor, unifiedMapPose, config.mowerFootprint);
+      if (footprintRing) {
+        features.push(
+          new Feature({
+            confidence: unifiedConfidence ?? 0,
+            geometry: new OlPolygon([closeRing(footprintRing)]),
+            kind: "finalFootprint",
+            showLabel: layers.labels,
+          }),
+        );
+      }
+      if (frontEdge) {
+        features.push(new Feature({ geometry: new LineString(frontEdge), kind: "finalFootprintFront" }));
+      }
+    }
     if (projectionAnchor && gpsPose && mapToSlamBase && separation > 0.2) {
       const a = localToMercator(projectionAnchor, gpsPose);
       const b = localToMercator(projectionAnchor, mapToSlamBase);
@@ -1038,7 +1175,7 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
     }
 
     source.addFeatures(features);
-    if (!hasCenteredOnFirstFixRef.current && (lonLat || gpsPose)) {
+    if (!hasCenteredOnFirstFixRef.current && (lonLat || gpsPose || unifiedMapPose)) {
       centerMapOnLatestFix();
       hasCenteredOnFirstFixRef.current = true;
     }
@@ -1055,6 +1192,9 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
     mapToSlamBase,
     projectionAnchor,
     separation,
+    config.mowerFootprint,
+    unifiedConfidence,
+    unifiedMapPose,
   ]);
 
   useEffect(() => {
@@ -1194,6 +1334,17 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
           : String(alignmentStatus?.boundary_sample_count ?? 0),
       boundarySkipped: String(boundarySkipCount),
       confidenceAge: formatAge(confidenceStats.lastMessageAt, now),
+      fusionAge: formatAge(fusionStats.lastMessageAt, now),
+      fusionGpsWeight: formatPercent(fusionWeight(freshFusionStatus, "gps")),
+      fusionLidarWeight: formatPercent(fusionWeight(freshFusionStatus, "lidar")),
+      fusionPoseAge: formatAge(unifiedPoseStats.lastMessageAt, now),
+      fusionReady:
+        freshFusionStatus?.ready_for_navigation === true
+          ? "Ready"
+          : freshFusionStatus?.ready_for_navigation === false
+            ? "Not ready"
+            : "--",
+      fusionState: statusLabel(freshFusionStatus?.state),
       gpsAge: formatAge(fixStats.lastMessageAt, now),
       gpsConfidence: formatPercent(gpsConfidence),
       gpsSigma: formatMeters(confidenceStatus?.gps.position_sigma_m, 2),
@@ -1209,6 +1360,14 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
         confidenceStatus?.lidar.yaw_sigma_local_rad === null || confidenceStatus?.lidar.yaw_sigma_local_rad === undefined
           ? "--"
           : `${formatNumber((confidenceStatus.lidar.yaw_sigma_local_rad * 180) / Math.PI, 1)} deg`,
+      unifiedConfidence: formatPercent(unifiedConfidence),
+      unifiedGpsSeparation: Number.isFinite(unifiedGpsSeparation) ? `${formatNumber(unifiedGpsSeparation, 2)} m` : "--",
+      unifiedLidarSeparation: Number.isFinite(unifiedLidarSeparation) ? `${formatNumber(unifiedLidarSeparation, 2)} m` : "--",
+      unifiedSigma: formatMeters(freshFusionStatus?.position_sigma_m, 2),
+      unifiedYawSigma:
+        freshFusionStatus?.yaw_sigma_rad === null || freshFusionStatus?.yaw_sigma_rad === undefined
+          ? "--"
+          : `${formatNumber((freshFusionStatus.yaw_sigma_rad * 180) / Math.PI, 1)} deg`,
       maxResidual: formatMeters(alignmentStatus?.residual_max_m, 2),
       outliers: String(alignmentStatus?.outlier_count ?? 0),
       p95Residual: formatMeters(alignmentStatus?.residual_p95_m, 2),
@@ -1245,6 +1404,12 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
       confidenceStatus?.lidar.position_sigma_local_m,
       confidenceStatus?.lidar.yaw_sigma_local_rad,
       fixStats.lastMessageAt,
+      fusionStats.lastMessageAt,
+      freshFusionStatus,
+      freshFusionStatus?.position_sigma_m,
+      freshFusionStatus?.ready_for_navigation,
+      freshFusionStatus?.state,
+      freshFusionStatus?.yaw_sigma_rad,
       gpsConfidence,
       lidarGlobalConfidence,
       lidarLocalConfidence,
@@ -1253,6 +1418,10 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
       scanStats.hz,
       separation,
       slamMapStats.lastMessageAt,
+      unifiedConfidence,
+      unifiedGpsSeparation,
+      unifiedLidarSeparation,
+      unifiedPoseStats.lastMessageAt,
     ],
   );
 
@@ -1329,6 +1498,15 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
               </div>
               <div className="confidence-track">
                 <span style={{ width: `${Math.max(0, Math.min(1, lidarGlobalConfidence ?? 0)) * 100}%` }} />
+              </div>
+            </div>
+            <div className={`confidence-row is-${confidenceClass(unifiedConfidence)}`}>
+              <div>
+                <span>Unified final</span>
+                <strong>{metricValues.unifiedConfidence}</strong>
+              </div>
+              <div className="confidence-track">
+                <span style={{ width: `${Math.max(0, Math.min(1, unifiedConfidence ?? 0)) * 100}%` }} />
               </div>
             </div>
           </div>
@@ -1426,6 +1604,18 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
             <strong>{metricValues.separation}</strong>
           </div>
           <div className="metric">
+            <span>Unified</span>
+            <strong>{metricValues.fusionReady}</strong>
+          </div>
+          <div className="metric">
+            <span>Final-GPS</span>
+            <strong>{metricValues.unifiedGpsSeparation}</strong>
+          </div>
+          <div className="metric">
+            <span>Final-LIDAR</span>
+            <strong>{metricValues.unifiedLidarSeparation}</strong>
+          </div>
+          <div className="metric">
             <span>Residual</span>
             <strong>{metricValues.residual}</strong>
           </div>
@@ -1501,6 +1691,10 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
               <span>{`${config.slamMapFrame} -> ${config.slamBaseFrame}`}</span>
               <strong>{tfState(slamToBase)}</strong>
             </div>
+            <div className={`tf-chip is-${tfState(mapToUnifiedBaseTf)}`}>
+              <span>{`map -> ${config.localizationFusionBaseFrame}`}</span>
+              <strong>{tfState(mapToUnifiedBaseTf)}</strong>
+            </div>
             <div>
               <span>Map age</span>
               <strong>{metricValues.lidarAge}</strong>
@@ -1516,6 +1710,38 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
             <div>
               <span>Confidence age</span>
               <strong>{metricValues.confidenceAge}</strong>
+            </div>
+            <div>
+              <span>Fusion status age</span>
+              <strong>{metricValues.fusionAge}</strong>
+            </div>
+            <div>
+              <span>Fusion pose age</span>
+              <strong>{metricValues.fusionPoseAge}</strong>
+            </div>
+            <div>
+              <span>Fusion state</span>
+              <strong>{metricValues.fusionState}</strong>
+            </div>
+            <div>
+              <span>Navigation ready</span>
+              <strong>{metricValues.fusionReady}</strong>
+            </div>
+            <div>
+              <span>Unified sigma</span>
+              <strong>{metricValues.unifiedSigma}</strong>
+            </div>
+            <div>
+              <span>Unified yaw sigma</span>
+              <strong>{metricValues.unifiedYawSigma}</strong>
+            </div>
+            <div>
+              <span>Fusion GPS weight</span>
+              <strong>{metricValues.fusionGpsWeight}</strong>
+            </div>
+            <div>
+              <span>Fusion LIDAR weight</span>
+              <strong>{metricValues.fusionLidarWeight}</strong>
             </div>
             <div>
               <span>GPS confidence state</span>
@@ -1578,6 +1804,18 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
               </div>
             </div>
           )}
+          {freshFusionStatus && (
+            <div className="confidence-detail-stack">
+              <div>
+                <span>Fusion recommended action</span>
+                <strong>{statusLabel(freshFusionStatus.recommended_action)}</strong>
+              </div>
+              <div>
+                <span>Fusion reasons</span>
+                <strong>{reasonSummary(freshFusionStatus.reasons ?? freshFusionStatus.rejections)}</strong>
+              </div>
+            </div>
+          )}
         </details>
 
         {error && <div className="error-banner">{error}</div>}
@@ -1595,7 +1833,7 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
           <button
             aria-label="Center map on latest robot pose"
             className="gps-map-control-button"
-            disabled={!lonLat && !gpsPose}
+            disabled={!lonLat && !gpsPose && !unifiedMapPose}
             onClick={centerMapOnLatestFix}
             title="Center map on latest robot pose"
             type="button"
@@ -1605,6 +1843,7 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
           <div className="map-marker-legend" aria-label="Robot marker legend">
             <span className="legend-marker is-gps">GPS</span>
             <span className="legend-marker is-lidar">LIDAR</span>
+            <span className="legend-marker is-final">FOOTPRINT</span>
             <strong>{metricValues.separation}</strong>
           </div>
           <div className="gps-status-strip combined-status-strip" aria-label="Map status">
@@ -1623,6 +1862,10 @@ export function CombinedMapView({ config, connected, error, now, ros, url }: Com
             <div>
               <span>Alignment</span>
               <strong>{alignmentLabel(alignmentStatus?.state, Boolean(alignmentStatus?.aligned))}</strong>
+            </div>
+            <div>
+              <span>Final</span>
+              <strong>{metricValues.fusionState}</strong>
             </div>
             <div>
               <span>Anchor</span>

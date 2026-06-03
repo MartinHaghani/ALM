@@ -1,0 +1,35 @@
+<launch>
+    <arg name="pose_topic" default="$(optenv OM_LOCALIZATION_FUSION_POSE_TOPIC /localization_fusion/pose)"/>
+    <arg name="odom_topic" default="$(optenv OM_LOCALIZATION_FUSION_ODOM_TOPIC /localization_fusion/odom)"/>
+    <arg name="status_topic" default="$(optenv OM_LOCALIZATION_FUSION_STATUS_TOPIC /localization_fusion/status)"/>
+    <arg name="gps_topic" default="$(optenv OM_SLAM_ALIGNMENT_GPS_TOPIC /hw/position/gps)"/>
+    <arg name="confidence_topic" default="$(optenv OM_LOCALIZATION_CONFIDENCE_STATUS_TOPIC /localization_confidence/status)"/>
+    <arg name="legacy_pose_topic" default="$(optenv OM_GPS_FUSED_POSE_TOPIC /xbot_positioning/xb_pose)"/>
+    <arg name="imu_topic" default="$(optenv OM_SLAM_IMU_TOPIC /hw/imu/data_raw)"/>
+    <arg name="twist_topic" default="$(optenv OM_SLAM_TWIST_TOPIC /hw/diff_drive/measured_twist)"/>
+    <arg name="map_frame" default="$(optenv OM_SLAM_ORIGIN_FRAME map)"/>
+    <arg name="output_base_frame" default="$(optenv OM_LOCALIZATION_FUSION_BASE_FRAME fused_base_link)"/>
+    <arg name="slam_base_frame" default="$(optenv OM_SLAM_BASE_FRAME slam_base_link)"/>
+    <arg name="rate_hz" default="$(optenv OM_LOCALIZATION_FUSION_RATE_HZ 10.0)"/>
+    <arg name="max_topic_age" default="$(optenv OM_LOCALIZATION_FUSION_MAX_TOPIC_AGE_SEC 2.0)"/>
+    <arg name="tf_max_age" default="$(optenv OM_LOCALIZATION_FUSION_TF_MAX_AGE_SEC 1.0)"/>
+    <arg name="publish_tf" default="$(optenv OM_LOCALIZATION_FUSION_PUBLISH_TF True)"/>
+
+    <node pkg="open_mower" type="localization_fusion.py" name="localization_fusion" output="screen" respawn="true" respawn_delay="5">
+        <param name="pose_topic" type="string" value="$(arg pose_topic)"/>
+        <param name="odom_topic" type="string" value="$(arg odom_topic)"/>
+        <param name="status_topic" type="string" value="$(arg status_topic)"/>
+        <param name="gps_topic" type="string" value="$(arg gps_topic)"/>
+        <param name="confidence_topic" type="string" value="$(arg confidence_topic)"/>
+        <param name="legacy_pose_topic" type="string" value="$(arg legacy_pose_topic)"/>
+        <param name="imu_topic" type="string" value="$(arg imu_topic)"/>
+        <param name="twist_topic" type="string" value="$(arg twist_topic)"/>
+        <param name="map_frame" type="string" value="$(arg map_frame)"/>
+        <param name="output_base_frame" type="string" value="$(arg output_base_frame)"/>
+        <param name="slam_base_frame" type="string" value="$(arg slam_base_frame)"/>
+        <param name="rate_hz" type="double" value="$(arg rate_hz)"/>
+        <param name="max_topic_age_sec" type="double" value="$(arg max_topic_age)"/>
+        <param name="tf_max_age_sec" type="double" value="$(arg tf_max_age)"/>
+        <param name="publish_tf" type="bool" value="$(arg publish_tf)"/>
+    </node>
+</launch>

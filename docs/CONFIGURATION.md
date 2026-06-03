@@ -162,6 +162,10 @@ Observed examples:
 - `OM_SLAM_TWIST_TOPIC`
 - `OM_SLAM_IMU_TOPIC`
 - `OM_SLAM_ODOM_GYRO_CALIBRATION_SECONDS`
+- `OM_SLAM_ODOM_GYRO_STATIONARY_VX_THRESHOLD`
+- `OM_SLAM_ODOM_GYRO_STATIONARY_WZ_THRESHOLD`
+- `OM_SLAM_ODOM_GYRO_WARNING_YAW_RATE_THRESHOLD`
+- `OM_SLAM_ODOM_GYRO_WARNING_SECONDS`
 - `OM_SLAM_MAP_RESOLUTION`
 - `OM_SLAM_MAX_LASER_RANGE`
 - `OM_SLAM_START_ENABLED`
@@ -177,7 +181,7 @@ Observed examples:
 - `OM_SLAM_ALIGNMENT_POSE_SYNC_MAX_LAG`
 - `OM_ENABLE_SLAM_RECORDING`
 
-These settings start the passive SLAM manager, a SLAM-only local odometry helper, and the passive alignment helper used by the combined `/next/` map. Mapping starts stopped by default so the operator can choose the first map origin from the WebUI. When mapping is started, the manager resets the SLAM-only odometry origin and starts `slam_toolbox`; the alignment helper clears old samples and learns a visualization-only `map -> slam_map` transform. It prefers saved mowing-boundary samples from `/area_recorder/boundary_samples`, then falls back to synchronized RTK-fixed `map -> base_link` and `slam_map -> slam_base_link` motion samples if no usable boundary path exists. Boundary samples default to a larger retention window than generic motion samples so long yard recordings are not truncated, and the status topic sends a decimated calibration trace for the WebUI. Live GPS and SLAM robot status poses are time-synchronized when their TF stamps are close enough, reducing motion-only marker separation caused by GPS/fusion latency. The default passive tree while mapping is `map -> slam_map -> slam_odom -> slam_base_link -> slam_lidar`; the raw C1 scan from `/hw/lidar` is republished as `/slam_toolbox/scan` in `slam_lidar`. The mower's existing `map -> base_link -> lidar` localization remains separate and authoritative for normal mower behavior, so passive SLAM does not feed costmaps, planning, or control.
+These settings start the passive SLAM manager, a SLAM-only local odometry helper, and the passive alignment helper used by the combined `/next/` map. Mapping starts stopped by default so the operator can choose the first map origin from the WebUI. When mapping is started, the manager resets the SLAM-only odometry origin and starts `slam_toolbox`; the alignment helper clears old samples and learns a visualization-only `map -> slam_map` transform. The passive odom helper estimates gyro yaw-rate offset during its startup calibration window and exposes `/passive_slam_odom/calibrate_gyro` for manual recalibration from the `/next/` Sensors tab; stationary gyro warnings are diagnostic only. It prefers saved mowing-boundary samples from `/area_recorder/boundary_samples`, then falls back to synchronized RTK-fixed `map -> base_link` and `slam_map -> slam_base_link` motion samples if no usable boundary path exists. Boundary samples default to a larger retention window than generic motion samples so long yard recordings are not truncated, and the status topic sends a decimated calibration trace for the WebUI. Live GPS and SLAM robot status poses are time-synchronized when their TF stamps are close enough, reducing motion-only marker separation caused by GPS/fusion latency. The default passive tree while mapping is `map -> slam_map -> slam_odom -> slam_base_link -> slam_lidar`; the raw C1 scan from `/hw/lidar` is republished as `/slam_toolbox/scan` in `slam_lidar`. The mower's existing `map -> base_link -> lidar` localization remains separate and authoritative for normal mower behavior, so passive SLAM does not feed costmaps, planning, or control.
 
 Area recording now saves mowing and obstacle geometry from the full costmap footprint swept along RTK-fixed mower poses. Mowing outlines use the largest exterior boundary of that swept union. Obstacles require a closed loop and use the largest interior hole boundary of the swept union. Navigation areas remain the existing `base_link` breadcrumb polygon. Polygon recording skips new trusted geometry unless the raw GPS pose is RTK fixed and within `/xbot_positioning/max_gps_accuracy`; GPS dropouts start a new swept segment so the final saved polygon does not bridge through bad data. Existing maps should be cleared and rerecorded after deploying this behavior. See [AREA_RECORDING_SWEEP.md](AREA_RECORDING_SWEEP.md) before tuning the area-recording params.
 
@@ -195,6 +199,22 @@ Observed examples:
 - `OM_CONFIDENCE_SCAN_MATCH_FAR_M`
 
 These settings start a read-only confidence monitor. The GPS driver publishes receiver-quality JSON on `/hw/position/gps/quality`, including carrier phase, satellite count, pDOP, reported accuracy, RTCM freshness, and parser health when UBX telemetry is available. The monitor publishes `/localization_confidence/status` with conservative GPS and LIDAR trust scores for display in `/next/`. GPS motion self-consistency uses a rolling receiver-only position/velocity check with receiver speed and timing uncertainty so normal driving does not look like a GPS fault. LIDAR confidence uses scan-to-map fit, estimated scan pose correction, observability, scan motion distortion, and passive alignment quality so rotation/scan-warp conditions can reduce LIDAR trust before fusion. The scores are diagnostics only; they do not affect mower localization, planning, costmaps, or control.
+
+### Localization fusion settings
+
+Observed examples:
+
+- `OM_USE_LOCALIZATION_FUSION`
+- `OM_LOCALIZATION_FUSION_POSE_TOPIC`
+- `OM_LOCALIZATION_FUSION_ODOM_TOPIC`
+- `OM_LOCALIZATION_FUSION_STATUS_TOPIC`
+- `OM_LOCALIZATION_FUSION_BASE_FRAME`
+- `OM_LOCALIZATION_FUSION_RATE_HZ`
+- `OM_LOCALIZATION_FUSION_MAX_TOPIC_AGE_SEC`
+- `OM_LOCALIZATION_FUSION_TF_MAX_AGE_SEC`
+- `OM_LOCALIZATION_FUSION_PUBLISH_TF`
+
+These settings start a read-only shadow publisher for the unified localization marker in `/next/`. It publishes `/localization_fusion/pose`, `/localization_fusion/odom`, `/localization_fusion/status`, and `map -> fused_base_link`. It uses the operational fused GPS/base pose from `/xbot_positioning/xb_pose` for the GPS position, uses raw GPS only as an RTK-fixed quality gate, and uses the globally aligned passive LIDAR pose with the confidence monitor's sigma/confidence values. RTK float is rejected as a GPS fusion source, so the shadow pose becomes LIDAR-only when the aligned LIDAR pose is available. It does not replace `map -> base_link` and does not feed navigation, planning, costmaps, or control.
 
 ### Mower logic settings
 

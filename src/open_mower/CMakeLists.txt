@@ -160,6 +160,7 @@ include_directories(
 catkin_install_python(PROGRAMS
   scripts/battery_voltage_logger.py
   scripts/localization_confidence.py
+  scripts/localization_fusion.py
   scripts/lsm6dso_imu_node.py
   scripts/passive_slam_alignment.py
   scripts/passive_slam_manager.py

@@ -1,4 +1,5 @@
 export type SatelliteSourceType = "arcgis-rest" | "xyz";
+export type MowerFootprintPoint = [number, number];
 
 export interface NextWebUiConfig {
   satelliteArcGisFormat: string;
@@ -16,7 +17,13 @@ export interface NextWebUiConfig {
   gpsRawPoseTopic: string;
   gpsStatusTopic: string;
   localizationConfidenceTopic: string;
+  localizationFusionBaseFrame: string;
+  localizationFusionPoseTopic: string;
+  localizationFusionStatusTopic: string;
+  mowerFootprint: MowerFootprintPoint[];
   mowerMapTopic: string;
+  passiveSlamGyroCalibrateService: string;
+  passiveSlamOdomStatusTopic: string;
   satelliteAttribution: string;
   satelliteMaxZoom: number;
   satelliteSourceType: SatelliteSourceType;
@@ -53,7 +60,18 @@ const defaultConfig: NextWebUiConfig = {
   gpsRawPoseTopic: "/hw/position/gps",
   gpsStatusTopic: "/hw/position/gps",
   localizationConfidenceTopic: "/localization_confidence/status",
+  localizationFusionBaseFrame: "fused_base_link",
+  localizationFusionPoseTopic: "/localization_fusion/pose",
+  localizationFusionStatusTopic: "/localization_fusion/status",
+  mowerFootprint: [
+    [0.0, 0.34],
+    [0.82, 0.34],
+    [0.82, -0.34],
+    [0.0, -0.34],
+  ],
   mowerMapTopic: "/mower_map_service/json_map",
+  passiveSlamGyroCalibrateService: "/passive_slam_odom/calibrate_gyro",
+  passiveSlamOdomStatusTopic: "/passive_slam_odom/status",
   satelliteAttribution: "Imagery &copy; The Regional Municipality of York",
   satelliteMaxZoom: 22,
   satelliteSourceType: "arcgis-rest",
@@ -80,6 +98,25 @@ declare global {
   }
 }
 
+function normalizeFootprint(value: unknown): MowerFootprintPoint[] {
+  if (!Array.isArray(value)) {
+    return defaultConfig.mowerFootprint;
+  }
+
+  const points = value
+    .map((point): MowerFootprintPoint | null => {
+      if (!Array.isArray(point) || point.length < 2) {
+        return null;
+      }
+      const x = Number(point[0]);
+      const y = Number(point[1]);
+      return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
+    })
+    .filter((point): point is MowerFootprintPoint => point !== null);
+
+  return points.length >= 3 ? points : defaultConfig.mowerFootprint;
+}
+
 export function getNextWebUiConfig(): NextWebUiConfig {
   const config = {
     ...defaultConfig,
@@ -88,8 +125,9 @@ export function getNextWebUiConfig(): NextWebUiConfig {
 
   return {
     ...config,
+    mowerFootprint: normalizeFootprint(config.mowerFootprint),
     satelliteMaxZoom: Number.isFinite(config.satelliteMaxZoom)
-      ? Math.max(1, Math.min(config.satelliteMaxZoom, 24))
+      ? Math.max(1, config.satelliteMaxZoom)
       : defaultConfig.satelliteMaxZoom,
     satelliteSourceType: config.satelliteSourceType === "xyz" ? "xyz" : "arcgis-rest",
   };

@@ -192,6 +192,10 @@ export OM_USE_F9R_SENSOR_FUSION=False
 # export OM_SLAM_TWIST_TOPIC=/hw/diff_drive/measured_twist
 # export OM_SLAM_IMU_TOPIC=/hw/imu/data_raw
 # export OM_SLAM_ODOM_GYRO_CALIBRATION_SECONDS=5.0
+# export OM_SLAM_ODOM_GYRO_STATIONARY_VX_THRESHOLD=0.03
+# export OM_SLAM_ODOM_GYRO_STATIONARY_WZ_THRESHOLD=0.04
+# export OM_SLAM_ODOM_GYRO_WARNING_YAW_RATE_THRESHOLD=0.025
+# export OM_SLAM_ODOM_GYRO_WARNING_SECONDS=2.0
 # export OM_SLAM_MAP_RESOLUTION=0.05
 # export OM_SLAM_MAX_LASER_RANGE=12.0
 # export OM_SLAM_START_ENABLED=False
@@ -217,6 +221,22 @@ export OM_USE_F9R_SENSOR_FUSION=False
 # export OM_CONFIDENCE_SCAN_MAX_POINTS=180
 # export OM_CONFIDENCE_SCAN_MATCH_NEAR_M=0.15
 # export OM_CONFIDENCE_SCAN_MATCH_FAR_M=0.35
+
+# Read-only unified localization shadow publisher. This publishes
+# /localization_fusion/pose, /localization_fusion/odom, /localization_fusion/status,
+# and map -> fused_base_link for WebUI comparison only. It does not replace
+# map -> base_link and does not feed navigation, planning, costmaps, or control.
+# GPS contribution uses /xbot_positioning/xb_pose and is accepted only while
+# raw GPS is RTK fixed; RTK float is ignored so LIDAR can stand alone.
+# export OM_USE_LOCALIZATION_FUSION=True
+# export OM_LOCALIZATION_FUSION_POSE_TOPIC=/localization_fusion/pose
+# export OM_LOCALIZATION_FUSION_ODOM_TOPIC=/localization_fusion/odom
+# export OM_LOCALIZATION_FUSION_STATUS_TOPIC=/localization_fusion/status
+# export OM_LOCALIZATION_FUSION_BASE_FRAME=fused_base_link
+# export OM_LOCALIZATION_FUSION_RATE_HZ=10.0
+# export OM_LOCALIZATION_FUSION_MAX_TOPIC_AGE_SEC=2.0
+# export OM_LOCALIZATION_FUSION_TF_MAX_AGE_SEC=1.0
+# export OM_LOCALIZATION_FUSION_PUBLISH_TF=True
 
 # Area recording saves mowing outlines from the exterior boundary of the full
 # mower footprint swept along RTK-fixed poses. Obstacles require a closed loop and

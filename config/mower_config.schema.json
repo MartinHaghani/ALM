@@ -517,8 +517,36 @@
           "type": "number",
           "default": 5.0,
           "title": "SLAM odom gyro calibration seconds",
-          "description": "Seconds spent estimating the IMU yaw-rate offset for passive SLAM local odometry on startup.",
+          "description": "Seconds spent estimating the IMU yaw-rate offset for passive SLAM local odometry on startup or when manual calibration is requested.",
           "x-environment-variable": "OM_SLAM_ODOM_GYRO_CALIBRATION_SECONDS"
+        },
+        "OM_SLAM_ODOM_GYRO_STATIONARY_VX_THRESHOLD": {
+          "type": "number",
+          "default": 0.03,
+          "title": "SLAM odom gyro stationary linear threshold",
+          "description": "Measured absolute linear velocity in m/s below which passive SLAM odom considers the mower stationary for gyro drift warnings.",
+          "x-environment-variable": "OM_SLAM_ODOM_GYRO_STATIONARY_VX_THRESHOLD"
+        },
+        "OM_SLAM_ODOM_GYRO_STATIONARY_WZ_THRESHOLD": {
+          "type": "number",
+          "default": 0.04,
+          "title": "SLAM odom gyro stationary yaw threshold",
+          "description": "Measured absolute wheel/twist yaw rate in rad/s below which passive SLAM odom considers the mower stationary for gyro drift warnings.",
+          "x-environment-variable": "OM_SLAM_ODOM_GYRO_STATIONARY_WZ_THRESHOLD"
+        },
+        "OM_SLAM_ODOM_GYRO_WARNING_YAW_RATE_THRESHOLD": {
+          "type": "number",
+          "default": 0.025,
+          "title": "SLAM odom gyro warning yaw-rate threshold",
+          "description": "Corrected IMU yaw-rate magnitude in rad/s that triggers a stationary gyro drift warning when the mower appears stationary.",
+          "x-environment-variable": "OM_SLAM_ODOM_GYRO_WARNING_YAW_RATE_THRESHOLD"
+        },
+        "OM_SLAM_ODOM_GYRO_WARNING_SECONDS": {
+          "type": "number",
+          "default": 2.0,
+          "title": "SLAM odom gyro warning hold time",
+          "description": "Seconds the stationary gyro drift condition must persist before passive SLAM odom reports a warning.",
+          "x-environment-variable": "OM_SLAM_ODOM_GYRO_WARNING_SECONDS"
         },
         "OM_SLAM_MAP_RESOLUTION": {
           "type": "number",
@@ -679,6 +707,75 @@
           "title": "Confidence scan far match distance",
           "description": "Endpoint-to-occupied-cell distance in meters considered a weak but usable scan-to-map match.",
           "x-environment-variable": "OM_CONFIDENCE_SCAN_MATCH_FAR_M"
+        }
+      }
+    },
+    "localization_fusion_settings": {
+      "title": "Localization Fusion Settings",
+      "type": "object",
+      "properties": {
+        "OM_USE_LOCALIZATION_FUSION": {
+          "type": "boolean",
+          "default": true,
+          "title": "Use localization fusion shadow publisher",
+          "description": "Start the read-only GPS/LIDAR fusion shadow publisher. It publishes /localization_fusion/pose and map -> fused_base_link for WebUI comparison only. GPS contribution uses /xbot_positioning/xb_pose and is accepted only while raw GPS is RTK fixed; RTK float is ignored. It does not replace map -> base_link or feed navigation.",
+          "x-environment-variable": "OM_USE_LOCALIZATION_FUSION"
+        },
+        "OM_LOCALIZATION_FUSION_POSE_TOPIC": {
+          "type": "string",
+          "default": "/localization_fusion/pose",
+          "title": "Localization fusion pose topic",
+          "description": "xbot_msgs/AbsolutePose topic for the shadow unified localization pose.",
+          "x-environment-variable": "OM_LOCALIZATION_FUSION_POSE_TOPIC"
+        },
+        "OM_LOCALIZATION_FUSION_ODOM_TOPIC": {
+          "type": "string",
+          "default": "/localization_fusion/odom",
+          "title": "Localization fusion odometry topic",
+          "description": "nav_msgs/Odometry topic for the shadow unified localization pose.",
+          "x-environment-variable": "OM_LOCALIZATION_FUSION_ODOM_TOPIC"
+        },
+        "OM_LOCALIZATION_FUSION_STATUS_TOPIC": {
+          "type": "string",
+          "default": "/localization_fusion/status",
+          "title": "Localization fusion status topic",
+          "description": "JSON std_msgs/String topic containing shadow fusion source weights, readiness, sigma, and rejection reasons.",
+          "x-environment-variable": "OM_LOCALIZATION_FUSION_STATUS_TOPIC"
+        },
+        "OM_LOCALIZATION_FUSION_BASE_FRAME": {
+          "type": "string",
+          "default": "fused_base_link",
+          "title": "Localization fusion base frame",
+          "description": "Shadow TF child frame published as map -> fused_base_link. Do not set this to base_link until a deliberate navigation takeover pass.",
+          "x-environment-variable": "OM_LOCALIZATION_FUSION_BASE_FRAME"
+        },
+        "OM_LOCALIZATION_FUSION_RATE_HZ": {
+          "type": "number",
+          "default": 10.0,
+          "title": "Localization fusion rate",
+          "description": "Publish rate for the shadow fusion pose, odometry, TF, and status.",
+          "x-environment-variable": "OM_LOCALIZATION_FUSION_RATE_HZ"
+        },
+        "OM_LOCALIZATION_FUSION_MAX_TOPIC_AGE_SEC": {
+          "type": "number",
+          "default": 2.0,
+          "title": "Localization fusion max topic age",
+          "description": "Maximum age before the shadow fusion node treats GPS or confidence inputs as stale.",
+          "x-environment-variable": "OM_LOCALIZATION_FUSION_MAX_TOPIC_AGE_SEC"
+        },
+        "OM_LOCALIZATION_FUSION_TF_MAX_AGE_SEC": {
+          "type": "number",
+          "default": 1.0,
+          "title": "Localization fusion TF max age",
+          "description": "Maximum accepted age for the LIDAR global pose transform.",
+          "x-environment-variable": "OM_LOCALIZATION_FUSION_TF_MAX_AGE_SEC"
+        },
+        "OM_LOCALIZATION_FUSION_PUBLISH_TF": {
+          "type": "boolean",
+          "default": true,
+          "title": "Publish localization fusion TF",
+          "description": "Publish the shadow map -> fused_base_link transform for visualization.",
+          "x-environment-variable": "OM_LOCALIZATION_FUSION_PUBLISH_TF"
         }
       }
     },

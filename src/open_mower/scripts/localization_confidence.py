@@ -1101,8 +1101,10 @@ class LocalizationConfidence:
         age = None if snapshot["alignment_wall_time"] is None else now - snapshot["alignment_wall_time"]
         if status is None or age is None or age > self.max_topic_age:
             return {
+                "alignment_frozen": False,
                 "confidence": 0.0,
                 "source": "none",
+                "state": "unavailable",
                 "residual_m": None,
                 "p95_m": None,
                 "scale_diagnostic": None,
@@ -1115,6 +1117,7 @@ class LocalizationConfidence:
         transform = status.get("transform")
         source = status.get("alignment_source") or "none"
         state = status.get("state") or "unknown"
+        alignment_hold_reason = status.get("alignment_hold_reason") or ""
         residual = status.get("residual_m")
         p95 = status.get("residual_p95_m")
         max_residual = status.get("max_residual_m") or 0.35
@@ -1126,8 +1129,10 @@ class LocalizationConfidence:
 
         if transform is None:
             return {
+                "alignment_frozen": bool(alignment_hold_reason),
                 "confidence": 0.0,
                 "source": source,
+                "state": state,
                 "residual_m": residual,
                 "p95_m": p95,
                 "scale_diagnostic": scale,
@@ -1167,13 +1172,15 @@ class LocalizationConfidence:
             },
         )
         reasons = []
+        if alignment_hold_reason:
+            reasons.append("alignment_frozen_%s" % alignment_hold_reason)
         if drift_warning:
             confidence = min(confidence, 0.35)
             reasons.append("slam_drift_warning")
         elif outlier_warning:
             confidence = min(confidence, 0.75)
             reasons.append("alignment_outliers_rejected")
-        if state not in ("aligned", "degraded", "degraded_slam_drift"):
+        if state not in ("aligned", "aligned_rtk_hold", "degraded", "degraded_slam_drift"):
             confidence = min(confidence, 0.25)
             reasons.append("alignment_not_ready")
         elif state.startswith("degraded"):
@@ -1181,8 +1188,10 @@ class LocalizationConfidence:
             reasons.append("alignment_degraded")
 
         return {
+            "alignment_frozen": bool(alignment_hold_reason),
             "confidence": confidence,
             "source": source,
+            "state": state,
             "residual_m": residual,
             "p95_m": p95,
             "scale_diagnostic": scale,

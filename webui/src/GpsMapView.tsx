@@ -175,7 +175,6 @@ function createSatelliteLayer(config: NextWebUiConfig) {
   return new TileLayer({
     source: new XYZ({
       attributions: config.satelliteAttribution,
-      maxZoom: config.satelliteMaxZoom,
       url: config.satelliteTileUrl,
     }),
   });
@@ -201,7 +200,7 @@ export function GpsMapView({ config, connected, now, ros }: GpsMapViewProps) {
   const lonLat = validLonLat(fix);
   const accuracy = accuracyMeters(freshStatus, fix);
   const gpsState = gpsStateKind(connected, fix, freshStatus, fixStats.lastMessageAt, now);
-  const followZoom = Math.min(DEFAULT_FOLLOW_ZOOM, config.satelliteMaxZoom);
+  const followZoom = DEFAULT_FOLLOW_ZOOM;
 
   const centerMapOnLatestFix = useCallback(() => {
     const map = mapRef.current;
@@ -236,7 +235,6 @@ export function GpsMapView({ config, connected, now, ros }: GpsMapViewProps) {
       target: mapElementRef.current,
       view: new View({
         center: fromLonLat([0, 0]),
-        maxZoom: config.satelliteMaxZoom,
         zoom: 2,
       }),
     });
@@ -254,7 +252,6 @@ export function GpsMapView({ config, connected, now, ros }: GpsMapViewProps) {
     config.satelliteArcGisLayers,
     config.satelliteArcGisRestUrl,
     config.satelliteAttribution,
-    config.satelliteMaxZoom,
     config.satelliteSourceType,
     config.satelliteTileUrl,
   ]);

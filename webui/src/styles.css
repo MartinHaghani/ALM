@@ -372,6 +372,9 @@ button:focus-visible {
 }
 
 .warning-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 10px 12px;
   border: 1px solid rgba(190, 84, 26, 0.3);
   border-radius: 8px;
@@ -380,6 +383,11 @@ button:focus-visible {
   font-size: 13px;
   font-weight: 800;
   line-height: 1.35;
+}
+
+.warning-banner svg {
+  flex: none;
+  margin-top: 1px;
 }
 
 .map-workspace {
@@ -844,6 +852,10 @@ button:focus-visible {
 
 .legend-marker.is-lidar {
   background: #5b4bb7;
+}
+
+.legend-marker.is-final {
+  background: #17202a;
 }
 
 .map-marker-legend strong {

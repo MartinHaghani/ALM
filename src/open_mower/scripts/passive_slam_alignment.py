@@ -272,6 +272,7 @@ class PassiveSlamAlignment:
         self.drift_warning = False
         self.outlier_warning = False
         self.outlier_count = 0
+        self.alignment_hold_reason = ""
         self.boundary_sample_received_count = 0
         self.boundary_sample_skip_counts = {
             "low_gps_quality": 0,
@@ -417,6 +418,7 @@ class PassiveSlamAlignment:
         self.drift_warning = False
         self.outlier_warning = False
         self.outlier_count = 0
+        self.alignment_hold_reason = ""
         self.boundary_sample_received_count = 0
         for key in self.boundary_sample_skip_counts:
             self.boundary_sample_skip_counts[key] = 0
@@ -559,8 +561,16 @@ class PassiveSlamAlignment:
             return
 
         if not self.gps_is_rtk_fixed():
-            self.set_state("degraded" if last_transform else "waiting_for_rtk")
+            if last_transform:
+                with self.lock:
+                    self.current_lidar_pose = compose_planar(last_transform, slam_pose)
+                    self.alignment_hold_reason = "gps_not_rtk_fixed"
+                    self.state = "aligned_rtk_hold"
+                    self.last_error = ""
+                return
+            self.set_state("waiting_for_rtk")
             with self.lock:
+                self.alignment_hold_reason = ""
                 self.alignment_source = "boundary_collecting" if boundary_snapshot else "none"
             return
 
@@ -571,6 +581,7 @@ class PassiveSlamAlignment:
         if not self.samples_ready(sample_snapshot):
             self.set_state("collecting")
             with self.lock:
+                self.alignment_hold_reason = ""
                 self.alignment_source = "boundary_collecting" if boundary_snapshot else "motion_collecting"
             return
 
@@ -631,6 +642,7 @@ class PassiveSlamAlignment:
             self.outlier_warning = outlier_warning
             self.outlier_count = max(0, len(samples) - len(kept_indices))
             self.alignment_source = source
+            self.alignment_hold_reason = ""
 
             if residual <= self.max_residual_m:
                 self.transform = transform
@@ -740,6 +752,7 @@ class PassiveSlamAlignment:
             drift_warning = self.drift_warning
             outlier_warning = self.outlier_warning
             outlier_count = self.outlier_count
+            alignment_hold_reason = self.alignment_hold_reason
             boundary_sample_received_count = self.boundary_sample_received_count
             boundary_sample_skip_counts = dict(self.boundary_sample_skip_counts)
             alignment_source = self.alignment_source
@@ -765,7 +778,9 @@ class PassiveSlamAlignment:
 
         now = time.time()
         return {
-            "aligned": transform is not None and state == "aligned",
+            "aligned": transform is not None and state in ("aligned", "aligned_rtk_hold"),
+            "alignment_frozen": bool(alignment_hold_reason),
+            "alignment_hold_reason": alignment_hold_reason,
             "alignment_source": alignment_source,
             "base_frame": self.base_frame,
             "boundary_pairs": self.boundary_pairs_for_status(transform),

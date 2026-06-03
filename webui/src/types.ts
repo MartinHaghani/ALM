@@ -164,6 +164,35 @@ export interface SlamManagerStatus {
   slam_running: boolean;
 }
 
+export interface PassiveSlamOdomStatus {
+  base_frame: string;
+  calibrated: boolean;
+  gyro_calibrating?: boolean;
+  gyro_calibration_elapsed?: number | null;
+  gyro_calibration_progress?: number | null;
+  gyro_calibration_seconds?: number | null;
+  gyro_offset: number;
+  gyro_stationary_warning?: boolean;
+  gyro_stationary_vx_threshold?: number;
+  gyro_stationary_wz_threshold?: number;
+  gyro_warning_duration?: number;
+  gyro_warning_seconds?: number;
+  gyro_warning_yaw_rate_threshold?: number;
+  last_imu_age: number | null;
+  last_reset_at: number;
+  last_twist_age: number | null;
+  odom_frame: string;
+  raw_yaw_rate?: number;
+  scan_frame: string;
+  stationary_detected?: boolean;
+  twist_yaw_rate?: number;
+  vx: number;
+  x: number;
+  y: number;
+  yaw: number;
+  yaw_rate: number;
+}
+
 export interface SlamAlignmentPose {
   x: number;
   y: number;
@@ -279,6 +308,36 @@ export interface LocalizationConfidenceStatus {
   read_only: boolean;
   stamp: number;
   version: number;
+}
+
+export interface LocalizationFusionSourceStatus {
+  accepted?: boolean;
+  age_s?: number | null;
+  confidence?: number | null;
+  innovation_m?: number | null;
+  mahalanobis?: number | null;
+  reason?: string | null;
+  rejection_reason?: string | null;
+  weight?: number | null;
+}
+
+export interface LocalizationFusionStatus {
+  accepted_source_weights?: Record<string, number>;
+  confidence?: number | null;
+  last_error?: string | null;
+  position_sigma_m?: number | null;
+  read_only?: boolean;
+  ready_for_navigation?: boolean;
+  recommended_action?: string | null;
+  rejected_updates?: Record<string, string | string[]>;
+  rejections?: string[];
+  reasons?: string[];
+  source_weights?: Record<string, number>;
+  sources?: Record<string, LocalizationFusionSourceStatus>;
+  stamp?: number;
+  state?: string;
+  version?: number;
+  yaw_sigma_rad?: number | null;
 }
 
 export interface SensorStats {

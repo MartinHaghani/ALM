@@ -37,6 +37,10 @@ class PassiveSlamOdom:
         self.twist_timeout = float(rospy.get_param("~twist_timeout", 0.5))
         self.max_dt = float(rospy.get_param("~max_dt", 0.25))
         self.gyro_calibration_seconds = float(rospy.get_param("~gyro_calibration_seconds", 5.0))
+        self.gyro_stationary_vx_threshold = float(rospy.get_param("~gyro_stationary_vx_threshold", 0.03))
+        self.gyro_stationary_wz_threshold = float(rospy.get_param("~gyro_stationary_wz_threshold", 0.04))
+        self.gyro_warning_yaw_rate_threshold = float(rospy.get_param("~gyro_warning_yaw_rate_threshold", 0.025))
+        self.gyro_warning_seconds = float(rospy.get_param("~gyro_warning_seconds", 2.0))
         self.publish_tf = bool(rospy.get_param("~publish_tf", True))
 
         self.lock = threading.Lock()
@@ -44,6 +48,8 @@ class PassiveSlamOdom:
         self.y = 0.0
         self.yaw = 0.0
         self.vx = 0.0
+        self.twist_yaw_rate = 0.0
+        self.raw_yaw_rate = 0.0
         self.yaw_rate = 0.0
         self.gyro_offset = 0.0
         self.gyro_offset_sum = 0.0
@@ -54,6 +60,10 @@ class PassiveSlamOdom:
         self.last_imu_wall_time = None
         self.last_twist_wall_time = None
         self.last_reset_wall_time = time.time()
+        self.gyro_warning_candidate_since = None
+        self.gyro_warning_duration = 0.0
+        self.gyro_stationary_warning = False
+        self.stationary_detected = False
 
         self.odom_pub = rospy.Publisher(self.odom_topic, Odometry, queue_size=10)
         self.scan_pub = rospy.Publisher(self.scan_out_topic, LaserScan, queue_size=2)
@@ -64,6 +74,7 @@ class PassiveSlamOdom:
         rospy.Subscriber("~twist_in", TwistStamped, self.on_twist, queue_size=10)
         rospy.Subscriber("~scan_in", LaserScan, self.on_scan, queue_size=2)
         rospy.Service("~reset", Trigger, self.reset)
+        rospy.Service("~calibrate_gyro", Trigger, self.calibrate_gyro)
 
         rospy.loginfo(
             "Passive SLAM odom ready: %s -> %s from twist + IMU gyro, republishing scans as %s on %s.",
@@ -92,6 +103,38 @@ class PassiveSlamOdom:
         self.publish_status()
         return TriggerResponse(success=True, message="Passive SLAM local odom reset")
 
+    def calibrate_gyro(self, _request):
+        if self.gyro_calibration_seconds <= 0.0:
+            return TriggerResponse(success=False, message="Passive SLAM gyro calibration is disabled")
+
+        with self.lock:
+            if self.twist_is_fresh() and (
+                abs(self.current_vx()) > self.gyro_stationary_vx_threshold
+                or abs(self.current_twist_yaw_rate()) > self.gyro_stationary_wz_threshold
+            ):
+                return TriggerResponse(success=False, message="Mower appears to be moving; stop before calibrating gyro")
+            self.start_gyro_calibration_locked()
+
+        self.publish_status()
+        return TriggerResponse(
+            success=True,
+            message="Passive SLAM gyro calibration started; keep the mower completely still for {:.1f} s".format(
+                self.gyro_calibration_seconds
+            ),
+        )
+
+    def start_gyro_calibration_locked(self):
+        self.calibrated = False
+        self.calibration_start = None
+        self.gyro_offset_sum = 0.0
+        self.gyro_offset_samples = 0
+        self.last_imu_stamp = None
+        self.raw_yaw_rate = 0.0
+        self.yaw_rate = 0.0
+        self.gyro_warning_candidate_since = None
+        self.gyro_warning_duration = 0.0
+        self.gyro_stationary_warning = False
+
     def current_vx(self):
         if self.last_twist_wall_time is None:
             return 0.0
@@ -99,10 +142,48 @@ class PassiveSlamOdom:
             return 0.0
         return self.vx
 
+    def current_twist_yaw_rate(self):
+        if self.last_twist_wall_time is None:
+            return 0.0
+        if time.time() - self.last_twist_wall_time > self.twist_timeout:
+            return 0.0
+        return self.twist_yaw_rate
+
+    def twist_is_fresh(self):
+        return self.last_twist_wall_time is not None and time.time() - self.last_twist_wall_time <= self.twist_timeout
+
+    def update_gyro_warning_locked(self):
+        now = time.time()
+        twist_fresh = self.twist_is_fresh()
+        vx = self.current_vx()
+        twist_yaw_rate = self.current_twist_yaw_rate()
+        self.stationary_detected = bool(
+            twist_fresh
+            and abs(vx) <= self.gyro_stationary_vx_threshold
+            and abs(twist_yaw_rate) <= self.gyro_stationary_wz_threshold
+        )
+
+        candidate = bool(
+            self.calibrated
+            and self.stationary_detected
+            and abs(self.yaw_rate) >= self.gyro_warning_yaw_rate_threshold
+        )
+        if candidate:
+            if self.gyro_warning_candidate_since is None:
+                self.gyro_warning_candidate_since = now
+            self.gyro_warning_duration = now - self.gyro_warning_candidate_since
+            self.gyro_stationary_warning = self.gyro_warning_duration >= self.gyro_warning_seconds
+        else:
+            self.gyro_warning_candidate_since = None
+            self.gyro_warning_duration = 0.0
+            self.gyro_stationary_warning = False
+
     def on_twist(self, msg):
         with self.lock:
             self.vx = msg.twist.linear.x
+            self.twist_yaw_rate = msg.twist.angular.z
             self.last_twist_wall_time = time.time()
+            self.update_gyro_warning_locked()
 
     def on_scan(self, msg):
         scan = LaserScan()
@@ -123,6 +204,7 @@ class PassiveSlamOdom:
         with self.lock:
             now = msg.header.stamp if msg.header.stamp != rospy.Time() else rospy.Time.now()
             self.last_imu_wall_time = time.time()
+            self.raw_yaw_rate = msg.angular_velocity.z
 
             if not self.calibrated:
                 if self.calibration_start is None:
@@ -140,6 +222,8 @@ class PassiveSlamOdom:
                 self.gyro_offset = self.gyro_offset_sum / max(1, self.gyro_offset_samples)
                 self.calibrated = True
                 self.last_imu_stamp = now
+                self.yaw_rate = 0.0
+                self.update_gyro_warning_locked()
                 rospy.loginfo("Passive SLAM odom gyro offset: %s", self.gyro_offset)
                 return
 
@@ -158,6 +242,7 @@ class PassiveSlamOdom:
             self.yaw = math.atan2(math.sin(self.yaw), math.cos(self.yaw))
             self.x += math.cos(self.yaw) * vx * dt
             self.y += math.sin(self.yaw) * vx * dt
+            self.update_gyro_warning_locked()
 
         self.publish_odometry(now)
 
@@ -201,15 +286,38 @@ class PassiveSlamOdom:
 
     def publish_status(self):
         with self.lock:
+            calibration_elapsed = None
+            calibration_progress = 1.0
+            if not self.calibrated:
+                if self.calibration_start is not None:
+                    calibration_elapsed = max(0.0, (rospy.Time.now() - self.calibration_start).to_sec())
+                calibration_progress = min(
+                    1.0,
+                    max(0.0, (calibration_elapsed or 0.0) / max(0.001, self.gyro_calibration_seconds)),
+                )
+            self.update_gyro_warning_locked()
             status = {
                 "base_frame": self.base_frame,
                 "calibrated": self.calibrated,
+                "gyro_calibrating": not self.calibrated,
+                "gyro_calibration_elapsed": calibration_elapsed,
+                "gyro_calibration_progress": calibration_progress,
+                "gyro_calibration_seconds": self.gyro_calibration_seconds,
                 "gyro_offset": self.gyro_offset,
+                "gyro_stationary_vx_threshold": self.gyro_stationary_vx_threshold,
+                "gyro_stationary_wz_threshold": self.gyro_stationary_wz_threshold,
+                "gyro_warning_duration": self.gyro_warning_duration,
+                "gyro_warning_seconds": self.gyro_warning_seconds,
+                "gyro_warning_yaw_rate_threshold": self.gyro_warning_yaw_rate_threshold,
+                "gyro_stationary_warning": self.gyro_stationary_warning,
                 "last_imu_age": None if self.last_imu_wall_time is None else time.time() - self.last_imu_wall_time,
                 "last_reset_at": self.last_reset_wall_time,
                 "last_twist_age": None if self.last_twist_wall_time is None else time.time() - self.last_twist_wall_time,
                 "odom_frame": self.odom_frame,
+                "raw_yaw_rate": self.raw_yaw_rate,
                 "scan_frame": self.scan_frame,
+                "stationary_detected": self.stationary_detected,
+                "twist_yaw_rate": self.current_twist_yaw_rate(),
                 "vx": self.current_vx(),
                 "x": self.x,
                 "y": self.y,

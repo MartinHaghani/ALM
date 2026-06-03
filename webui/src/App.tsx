@@ -1,4 +1,4 @@
-import { Activity, Map as MapIcon, Pause, Play, Radar, RefreshCw, Wifi, WifiOff } from "lucide-react";
+import { Activity, AlertTriangle, Map as MapIcon, Pause, Play, Radar, RefreshCw, RotateCcw, Wifi, WifiOff } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Ros } from "roslib";
 
@@ -7,13 +7,16 @@ import { ImuPanel } from "./ImuPanel";
 import { ScanCanvas } from "./ScanCanvas";
 import { getNextWebUiConfig, type NextWebUiConfig } from "./config";
 import { isImuSampleValid } from "./imuMath";
+import { callTriggerService } from "./rosServices";
 import type { Imu, ImuStats, LaserScan } from "./types";
 import { useImu } from "./useImu";
 import { useLaserScan } from "./useLaserScan";
+import { usePassiveSlamOdomStatus } from "./usePassiveSlamOdomStatus";
 import { useRosBridge } from "./useRosBridge";
 
 const DEFAULT_IMU_TOPIC = "/hw/imu/data_raw";
 const IMU_STALE_MS = 1500;
+const PASSIVE_ODOM_STALE_MS = 2000;
 
 type ImuStatus = "functioning" | "offline" | "waiting";
 type ViewMode = "map" | "sensors";
@@ -39,6 +42,20 @@ function formatAge(lastMessageAt: number | null, now: number): string {
     return "--";
   }
   return `${formatNumber(Math.max(0, (now - lastMessageAt) / 1000), 1)} s`;
+}
+
+function formatPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "--";
+  }
+  return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
+}
+
+function formatYawRate(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "--";
+  }
+  return `${formatNumber((value * 180) / Math.PI, 1)} deg/s`;
 }
 
 function finiteRanges(scan: LaserScan | null): number[] {
@@ -78,6 +95,8 @@ function SensorViewer({ config, connected, error, now, ros, url }: SensorViewerP
   const [draftImuTopic, setDraftImuTopic] = useState(DEFAULT_IMU_TOPIC);
   const [paused, setPaused] = useState(false);
   const [clampMeters, setClampMeters] = useState(8);
+  const [gyroCommandMessage, setGyroCommandMessage] = useState<string | null>(null);
+  const [gyroCommandPending, setGyroCommandPending] = useState(false);
 
   const { scan, stats } = useLaserScan({
     paused,
@@ -88,11 +107,20 @@ function SensorViewer({ config, connected, error, now, ros, url }: SensorViewerP
     ros,
     topicName: imuTopic,
   });
+  const { stats: passiveOdomStats, status: passiveOdomStatus } = usePassiveSlamOdomStatus({
+    ros,
+    topicName: config.passiveSlamOdomStatusTopic,
+  });
 
   const ranges = finiteRanges(scan);
   const minRange = ranges.length > 0 ? Math.min(...ranges) : Number.NaN;
   const maxRange = ranges.length > 0 ? Math.max(...ranges) : Number.NaN;
   const imuStatus = getImuStatus(connected, imu, imuStats, now);
+  const passiveOdomIsFresh =
+    passiveOdomStats.lastMessageAt !== null && now - passiveOdomStats.lastMessageAt <= PASSIVE_ODOM_STALE_MS;
+  const freshPassiveOdom = passiveOdomIsFresh ? passiveOdomStatus : null;
+  const gyroWarning = Boolean(freshPassiveOdom?.gyro_stationary_warning);
+  const gyroCalibrating = Boolean(freshPassiveOdom?.gyro_calibrating);
 
   function applyTopic(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -110,6 +138,26 @@ function SensorViewer({ config, connected, error, now, ros, url }: SensorViewerP
     }
   }
 
+  async function calibrateGyro(): Promise<void> {
+    if (!ros || !connected || gyroCommandPending) {
+      return;
+    }
+
+    setGyroCommandPending(true);
+    setGyroCommandMessage(null);
+    try {
+      const response = await callTriggerService(ros, config.passiveSlamGyroCalibrateService);
+      setGyroCommandMessage(response.message || "Gyro calibration started");
+      if (!response.success) {
+        throw new Error(response.message || "Gyro calibration failed");
+      }
+    } catch (serviceError) {
+      setGyroCommandMessage(serviceError instanceof Error ? serviceError.message : String(serviceError));
+    } finally {
+      setGyroCommandPending(false);
+    }
+  }
+
   return (
     <div className="workspace">
       <aside className="control-panel">
@@ -122,6 +170,36 @@ function SensorViewer({ config, connected, error, now, ros, url }: SensorViewerP
           <Activity size={18} aria-hidden="true" />
           <span>{imuStatusLabel(imuStatus)}</span>
         </div>
+
+        {gyroWarning && (
+          <div className="warning-banner">
+            <AlertTriangle size={16} aria-hidden="true" />
+            <span>
+              Gyro reports {formatYawRate(freshPassiveOdom?.yaw_rate)} while the mower appears stationary. Calibrate
+              the gyro with the mower still.
+            </span>
+          </div>
+        )}
+        {gyroCalibrating && (
+          <div className="status-banner">
+            Gyro calibration running: {formatPercent(freshPassiveOdom?.gyro_calibration_progress)}
+          </div>
+        )}
+        {gyroCommandMessage && <div className="status-banner">{gyroCommandMessage}</div>}
+
+        <section className="panel-section">
+          <div className="control-row">
+            <button
+              className="command-button"
+              disabled={!connected || gyroCommandPending}
+              type="button"
+              onClick={calibrateGyro}
+            >
+              <RotateCcw size={18} aria-hidden="true" />
+              <span>{gyroCommandPending ? "Starting" : "Calibrate gyro"}</span>
+            </button>
+          </div>
+        </section>
 
         <form className="topic-form" onSubmit={applyTopic}>
           <label htmlFor="scan-topic">Scan topic</label>
@@ -172,6 +250,33 @@ function SensorViewer({ config, connected, error, now, ros, url }: SensorViewerP
               onChange={(event) => setClampMeters(Number(event.target.value))}
             />
             <output htmlFor="range-clamp">{formatNumber(clampMeters, 1)} m</output>
+          </div>
+        </section>
+
+        <section className="metric-grid" aria-label="Gyro diagnostics">
+          <div className="metric">
+            <span>Gyro rate</span>
+            <strong>{formatYawRate(freshPassiveOdom?.yaw_rate)}</strong>
+          </div>
+          <div className="metric">
+            <span>Raw gyro</span>
+            <strong>{formatYawRate(freshPassiveOdom?.raw_yaw_rate)}</strong>
+          </div>
+          <div className="metric">
+            <span>Offset</span>
+            <strong>{formatYawRate(freshPassiveOdom?.gyro_offset)}</strong>
+          </div>
+          <div className="metric">
+            <span>Still</span>
+            <strong>{freshPassiveOdom?.stationary_detected === true ? "Yes" : freshPassiveOdom ? "No" : "--"}</strong>
+          </div>
+          <div className="metric">
+            <span>Odom age</span>
+            <strong>{formatAge(passiveOdomStats.lastMessageAt, now)}</strong>
+          </div>
+          <div className="metric">
+            <span>Calibration</span>
+            <strong>{gyroCalibrating ? formatPercent(freshPassiveOdom?.gyro_calibration_progress) : freshPassiveOdom?.calibrated ? "Done" : "--"}</strong>
           </div>
         </section>
 
