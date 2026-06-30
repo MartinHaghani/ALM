@@ -32,6 +32,11 @@ export interface Pose {
   orientation: Quaternion;
 }
 
+export interface PoseStamped {
+  header: RosHeader;
+  pose: Pose;
+}
+
 export interface PoseWithCovariance {
   pose: Pose;
   covariance: number[];
@@ -100,6 +105,11 @@ export interface OccupancyGrid {
   data: number[];
 }
 
+export interface NavPath {
+  header: RosHeader;
+  poses: PoseStamped[];
+}
+
 export interface Transform {
   translation: Vector3;
   rotation: Quaternion;
@@ -119,9 +129,84 @@ export interface StringMessage {
   data: string;
 }
 
+export interface BoolMessage {
+  data: boolean;
+}
+
+export interface MowerActionInfo {
+  action_id: string;
+  action_name: string;
+  enabled: boolean | number;
+}
+
+export interface RobotState {
+  battery_percentage: number;
+  current_action_progress: number;
+  current_area: number;
+  current_path: number;
+  current_path_index: number;
+  current_state: string;
+  current_sub_state: string;
+  emergency: boolean;
+  gps_percentage: number;
+  is_charging: boolean;
+  rain_detected: boolean;
+  robot_pose: AbsolutePose;
+}
+
+export interface MapOverlayPolygon {
+  closed: boolean;
+  color: string;
+  line_width: number;
+  polygon: {
+    points: Array<{ x: number; y: number; z?: number }>;
+  };
+}
+
+export interface MapOverlay {
+  polygons: MapOverlayPolygon[];
+}
+
+export interface Twist {
+  angular: Vector3;
+  linear: Vector3;
+}
+
 export interface MapPoint {
   x: number;
   y: number;
+}
+
+export type RoutePlanSource = "mower_logic" | "planpath_compat" | "v2_task_paths";
+
+export interface RoutePlanPose {
+  pose_index: number;
+  x: number;
+  y: number;
+  yaw: number;
+  tool_x?: number;
+  tool_y?: number;
+  tool_yaw?: number;
+}
+
+export interface RoutePlanPath {
+  frame_id?: string;
+  is_outline: boolean;
+  label: string;
+  path_index: number;
+  poses: RoutePlanPose[];
+}
+
+export interface RoutePlan {
+  active: boolean;
+  current_path_index: number;
+  current_pose_index: number;
+  frame_id: string;
+  paths: RoutePlanPath[];
+  plan_id: string;
+  schema: "open_mower.route_plan.v0";
+  source: RoutePlanSource;
+  stamp?: RosTime;
 }
 
 export interface MowerMapArea {
@@ -147,6 +232,49 @@ export interface MowerDockingStation {
 export interface MowerMapData {
   areas: MowerMapArea[];
   docking_stations: MowerDockingStation[];
+}
+
+export interface RosPolygon {
+  points: Array<{ x: number; y: number; z?: number }>;
+}
+
+export interface MapEditStroke {
+  brush_diameter_m: number;
+  expected_map_hash: string;
+  expected_map_id: string;
+  operation: number;
+  path: RosPolygon;
+  replacement_polygon: RosPolygon;
+  target_area_id: string;
+}
+
+export interface MapSummary {
+  area_count: number;
+  bounds_valid: boolean;
+  center_x: number;
+  center_y: number;
+  created_at: string;
+  datum_lat: number;
+  datum_lon: number;
+  datum_source: string;
+  has_docking_station: boolean;
+  id: string;
+  map_hash: string;
+  max_x: number;
+  max_y: number;
+  min_x: number;
+  min_y: number;
+  mowing_area_count: number;
+  name: string;
+  navigation_area_count: number;
+  obstacle_count: number;
+  selected: boolean;
+  updated_at: string;
+}
+
+export interface MapCatalog {
+  maps: MapSummary[];
+  selected_map_id: string;
 }
 
 export interface SlamManagerStatus {
@@ -338,6 +466,78 @@ export interface LocalizationFusionStatus {
   state?: string;
   version?: number;
   yaw_sigma_rad?: number | null;
+}
+
+export interface ManualPathRecorderSourceHealth {
+  age_s: number | null;
+  fresh: boolean;
+  seen: boolean;
+  stamp: number | null;
+}
+
+export interface ManualPathRecorderStatus {
+  active: boolean;
+  artifact_paths?: Record<string, string>;
+  duration_s?: number | null;
+  last_error?: string | null;
+  raw_bag_active: boolean;
+  reject_counts?: Record<string, number>;
+  sample_counts?: Record<string, number>;
+  session_dir?: string | null;
+  session_id?: string | null;
+  source_health?: Record<string, ManualPathRecorderSourceHealth>;
+  subscribed_topics?: string[];
+  sync_rate_hz?: number;
+}
+
+export type ManualInputSource = "direct_bluetooth" | "web_gamepad";
+
+export interface BluetoothAdapterStatus {
+  address: string;
+  alias: string;
+  discovering: boolean;
+  name: string;
+  pairable: boolean;
+  path: string;
+  powered: boolean;
+}
+
+export interface BluetoothDevice {
+  address: string;
+  alias: string;
+  connected: boolean;
+  icon: string;
+  name: string;
+  paired: boolean;
+  path: string;
+  rssi: number | null;
+  services_resolved: boolean;
+  trusted: boolean;
+}
+
+export interface BluetoothGamepadStatus {
+  adapter: BluetoothAdapterStatus | null;
+  agent_available?: boolean;
+  available: boolean;
+  controller_type: string;
+  devices: BluetoothDevice[];
+  message: string;
+  scan_requested: boolean;
+  supported_profiles: string[];
+}
+
+export interface MowerInputStatus {
+  active_source: ManualInputSource;
+  available_sources: ManualInputSource[];
+  bluetooth?: BluetoothGamepadStatus;
+  direct_blade_hold_active: boolean;
+  direct_command_age_ms: number | null;
+  direct_connected: boolean;
+  direct_joy_age_ms: number | null;
+  direct_profile: string | null;
+  last_switch_time: number;
+  selected_source: ManualInputSource;
+  web_command_age_ms: number | null;
 }
 
 export interface SensorStats {

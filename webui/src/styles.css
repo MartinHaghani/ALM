@@ -29,7 +29,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -148,6 +149,298 @@ button {
   color: var(--amber);
   border-color: rgba(160, 92, 0, 0.28);
   background: #fff7e8;
+}
+
+.bluetooth-control {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.bluetooth-header-button {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #fff;
+}
+
+.bluetooth-header-button:hover {
+  border-color: rgba(15, 122, 122, 0.35);
+  color: var(--teal);
+}
+
+.bluetooth-header-button.is-ready {
+  color: var(--blue);
+  border-color: rgba(36, 89, 166, 0.28);
+  background: #eef4ff;
+}
+
+.bluetooth-header-button.is-connected {
+  color: var(--green);
+  border-color: rgba(20, 120, 77, 0.3);
+  background: #eef8f2;
+}
+
+.bluetooth-header-button.is-offline {
+  color: var(--amber);
+  border-color: rgba(160, 92, 0, 0.26);
+  background: #fff7e8;
+}
+
+.bluetooth-header-dot {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+.bluetooth-header-button.is-ready .bluetooth-header-dot {
+  background: var(--blue);
+}
+
+.bluetooth-header-button.is-connected .bluetooth-header-dot {
+  background: var(--green);
+}
+
+.bluetooth-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(430px, calc(100vw - 24px));
+  max-height: min(720px, calc(100vh - 88px));
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid rgba(217, 225, 234, 0.95);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 44px rgba(23, 32, 42, 0.22);
+}
+
+.bluetooth-panel-header,
+.bluetooth-adapter-row,
+.bluetooth-command-row,
+.bluetooth-device-main,
+.bluetooth-badge-row,
+.bluetooth-device-actions,
+.input-source-switch,
+.bluetooth-profile-field {
+  display: flex;
+  align-items: center;
+}
+
+.bluetooth-panel-header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bluetooth-panel-header h2 {
+  margin: 2px 0 0;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.05;
+}
+
+.bluetooth-adapter-row,
+.bluetooth-badge-row {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--panel-soft);
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.status-badge.is-green {
+  color: var(--green);
+  border-color: rgba(20, 120, 77, 0.28);
+  background: #eef8f2;
+}
+
+.status-badge.is-amber {
+  color: var(--amber);
+  border-color: rgba(160, 92, 0, 0.28);
+  background: #fff7e8;
+}
+
+.status-badge.is-blue {
+  color: var(--blue);
+  border-color: rgba(36, 89, 166, 0.24);
+  background: #eef4ff;
+}
+
+.status-badge.is-muted {
+  color: var(--muted);
+}
+
+.input-source-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-height: 38px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.input-source-switch button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.input-source-switch button.is-active {
+  color: var(--teal);
+  background: #eef9f7;
+  box-shadow: 0 1px 4px rgba(23, 32, 42, 0.1);
+}
+
+.input-source-switch button:disabled,
+.bluetooth-profile-field select:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.bluetooth-profile-field {
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.bluetooth-profile-field select {
+  min-width: 160px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 750;
+  text-transform: none;
+}
+
+.bluetooth-command-row {
+  gap: 8px;
+}
+
+.bluetooth-command-row .command-button {
+  flex: 1 1 0;
+  justify-content: center;
+  min-width: 0;
+}
+
+.bluetooth-message,
+.bluetooth-empty {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: var(--panel-soft);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.bluetooth-device-list {
+  display: grid;
+  gap: 10px;
+}
+
+.bluetooth-device-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.bluetooth-device-main {
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bluetooth-device-main div:first-child {
+  min-width: 0;
+}
+
+.bluetooth-device-main strong,
+.bluetooth-device-main span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bluetooth-device-main strong {
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.15;
+}
+
+.bluetooth-device-main span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bluetooth-rssi {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bluetooth-device-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bluetooth-device-actions .icon-button {
+  width: 36px;
+  height: 34px;
+}
+
+.icon-button.is-danger {
+  color: var(--red);
 }
 
 .sensor-pill {
@@ -584,6 +877,10 @@ button:focus-visible {
   padding: 18px clamp(14px, 3vw, 36px) 24px;
 }
 
+.combined-map-workspace.is-route-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .combined-map-panel {
   display: flex;
   flex-direction: column;
@@ -657,6 +954,173 @@ button:focus-visible {
 
 .confidence-summary {
   gap: 12px;
+}
+
+.map-selector-section {
+  gap: 10px;
+}
+
+.selected-map-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 58px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.selected-map-card span,
+.map-selector-details span {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.selected-map-card strong,
+.map-selector-details strong {
+  display: block;
+  min-width: 0;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.map-count-pill {
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid rgba(36, 89, 166, 0.22);
+  border-radius: 999px;
+  color: var(--blue);
+  background: #edf4ff;
+  font-weight: 850;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-select,
+.map-command-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.map-select:disabled,
+.map-command-form input:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.map-command-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  gap: 8px;
+  align-items: center;
+}
+
+.map-command-form.map-rename-form {
+  grid-template-columns: minmax(0, 1fr) 40px 40px;
+}
+
+.map-selector-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.map-selector-details div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.map-editor-section {
+  gap: 10px;
+}
+
+.segmented-control,
+.tool-button-row,
+.editor-command-row {
+  display: flex;
+  gap: 8px;
+}
+
+.segmented-control {
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.segmented-control button,
+.tool-button-row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.segmented-control button {
+  flex: 1 1 0;
+}
+
+.tool-button-row {
+  flex-wrap: wrap;
+}
+
+.tool-button-row button {
+  flex: 1 1 72px;
+  border-color: var(--line);
+  background: #fff;
+}
+
+.segmented-control button.is-active,
+.tool-button-row button.is-active {
+  color: var(--teal);
+  border-color: rgba(15, 122, 122, 0.28);
+  background: #eef9f7;
+}
+
+.segmented-control button:disabled,
+.tool-button-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.editor-command-row {
+  align-items: center;
+}
+
+.editor-command-row .command-button {
+  flex: 1 1 auto;
 }
 
 .confidence-list {
@@ -863,6 +1327,364 @@ button:focus-visible {
   border: 1px solid var(--line);
   background: var(--panel-soft);
   font-variant-numeric: tabular-nums;
+}
+
+.area-recording-summary {
+  gap: 12px;
+}
+
+.area-recording-pose-toggle {
+  width: 100%;
+}
+
+.area-recording-pose-toggle span {
+  overflow-wrap: anywhere;
+}
+
+.area-recording-mini-status {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.area-recording-mini-status div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.area-recording-mini-status span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.area-recording-mini-status strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--ink);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.area-recording-map-panel {
+  position: absolute;
+  right: 14px;
+  bottom: 94px;
+  left: 14px;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(170px, 240px) minmax(230px, 390px) minmax(230px, 340px);
+  gap: 10px;
+  align-items: stretch;
+  max-width: 990px;
+  pointer-events: none;
+}
+
+.route-map-panel {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(390px, calc(100% - 28px));
+  max-height: calc(100% - 28px);
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid rgba(217, 225, 234, 0.94);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 28px rgba(23, 32, 42, 0.18);
+}
+
+.route-panel-header,
+.route-file-row,
+.route-pose-controls,
+.route-mini-status {
+  display: flex;
+  align-items: center;
+}
+
+.route-panel-header {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.route-panel-header strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.1;
+  text-transform: capitalize;
+}
+
+.route-file-row {
+  gap: 8px;
+}
+
+.route-file-button {
+  position: relative;
+  cursor: pointer;
+}
+
+.route-file-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.route-layer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 12px;
+}
+
+.route-field {
+  display: grid;
+  gap: 6px;
+}
+
+.route-field span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.route-field select {
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.route-pose-controls {
+  gap: 8px;
+}
+
+.route-pose-controls input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.route-readout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.route-readout div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.route-readout span,
+.route-mini-status span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.route-readout strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.route-mini-status {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.area-recording-drive,
+.area-recording-actions {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(217, 225, 234, 0.92);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 8px 22px rgba(23, 32, 42, 0.16);
+  pointer-events: auto;
+}
+
+.area-recording-drive {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+}
+
+.area-recording-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.area-recording-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.area-recording-panel-header strong {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.1;
+  text-transform: capitalize;
+}
+
+.gamepad-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.gamepad-chip.is-connected {
+  color: var(--green);
+  border-color: rgba(20, 120, 77, 0.28);
+  background: #eef8f2;
+}
+
+.gamepad-chip.is-offline {
+  color: var(--amber);
+  border-color: rgba(160, 92, 0, 0.28);
+  background: #fff7e8;
+}
+
+.area-joystick-pad {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 146px;
+  height: 146px;
+  overflow: hidden;
+  border: 1px solid rgba(36, 89, 166, 0.22);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, rgba(36, 89, 166, 0.12) 0 18%, transparent 19%),
+    #f7f9fb;
+  touch-action: none;
+  user-select: none;
+}
+
+.area-joystick-pad.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.area-joystick-axis {
+  position: absolute;
+  background: rgba(92, 107, 122, 0.28);
+}
+
+.area-joystick-axis-x {
+  width: 72%;
+  height: 1px;
+}
+
+.area-joystick-axis-y {
+  width: 1px;
+  height: 72%;
+}
+
+.area-joystick-knob {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border: 2px solid rgba(23, 32, 42, 0.24);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(23, 32, 42, 0.18);
+}
+
+.blade-hold-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid rgba(160, 92, 0, 0.3);
+  border-radius: 6px;
+  color: var(--amber);
+  background: #fff7e8;
+  font-weight: 850;
+}
+
+.blade-hold-button.is-active {
+  color: #fff;
+  border-color: rgba(180, 35, 24, 0.36);
+  background: var(--red);
+  box-shadow: 0 8px 18px rgba(180, 35, 24, 0.2);
+}
+
+.blade-hold-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.area-action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.manual-path-raw-toggle {
+  border-radius: 6px;
+}
+
+.manual-path-mini-status strong {
+  font-size: 15px;
+}
+
+.manual-path-action-grid .command-button span {
+  overflow-wrap: anywhere;
+}
+
+.area-action-grid .command-button:last-child {
+  grid-column: 1 / -1;
+}
+
+.area-finish-modal .warning-modal-header svg {
+  color: var(--teal);
+}
+
+.area-finish-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .combined-status-strip strong {
@@ -1561,6 +2383,10 @@ button:focus-visible {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .area-recording-map-panel {
+    max-width: none;
+  }
+
   .slam-status-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1577,6 +2403,20 @@ button:focus-visible {
   .topbar-actions,
   .status-cluster {
     justify-content: stretch;
+  }
+
+  .bluetooth-control {
+    display: flex;
+    justify-content: center;
+  }
+
+  .bluetooth-popover {
+    position: fixed;
+    top: 78px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: calc(100vh - 96px);
   }
 
   .connection-pill,
@@ -1620,6 +2460,29 @@ button:focus-visible {
     position: static;
     grid-template-columns: 1fr;
     margin: 10px;
+  }
+
+  .area-recording-map-panel {
+    position: static;
+    grid-template-columns: 1fr;
+    margin: 10px;
+  }
+
+  .route-map-panel {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin: 10px;
+  }
+
+  .route-layer-grid,
+  .route-readout {
+    grid-template-columns: 1fr;
+  }
+
+  .area-action-grid,
+  .area-finish-actions {
+    grid-template-columns: 1fr;
   }
 
   .map-marker-legend {

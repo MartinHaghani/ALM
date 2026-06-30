@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, Map as MapIcon, Pause, Play, Radar, RefreshCw, RotateCcw, Wifi, WifiOff } from "lucide-react";
+import { Activity, AlertTriangle, Bluetooth, Gamepad2, Link2, Map as MapIcon, Pause, Play, Power, Radar, RefreshCw, RotateCcw, Route, Search, Trash2, Unlink, Wifi, WifiOff, X } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Ros } from "roslib";
 
@@ -7,19 +7,32 @@ import { ImuPanel } from "./ImuPanel";
 import { ScanCanvas } from "./ScanCanvas";
 import { getNextWebUiConfig, type NextWebUiConfig } from "./config";
 import { isImuSampleValid } from "./imuMath";
-import { callTriggerService } from "./rosServices";
-import type { Imu, ImuStats, LaserScan } from "./types";
+import { callBluetoothDeviceCommandService, callSetBoolService, callSetManualInputSourceService, callTriggerService } from "./rosServices";
+import type { BluetoothDevice, BluetoothGamepadStatus, Imu, ImuStats, LaserScan, ManualInputSource, MowerInputStatus } from "./types";
+import { useBluetoothGamepadStatus } from "./useBluetoothGamepadStatus";
 import { useImu } from "./useImu";
 import { useLaserScan } from "./useLaserScan";
+import { useMowerInputStatus } from "./useMowerInputStatus";
 import { usePassiveSlamOdomStatus } from "./usePassiveSlamOdomStatus";
 import { useRosBridge } from "./useRosBridge";
 
 const DEFAULT_IMU_TOPIC = "/hw/imu/data_raw";
 const IMU_STALE_MS = 1500;
 const PASSIVE_ODOM_STALE_MS = 2000;
+const GYRO_CALIBRATION_MAX_RAW_YAW_RATE_RAD_S = 0.05;
 
 type ImuStatus = "functioning" | "offline" | "waiting";
-type ViewMode = "map" | "sensors";
+type ViewMode = "map" | "route" | "sensors";
+
+const DEFAULT_CONTROLLER_PROFILES = ["xbox360", "switch_pro", "shield", "ps3", "steam_stick", "steam_touch"];
+const CONTROLLER_PROFILE_LABELS: Record<string, string> = {
+  ps3: "PS3",
+  shield: "Shield",
+  steam_stick: "Steam Stick",
+  steam_touch: "Steam Touch",
+  switch_pro: "Switch Pro",
+  xbox360: "Xbox 360",
+};
 
 interface SensorViewerProps {
   config: NextWebUiConfig;
@@ -28,6 +41,15 @@ interface SensorViewerProps {
   now: number;
   ros: Ros | null;
   url: string;
+}
+
+interface BluetoothControlPanelProps {
+  bluetoothStatus: BluetoothGamepadStatus | null;
+  config: NextWebUiConfig;
+  connected: boolean;
+  mowerInputStatus: MowerInputStatus | null;
+  onClose: () => void;
+  ros: Ros | null;
 }
 
 function formatNumber(value: number, digits = 1): string {
@@ -56,6 +78,21 @@ function formatYawRate(value: number | null | undefined): string {
     return "--";
   }
   return `${formatNumber((value * 180) / Math.PI, 1)} deg/s`;
+}
+
+function controllerProfileLabel(profile: string): string {
+  return CONTROLLER_PROFILE_LABELS[profile] ?? profile;
+}
+
+function formatRssi(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return "--";
+  }
+  return `${Math.round(value)} dBm`;
+}
+
+function deviceName(device: BluetoothDevice): string {
+  return device.alias || device.name || "Controller";
 }
 
 function finiteRanges(scan: LaserScan | null): number[] {
@@ -143,13 +180,54 @@ function SensorViewer({ config, connected, error, now, ros, url }: SensorViewerP
       return;
     }
 
+    const rawYawRate = imu?.angular_velocity?.z;
+    const imuIsFresh = imuStats.lastMessageAt !== null && now - imuStats.lastMessageAt <= IMU_STALE_MS;
+    if (
+      !imuIsFresh ||
+      rawYawRate === null ||
+      rawYawRate === undefined ||
+      !Number.isFinite(rawYawRate) ||
+      Math.abs(rawYawRate) > GYRO_CALIBRATION_MAX_RAW_YAW_RATE_RAD_S
+    ) {
+      setGyroCommandMessage(
+        `Raw gyro is not quiet enough to calibrate: ${formatYawRate(rawYawRate)}. Keep the mower still and try again.`,
+      );
+      return;
+    }
+
     setGyroCommandPending(true);
     setGyroCommandMessage(null);
     try {
-      const response = await callTriggerService(ros, config.passiveSlamGyroCalibrateService);
-      setGyroCommandMessage(response.message || "Gyro calibration started");
-      if (!response.success) {
-        throw new Error(response.message || "Gyro calibration failed");
+      const calibrations = [
+        { label: "Positioning", service: config.positioningGyroCalibrateService },
+        { label: "Passive SLAM", service: config.passiveSlamGyroCalibrateService },
+      ];
+      const results = await Promise.allSettled(
+        calibrations.map(async (calibration) => ({
+          ...calibration,
+          response: await callTriggerService(ros, calibration.service),
+        })),
+      );
+      const messages: string[] = [];
+      const failures: string[] = [];
+
+      results.forEach((result, index) => {
+        const label = calibrations[index].label;
+        if (result.status === "rejected") {
+          failures.push(`${label}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+          return;
+        }
+
+        const message = result.value.response.message || "calibration started";
+        messages.push(`${label}: ${message}`);
+        if (!result.value.response.success) {
+          failures.push(`${label}: ${message}`);
+        }
+      });
+
+      setGyroCommandMessage(messages.join(" | ") || "Gyro calibration started");
+      if (failures.length > 0) {
+        throw new Error(failures.join(" | "));
       }
     } catch (serviceError) {
       setGyroCommandMessage(serviceError instanceof Error ? serviceError.message : String(serviceError));
@@ -331,12 +409,248 @@ function SensorViewer({ config, connected, error, now, ros, url }: SensorViewerP
   );
 }
 
+function BluetoothControlPanel({
+  bluetoothStatus,
+  config,
+  connected,
+  mowerInputStatus,
+  onClose,
+  ros,
+}: BluetoothControlPanelProps) {
+  const [commandMessage, setCommandMessage] = useState<string | null>(null);
+  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [selectedProfile, setSelectedProfile] = useState(bluetoothStatus?.controller_type ?? "xbox360");
+
+  useEffect(() => {
+    if (bluetoothStatus?.controller_type) {
+      setSelectedProfile(bluetoothStatus.controller_type);
+    }
+  }, [bluetoothStatus?.controller_type]);
+
+  const adapter = bluetoothStatus?.adapter ?? null;
+  const devices = bluetoothStatus?.devices ?? [];
+  const activeSource = mowerInputStatus?.active_source ?? "web_gamepad";
+  const profileOptions = bluetoothStatus?.supported_profiles?.length
+    ? bluetoothStatus.supported_profiles
+    : DEFAULT_CONTROLLER_PROFILES;
+  const canUseServices = Boolean(ros && connected);
+  const directInputLive = Boolean(mowerInputStatus?.direct_connected);
+
+  async function runCommand(key: string, command: () => Promise<{ message: string; success: boolean }>): Promise<void> {
+    if (!canUseServices) {
+      setCommandMessage("ROS offline");
+      return;
+    }
+
+    setPendingKey(key);
+    setCommandMessage(null);
+    try {
+      const response = await command();
+      setCommandMessage(response.message || "Done");
+      if (!response.success) {
+        throw new Error(response.message || "Command failed");
+      }
+    } catch (serviceError) {
+      setCommandMessage(serviceError instanceof Error ? serviceError.message : String(serviceError));
+    } finally {
+      setPendingKey(null);
+    }
+  }
+
+  function setPowered(powered: boolean): void {
+    void runCommand("power", () => callSetBoolService(ros as Ros, config.bluetoothPowerService, powered));
+  }
+
+  function setScanning(scanning: boolean): void {
+    void runCommand("scan", () => callSetBoolService(ros as Ros, config.bluetoothScanService, scanning));
+  }
+
+  function setManualInputSource(source: ManualInputSource): void {
+    void runCommand(`source-${source}`, () => callSetManualInputSourceService(ros as Ros, config.manualInputSetSourceService, source));
+  }
+
+  function runDeviceCommand(key: string, serviceName: string, device: BluetoothDevice): void {
+    void runCommand(`${key}-${device.address}`, () =>
+      callBluetoothDeviceCommandService(ros as Ros, serviceName, device.address, selectedProfile),
+    );
+  }
+
+  return (
+    <div className="bluetooth-popover" role="dialog" aria-label="Bluetooth controller">
+      <div className="bluetooth-panel-header">
+        <div>
+          <span className="eyebrow">Controller</span>
+          <h2>Bluetooth</h2>
+        </div>
+        <button className="icon-button" type="button" aria-label="Close Bluetooth panel" onClick={onClose}>
+          <X size={18} aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="bluetooth-adapter-row">
+        <span className={`status-badge ${bluetoothStatus?.available ? "is-green" : "is-amber"}`}>
+          {bluetoothStatus?.available ? "Adapter" : "Offline"}
+        </span>
+        <span className={`status-badge ${adapter?.powered ? "is-green" : "is-muted"}`}>
+          {adapter?.powered ? "Powered" : "Off"}
+        </span>
+        <span className={`status-badge ${adapter?.discovering ? "is-blue" : "is-muted"}`}>
+          {adapter?.discovering ? "Scanning" : "Idle"}
+        </span>
+        <span className={`status-badge ${bluetoothStatus?.agent_available ? "is-green" : "is-muted"}`}>
+          Agent
+        </span>
+      </div>
+
+      <div className="input-source-switch" aria-label="Manual input source">
+        <button
+          className={activeSource === "web_gamepad" ? "is-active" : ""}
+          disabled={!canUseServices || pendingKey !== null}
+          type="button"
+          onClick={() => setManualInputSource("web_gamepad")}
+        >
+          Web Gamepad
+        </button>
+        <button
+          className={activeSource === "direct_bluetooth" ? "is-active" : ""}
+          disabled={!canUseServices || pendingKey !== null}
+          type="button"
+          onClick={() => setManualInputSource("direct_bluetooth")}
+        >
+          Direct Bluetooth
+        </button>
+      </div>
+
+      <label className="bluetooth-profile-field" htmlFor="controller-profile">
+        <span>Profile</span>
+        <select
+          id="controller-profile"
+          value={selectedProfile}
+          onChange={(event) => setSelectedProfile(event.target.value)}
+        >
+          {profileOptions.map((profile) => (
+            <option key={profile} value={profile}>
+              {controllerProfileLabel(profile)}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div className="bluetooth-command-row">
+        <button
+          className="command-button"
+          disabled={!canUseServices || pendingKey !== null}
+          type="button"
+          onClick={() => setPowered(!adapter?.powered)}
+        >
+          <Power size={17} aria-hidden="true" />
+          <span>{adapter?.powered ? "Power off" : "Power on"}</span>
+        </button>
+        <button
+          className="command-button"
+          disabled={!canUseServices || pendingKey !== null}
+          type="button"
+          onClick={() => setScanning(!adapter?.discovering)}
+        >
+          <Search size={17} aria-hidden="true" />
+          <span>{adapter?.discovering ? "Stop scan" : "Scan"}</span>
+        </button>
+      </div>
+
+      {(commandMessage || bluetoothStatus?.message) && (
+        <div className="bluetooth-message">{commandMessage || bluetoothStatus?.message}</div>
+      )}
+
+      <div className="bluetooth-device-list">
+        {devices.length === 0 ? (
+          <div className="bluetooth-empty">No devices</div>
+        ) : (
+          devices.map((device) => {
+            const inputLive = directInputLive && device.connected && device.services_resolved;
+
+            return (
+              <article className="bluetooth-device-card" key={device.address}>
+                <div className="bluetooth-device-main">
+                  <div>
+                    <strong>{deviceName(device)}</strong>
+                    <span>{device.address}</span>
+                  </div>
+                  <div className="bluetooth-rssi">{formatRssi(device.rssi)}</div>
+                </div>
+                <div className="bluetooth-badge-row">
+                  {inputLive && <span className="status-badge is-green">Input live</span>}
+                  {device.connected && !inputLive && (
+                    <span className={`status-badge ${device.services_resolved ? "is-blue" : "is-amber"}`}>
+                      {device.services_resolved ? "Link ready" : "Link only"}
+                    </span>
+                  )}
+                  {device.paired && <span className="status-badge is-blue">Paired</span>}
+                  {device.trusted && <span className="status-badge is-muted">Trusted</span>}
+                </div>
+                <div className="bluetooth-device-actions">
+                  <button
+                    className="icon-button"
+                    disabled={!canUseServices || pendingKey !== null || device.paired}
+                    title="Pair"
+                    type="button"
+                    onClick={() => runDeviceCommand("pair", config.bluetoothPairService, device)}
+                  >
+                    <Gamepad2 size={17} aria-hidden="true" />
+                  </button>
+                  <button
+                    className="icon-button"
+                    disabled={!canUseServices || pendingKey !== null || !device.paired || device.connected}
+                    title="Connect"
+                    type="button"
+                    onClick={() => runDeviceCommand("connect", config.bluetoothConnectService, device)}
+                  >
+                    <Link2 size={17} aria-hidden="true" />
+                  </button>
+                  <button
+                    className="icon-button"
+                    disabled={!canUseServices || pendingKey !== null || !device.connected}
+                    title="Disconnect"
+                    type="button"
+                    onClick={() => runDeviceCommand("disconnect", config.bluetoothDisconnectService, device)}
+                  >
+                    <Unlink size={17} aria-hidden="true" />
+                  </button>
+                  <button
+                    className="icon-button is-danger"
+                    disabled={!canUseServices || pendingKey !== null}
+                    title="Forget"
+                    type="button"
+                    onClick={() => runDeviceCommand("forget", config.bluetoothForgetService, device)}
+                  >
+                    <Trash2 size={17} aria-hidden="true" />
+                  </button>
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>("map");
+  const [bluetoothOpen, setBluetoothOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const config = useMemo(getNextWebUiConfig, []);
 
   const { connected, error, ros, url } = useRosBridge();
+  const { status: bluetoothStatus } = useBluetoothGamepadStatus({
+    ros,
+    topicName: config.bluetoothStatusTopic,
+  });
+  const { status: mowerInputStatus } = useMowerInputStatus({
+    ros,
+    topicName: config.manualInputStatusTopic,
+  });
+  const bluetoothInputLive = Boolean(mowerInputStatus?.direct_connected);
+  const bluetoothReady = Boolean(bluetoothStatus?.available && bluetoothStatus?.adapter?.powered);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
@@ -361,6 +675,14 @@ export default function App() {
               <span>Map</span>
             </button>
             <button
+              className={viewMode === "route" ? "is-active" : ""}
+              type="button"
+              onClick={() => setViewMode("route")}
+            >
+              <Route size={17} aria-hidden="true" />
+              <span>Route</span>
+            </button>
+            <button
               className={viewMode === "sensors" ? "is-active" : ""}
               type="button"
               onClick={() => setViewMode("sensors")}
@@ -368,6 +690,28 @@ export default function App() {
               <Activity size={17} aria-hidden="true" />
               <span>Sensors</span>
             </button>
+          </div>
+          <div className="bluetooth-control">
+            <button
+              className={`bluetooth-header-button ${bluetoothInputLive ? "is-connected" : bluetoothReady ? "is-ready" : "is-offline"}`}
+              title="Bluetooth controller"
+              type="button"
+              aria-label="Bluetooth controller"
+              onClick={() => setBluetoothOpen((current) => !current)}
+            >
+              <Bluetooth size={19} aria-hidden="true" />
+              <span className="bluetooth-header-dot" aria-hidden="true" />
+            </button>
+            {bluetoothOpen && (
+              <BluetoothControlPanel
+                bluetoothStatus={bluetoothStatus}
+                config={config}
+                connected={connected}
+                mowerInputStatus={mowerInputStatus}
+                onClose={() => setBluetoothOpen(false)}
+                ros={ros}
+              />
+            )}
           </div>
           <div className={`connection-pill ${connected ? "is-connected" : "is-offline"}`}>
             {connected ? <Wifi size={18} aria-hidden="true" /> : <WifiOff size={18} aria-hidden="true" />}
@@ -377,7 +721,27 @@ export default function App() {
       </header>
 
       {viewMode === "map" && (
-        <CombinedMapView config={config} connected={connected} error={error} now={now} ros={ros} url={url} />
+        <CombinedMapView
+          config={config}
+          connected={connected}
+          error={error}
+          mowerInputStatus={mowerInputStatus}
+          now={now}
+          ros={ros}
+          url={url}
+        />
+      )}
+      {viewMode === "route" && (
+        <CombinedMapView
+          config={config}
+          connected={connected}
+          error={error}
+          mowerInputStatus={mowerInputStatus}
+          now={now}
+          routeMode
+          ros={ros}
+          url={url}
+        />
       )}
       {viewMode === "sensors" && (
         <SensorViewer config={config} connected={connected} error={error} now={now} ros={ros} url={url} />
