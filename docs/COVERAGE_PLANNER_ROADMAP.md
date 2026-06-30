@@ -7,6 +7,7 @@ This roadmap is shared between agents and humans. **Update the status table when
 Related context:
 
 - [COVERAGE_PLANNER_LAB.md](COVERAGE_PLANNER_LAB.md): current lab design, defaults, runtime semantics, and known gaps.
+- [COVERAGE_PLANNER_V2_DESIGN.md](COVERAGE_PLANNER_V2_DESIGN.md): fresh mower-first planner design that keeps this roadmap's planner as a baseline while V2 develops.
 - [tools/coverage_lab/README.md](../tools/coverage_lab/README.md): lab CLI usage.
 - [tools/coverage_lab/AGENTS.md](../tools/coverage_lab/AGENTS.md): lab guardrails for agents.
 - [src/lib/slic3r_coverage_planner/](../src/lib/slic3r_coverage_planner/): the slicer planner still wired into `mower_logic` at runtime. The lab does not yet replace it.
@@ -32,7 +33,7 @@ Listed in **execution order** (top = do next). IDs are stable per the "do not re
 | – | P0 | Footprint-aware headland | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
 | – | P1 | Obstacle-aware swath bridging | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
 | – | P11 | BCD critical-vertex decomposition (split at concave outer-boundary vertices, not just hole x-extents) | landed | – | 91c4f92 |
-| – | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot, skip-stripe ordering) | landed | – | 315cf02 |
+| – | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot; skip-stripe ordering remains) | landed except skip-stripe follow-up | – | 315cf02 |
 | – | P12 | Robust dominant-direction stripe angle (replace F2C's `best_swath_length` with a weighted edge-angle histogram so noisy real-world outlines pick the visually-dominant axis, not the longest single segment) | landed | – | 9ca521f |
 | – | P13 | Per-cell stripe angle for tight cells (cells whose short axis < ~2× tool_width along the global angle should rotate stripes to align with the cell's long axis, eliminating impossible U-turns in narrow slivers like obstacle_off_center paths 10–17) | landed | – | 9ca521f |
 | – | P10 | Always-connected base-link path (eliminate teleports between paths) | landed | – | 310f63e |
@@ -320,15 +321,19 @@ This breaks visual stripe-direction continuity across the rotated cell, but the 
 
 ## P3 — Stripe-to-stripe turn diversity
 
-**Problem.** The only viable maneuver is the wheel-anchor turn. Forward U-turn fallback rarely succeeds because `2 * min_turning_radius` typically exceeds stripe spacing. When wheel-anchor fails, no fallback works and the path is split. Real robot mowers visibly use omega turns and three-point Y-turns; neither is implemented.
+**Status.** Mostly landed in `315cf02`: wheel-anchor remains primary, with forward U-turn, omega/keyhole, and three-point-Y fallbacks. The remaining unimplemented part is skip-stripe ordering, which should reduce split stripes that no local adjacent-stripe turn can solve.
 
-**Solution sketch.** Maneuver library: wheel-anchor (existing), three-point Y-turn, omega/keyhole turn, in-place pivot at stripe end, skip-stripe ordering combined with omega. Each maneuver returns `(cost, min_clearance, time, reverse_distance, cutter_overlap)`; selector picks the lowest-cost footprint-safe option, with reverse heavily penalized. Skip-stripe + omega becomes the lawnmower-aesthetic default.
+**Remaining solution sketch.** Add skip-stripe ordering combined with omega/keyhole turns. Each maneuver should expose `(cost, min_clearance, time, reverse_distance, cutter_overlap)` so the selector can pick the lowest-cost footprint-safe option, with reverse heavily penalized. Skip-stripe + omega is still the likely lawnmower-aesthetic default.
 
 ---
 
 ## P4 — FTC-aware execution contract
 
 **Problem.** The mower-facing `PlanPath` shape is a flat `nav_msgs/Path`. `FTCPlanner` is a follow-the-carrot controller that skips duplicate-position poses, has no reverse, no blade modulation, no notion of "this segment is transit, not coverage." Wheel-anchor turns produced by the lab cannot execute on the real mower.
+
+**V2 bridge note (2026-06-19).** `classify-v2` now writes a lossy `planpath_compat.json` from V2 task paths. The bridge defaults to forward, blade-on `base_link` segments only and reports skipped reverse, rotate, or blade-off segments in `v2_planpath_compat_summary.json` plus `v2_metrics.json.planpath_compat`. This lets V2 become the source planner for simple-map tests while P4 remains the real maneuver-aware mower contract.
+
+**Outline export note (2026-06-21).** V2 outline paths now smooth the sampled outline tangent/yaw before converting cutter-center samples to Mowrator `base_link` poses. The old per-chord yaw export could make an otherwise smooth inset outline appear as 0.3-0.5 m rear-center spikes in `planpath_compat.json`.
 
 **Solution sketch.** Define a maneuver-aware planner message: `Path { segments[] { kind, blade_state, direction, poses[], maneuver_metadata } }` with `kind ∈ {STRIPE, HEADLAND, TRANSIT, PIVOT, REVERSE}`. v1 ships option C from the analysis: never emit pivot/reverse segments in the live planner; the lab plans them; the live mower only consumes FTC-trackable maneuvers (omega, three-point Y-turn, all-forward). v1.1 evaluates extending FTCPlanner or replacing it with MPC.
 
@@ -344,17 +349,17 @@ This breaks visual stripe-direction continuity across the rotated cell, but the 
 
 ## P6 — Multi-lawn navigation and dock integration
 
-**Problem.** Each lawn is planned in isolation. `nav` polygons are parsed but unused. Docking stations are in the map but ignored.
+**Status.** Dropped. Multi-lawn properties are now treated as separate maps/plans, and `cross_lawn_connectors_enabled` defaults to `false`. Dock integration is also no longer a planner priority because docking is being removed from the runtime.
 
-**Solution sketch.** Plan inter-lawn transit through `nav` polygons (visibility graph or A* on a navmesh). Lawn ordering as TSP weighted by transit cost. Dock entry/exit as fixed maneuvers from `docking_stations[]`. Output one executable path with explicit `kind: TRANSIT` segments.
+**Revival note.** If a future workflow needs one plan spanning multiple lawns, revive this priority with nav-polygon routing and explicit transit semantics instead of re-enabling straight cross-lawn connectors.
 
 ---
 
 ## P7 — Slope and soft-zone awareness
 
-**Problem.** No slope awareness in the coverage planner. Slope reliability work exists on a separate branch but is not integrated.
+**Status.** Deferred until the flat-geometry planner is stable and coverage quality is no longer the limiting factor.
 
-**Solution sketch.** Per-area slope vector annotation in map JSON. Prefer stripe direction perpendicular to steepest descent. Constrain reverse direction relative to slope. Treat `obstacle:soft` typed polygons as no-go. Merge with slope-reliability branch when it lands.
+**Future sketch.** Per-area slope vector annotation in map JSON; prefer stripe direction perpendicular to steepest descent; constrain reverse direction relative to slope; treat `obstacle:soft` typed polygons as no-go.
 
 ---
 

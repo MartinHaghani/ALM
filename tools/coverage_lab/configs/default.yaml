@@ -24,6 +24,39 @@ tight_cell_stripe_threshold_factor: 2.0
 outline_count: 1
 outline_clearance_m: auto
 outline_offset: 0.0
+v2_outline_enabled: true
+# footprint_side_fit emits executable base_link poses whose right footprint side
+# tracks the conditioned boundary as closely as the configured footprint
+# clearance and sampled turn geometry allow. footprint_elastic_band and
+# footprint_cspace_shell are experimental whole-loop trajectory modes for
+# comparing smoother footprint-aware outlines. footprint_disk/right_edge_fit are
+# retained for legacy comparison.
+v2_outline_generation_mode: footprint_side_fit
+# Used only by footprint_disk/right_edge_fit. auto = v2_drivable_boundary_clearance_m
+# + half the safety mower width for the legacy centerline-style outline.
+v2_outline_clearance_m: auto
+# Used by footprint_side_fit. auto = v2_outline_footprint_clearance_m, falling
+# back to safety_margin_m, so set v2_outline_footprint_clearance_m: 0.0 for a
+# no-extra-clearance diagnostic run against a trusted boundary.
+v2_outline_right_footprint_clearance_m: auto
+v2_outline_sample_step_m: 0.10
+# Used by footprint_disk/right_edge_fit. auto = max(4x outline sample spacing,
+# 2x tool-center offset). footprint_side_fit owns yaw directly in base_link.
+v2_outline_yaw_window_m: auto
+v2_outline_trajectory_yaw_window_m: 0.80
+v2_outline_trajectory_iterations: 35
+v2_outline_trajectory_anchor_weight: 1.0
+v2_outline_trajectory_smooth_weight: 0.45
+v2_outline_trajectory_projection_step_m: 0.025
+v2_outline_trajectory_projection_max_extra_m: 0.60
+v2_outline_trajectory_max_yaw_step_deg: 6.0
+v2_outline_cspace_yaw_sweep_deg: 35.0
+v2_outline_cspace_yaw_step_deg: 5.0
+v2_outline_cspace_offset_step_m: 0.025
+v2_outline_cspace_max_extra_m: 0.60
+v2_outline_cutting_enabled: true
+v2_outline_start_selector_enabled: true
+v2_outline_start_straight_angle_tolerance_deg: 8
 drive_model: zero_turn
 pivot_yaw_step_degrees: 10
 wheel_track_m: 0.58
@@ -63,6 +96,88 @@ turn_lattice_pivot_cost_m_per_rad: 0.18
 turn_lattice_reverse_penalty: 0.10
 turn_lattice_switch_penalty_m: 0.04
 safety_margin_m: 0.05
+# V2 geometry classifier only: the main mowable/drivable interior is the
+# conditioned lawn inset by this operator clearance. This is intentionally
+# separate from the old planner's footprint-disk erosion and from
+# safety_margin_m.
+v2_drivable_boundary_clearance_m: 0.40
+v2_width_sample_step_m: 0.20
+v2_body_width_factor: 2.5
+v2_neck_widening_ratio: 1.5
+v2_neck_min_area_m2: 1.0
+v2_task_min_branch_length_m: 0.80
+v2_task_corridor_aspect_ratio: 2.5
+v2_task_notch_max_area_m2: 1.5
+v2_task_notch_max_depth_m: 1.5
+v2_task_artifact_max_area_m2: 0.25
+v2_task_portal_body_width_ratio: 1.35
+v2_task_dead_end_min_depth_m: 1.8
+v2_task_dead_end_min_area_m2: 1.0
+v2_task_region_merge_overlap_ratio: 0.45
+v2_task_portal_cut_buffer_m: 0.03
+v2_task_portal_search_enabled: true
+v2_task_portal_search_m: 0.80
+v2_task_portal_search_step_m: 0.10
+v2_task_pocket_min_visible_area_m2: 0.25
+v2_task_false_notch_suppression_enabled: true
+v2_task_false_notch_max_area_m2: 0.60
+v2_task_false_notch_max_area_ratio: 0.03
+v2_task_false_notch_max_depth_m: 1.60
+v2_task_false_notch_min_portal_width_depth_ratio: 0.85
+v2_task_path_enabled: false
+v2_task_path_spacing_factor: 0.90
+v2_task_path_min_pass_length_m: 0.35
+v2_task_path_body_min_pass_length_m: 2.00
+v2_task_path_sample_step_m: 0.10
+# V2 BODY-only adjacent-stripe connector prototype. Temporary straight mode is
+# for mower-consumption tests: blade-off connector metadata exists in V2, but
+# the old PlanPath compatibility bridge cannot carry blade state to mower_logic.
+v2_task_path_compact_connectors_enabled: true
+v2_task_path_adjacent_connector_style: straight
+v2_task_path_compact_connector_max_distance_m: 1.50
+v2_task_path_straight_connector_max_distance_m: 10.00
+v2_task_path_straight_connector_min_heading_delta_deg: 0
+v2_task_path_connector_unsafe_policy: include
+v2_task_path_compact_connector_min_heading_delta_deg: 120
+v2_task_path_compact_connector_extra_forward_m: 0.35
+v2_task_path_compact_connector_max_forward_extension_m: 0.65
+v2_task_path_compact_connector_turn_radius_m: 0.60
+v2_task_path_compact_connector_sample_step_m: 0.10
+v2_task_path_stripe_boundary_clearance_factor: 1.0
+v2_task_path_body_pocket_enabled: true
+v2_task_path_body_pocket_outline_band_m: 0.50
+v2_task_path_body_pocket_min_area_m2: 0.50
+v2_task_path_body_pocket_min_width_factor: 0.60
+v2_task_path_body_pocket_max_strokes: 4
+v2_task_path_reverse_out_enabled: true
+v2_task_path_reverse_cutting_enabled: false
+v2_task_path_terminal_angle_tolerance_deg: 35
+v2_task_path_side_lane_min_length_factor: 0.55
+v2_task_path_notch_max_strokes: 3
+v2_task_path_service_axis_ray_pad_m: 0.50
+v2_task_path_axis_candidate_scoring_enabled: true
+v2_task_path_axis_candidate_sweep_degrees: 25
+v2_task_path_axis_candidate_step_degrees: 12.5
+v2_task_path_axis_candidate_max_count: 24
+v2_task_annotation_cut_buffer_m: 0.03
+v2_task_ownership_enabled: true
+v2_task_ownership_portal_band_m: 0.90
+v2_task_ownership_short_body_pass_m: 1.20
+v2_task_ownership_axis_alignment_deg: 35
+v2_task_path_dead_end_turnaround_enabled: true
+v2_task_path_turnaround_yaw_step_deg: 10
+v2_task_path_turnaround_clearance_m: 0.05
+v2_task_path_turnaround_terminal_band_m: 0.80
+v2_planpath_compat_enabled: true
+# Lossy bridge for the current mower-facing PlanPath-like shape. The temporary
+# single-infill mode flattens each task into one base_link path so mower
+# consumption can be tested without stopping between stripes.
+v2_planpath_compat_mode: single_infill_path
+v2_planpath_compat_profile: v2_task_paths_single_infill_test_compat
+v2_planpath_compat_min_pose_count: 2
+v2_annotation_qa_min_operator_overlap: 0.25
+v2_annotation_qa_good_overlap: 0.65
+v2_annotation_qa_max_portal_distance_m: 0.80
 
 footprint:
   - [0.0, 0.34]

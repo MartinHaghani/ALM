@@ -52,5 +52,10 @@ RUN git clone --depth 1 --branch "${FIELDS2COVER_REF}" https://github.com/Fields
 RUN pip3 install --no-cache-dir "shapely>=2.0,<3" \
   && python3 -c "import shapely; print('shapely', shapely.__version__)"
 
+# Pillow powers the lawn_preview.png output in render_run() -- raster
+# compositing of cutting disk + footprint + wheel tracks in pose order.
+RUN pip3 install --no-cache-dir "Pillow>=10,<12" \
+  && python3 -c "import PIL; print('Pillow', PIL.__version__)"
+
 WORKDIR /workspace
 ENTRYPOINT ["python3", "/workspace/tools/coverage_lab/coverage_lab.py"]

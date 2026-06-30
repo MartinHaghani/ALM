@@ -13,14 +13,16 @@ Before starting any planner work, read [docs/COVERAGE_PLANNER_ROADMAP.md](../../
 
 ## Current implementation state
 
-- `coverage_lab.py` is the main laptop-only CLI. It supports `validate-map`, `plan`, `render`, `batch`, and `convert-kml`.
+- `coverage_lab.py` is the main laptop-only CLI. It supports `validate-map`, `classify-v2`, `plan`, `render`, `batch`, and `convert-kml`.
 - `lab_geometry.py` is the shapely-backed geometry helper used by P0/P1: footprint-disk Minkowski erosion of the lawn, Boustrophedon Cellular Decomposition aligned to the stripe angle, and ring-walk transit stitching. Doctest-tested on host and in the lab image.
 - `bin/coverage_lab` is the Docker-aware wrapper. Prefer using the wrapper for planning because Fields2Cover is installed inside the lab image.
 - `configs/default.yaml` is the effective Mowrator planning model for the lab: `tool_width: 0.4`, `tool_center_offset: [0.41, 0.0]`, footprint `[[0.0, 0.34], [0.82, 0.34], [0.82, -0.34], [0.0, -0.34]]`, `headland_strategy: footprint_disk` (P0), `cell_decomposition: true` (P1), one outline/headland pass, automatic footprint-derived outline clearance, `wheel_track_m: 0.58`, `wheel_contact_x_m: 0.0`, wheel-anchored turn planner with lab-only reverse metadata, zero-turn primary profile, and `f2c_tiny_radius` comparison profile.
-- `metrics.json` carries new top-level sections produced by P0/P1: `headland.{strategy, eroded_polygon_area_m2, mainland_polygon_area_m2, unsafe_footprint_samples}`, `cells.{count, areas_m2}`, and `transit.{count, total_length_m}`. The post-P0/P1 baseline numbers for each tracked example are recorded in [docs/COVERAGE_PLANNER_ROADMAP.md](../../docs/COVERAGE_PLANNER_ROADMAP.md).
-- The primary profile is `mowrator_zero_turn`: Fields2Cover produces headlands, swaths, and swath order; lab code converts tool-center poses to `base_link` poses and inserts footprint-checked wheel-anchor maneuvers that land exactly on the next swath start when safe. If no safe turn or configured safe fallback exists, the fill path is split so the preview shows the unplanned segment gap.
+- `metrics.json` carries planner-anatomy sections produced by the landed roadmap work: `swath_length`, `headland.{strategy, eroded_polygon_area_m2, mainland_polygon_area_m2, unsafe_footprint_samples}`, `cells.{count, areas_m2}`, `transit.{count,total_length_m}`, `inter_cell.direct_turn_count`, `path_splits.within_cell_path_splits`, `per_cell_angle`, `fill_bridges`, and `cross_lawn_transit_count`. Baseline numbers live in [docs/COVERAGE_PLANNER_ROADMAP.md](../../docs/COVERAGE_PLANNER_ROADMAP.md).
+- The primary profile is `mowrator_zero_turn`: Fields2Cover generates swaths inside the lab's eroded/cell-decomposed geometry; lab code converts tool-center poses to `base_link` poses, optimizes cell visit order, inserts footprint-checked wheel-anchor or fallback maneuvers, and uses explicit transits/fill bridges when safe. If no safe turn or configured safe fallback exists, the fill path is split so the preview shows the unplanned segment gap.
 - The comparison profile is `f2c_tiny_radius`: the same F2C swaths/order are passed through Fields2Cover's built-in path planner with `min_turning_radius: 0.10`.
 - `plan.html` embeds `simulation_preview.json` and works from a local file without a server. It has a slicer-style timeline slider, dimensionally accurate mower footprint, wheel-track and turn-anchor overlays, unsafe-pose coloring, previous/next unsafe buttons, layer toggles, and pan/zoom/rotate view controls.
+- `lawn_preview.png` is generated beside `plan.html` by `render_run()`. It uses Pillow to rasterize the exact `simulation_preview.json` timeline into a grass-finish preview, so keep the lab Docker image's Pillow dependency aligned with that renderer.
+- `classify-v2` is the lab-only V2 geometry/path prototype. It writes `v2_geometry_report.html`, `v2_geometry.svg`, `v2_geometry.json`, `v2_task_paths.json`, `v2_metrics.json`, and a lossy `planpath_compat.json` bridge. The bridge exports only old-shape `base_link` poses for eligible V2 segments and does not imply live mower execution.
 
 ## Mower runtime assumptions to preserve
 
@@ -34,6 +36,6 @@ Before starting any planner work, read [docs/COVERAGE_PLANNER_ROADMAP.md](../../
 
 ## Known planner gaps
 
-- The lab is currently useful for finding problems, not for producing mower-ready plans. Complex real Google Earth maps have shown unsafe footprint samples, stripes/turns that cross obstacles or leave mow areas, and turn gaps where the configured wheel geometry cannot produce a safe maneuver.
+- The lab is currently useful for finding problems, not for producing mower-ready plans. The current known gaps are mostly quality/contract gaps: conservative edge-band undercoverage, remaining split stripes that need skip-stripe ordering, long but explicit transits, and no live maneuver-aware contract.
 - Fields2Cover should remain useful for headland and swath generation, but mower-specific logic likely needs to own swath clipping/validation, segment boundaries, stripe-to-stripe turns, and controller-aware execution.
 - Do not "fix" unsafe output by relaxing safety checks. Make the report show the issue clearly, add a small tracked sample if possible, then adjust planning logic or evaluation deliberately.

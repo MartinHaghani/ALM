@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 import lab_geometry
+import v2_annotation_qa
+import v2_geometry
+import v2_planpath_compat
+import v2_task_annotations
+import v2_task_paths
 
 
 LAB_DIR = pathlib.Path(__file__).resolve().parent
@@ -4370,6 +4375,110 @@ def plan_map(args: argparse.Namespace) -> pathlib.Path:
     return run_dir
 
 
+def make_v2_run_dir(map_path: pathlib.Path, output: pathlib.Path | None) -> pathlib.Path:
+    if output:
+        return output
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    return DEFAULT_RUNS_DIR / f"{stamp}-{map_path.stem}-v2-classify"
+
+
+def _v2_baseline_for_map(map_path: pathlib.Path) -> dict[str, Any] | None:
+    try:
+        rel = map_path.resolve().relative_to(REPO_DIR)
+    except ValueError:
+        return None
+    if str(rel) != "tools/coverage_lab/data/maps/current/map.json":
+        return None
+    return {
+        "coverage_percent": 61.12425212188674,
+        "cells": 13,
+        "connector_length_m": 122.78850445043075,
+    }
+
+
+def cmd_classify_v2(args: argparse.Namespace) -> None:
+    map_path = pathlib.Path(args.map).resolve()
+    config = load_config(pathlib.Path(args.config).resolve())
+    task_annotations = None
+    if args.task_annotations:
+        task_annotations = read_json(pathlib.Path(args.task_annotations).resolve())
+    try:
+        options = v2_geometry.make_options(
+            config,
+            conditioning_profile=args.conditioning_profile,
+            simplify_tolerance_m=args.simplify_tolerance_m,
+            min_zone_area_m2=args.min_zone_area_m2,
+            corridor_width_factor=args.corridor_width_factor,
+            drivable_boundary_clearance_m=args.drivable_boundary_clearance_m,
+        )
+    except ValueError as exc:
+        die(str(exc))
+
+    model = parse_map(map_path, repair_rings=args.repair_rings)
+    selected = range(len(model.lawns)) if args.area_index is None else [args.area_index]
+    areas: list[dict[str, Any]] = []
+    for area_index in selected:
+        if area_index < 0 or area_index >= len(model.lawns):
+            die(f"area index out of range: {area_index}")
+        lawn = model.lawns[area_index]
+        holes = [
+            {
+                "id": hole.id,
+                "name": hole.name,
+                "outline": hole.outline,
+            }
+            for hole in lawn.holes
+        ]
+        areas.append(
+            v2_geometry.classify_lawn(
+                area_index=area_index,
+                source_id=lawn.area.id,
+                source_name=lawn.area.name,
+                outline=lawn.area.outline,
+                holes=holes,
+                config=config,
+                options=options,
+            )
+        )
+
+    result = v2_geometry.build_result(
+        map_path=map_path,
+        frame_id=str(config.get("frame_id", "map")),
+        config=config,
+        options=options,
+        areas=areas,
+    )
+    automatic_result = copy.deepcopy(result)
+    if task_annotations is not None:
+        result = v2_task_annotations.apply_task_annotations(result, task_annotations, config)
+        result = v2_annotation_qa.apply_annotation_qa(result, automatic_result, config)
+    task_path_result = v2_task_paths.apply_task_paths(result, config)
+    planpath_compat, planpath_compat_summary = v2_planpath_compat.build_planpath_compat(
+        result=result,
+        task_path_result=task_path_result,
+        config=config,
+    )
+    metrics = v2_geometry.build_metrics(result, baseline_current_planner=_v2_baseline_for_map(map_path))
+    metrics["planpath_compat"] = planpath_compat_summary
+
+    run_dir = make_v2_run_dir(map_path, pathlib.Path(args.output).resolve() if args.output else None)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(map_path, run_dir / "source_map_snapshot.json")
+    write_json(run_dir / "config_snapshot.json", config)
+    write_json(run_dir / "v2_geometry.json", result)
+    if result.get("annotation_qa"):
+        write_json(run_dir / "v2_annotation_qa.json", result["annotation_qa"])
+    write_json(run_dir / "v2_task_paths.json", task_path_result)
+    write_json(run_dir / "planpath_compat.json", planpath_compat)
+    write_json(run_dir / "v2_planpath_compat_summary.json", planpath_compat_summary)
+    write_json(run_dir / "v2_metrics.json", metrics)
+    (run_dir / "v2_geometry.svg").write_text(v2_geometry.render_svg(result), encoding="utf-8")
+    (run_dir / "v2_geometry_report.html").write_text(v2_geometry.render_html(result, metrics), encoding="utf-8")
+
+    print(f"Wrote coverage lab V2 geometry run: {run_dir}")
+    print(f"Display report: {run_dir / 'v2_geometry_report.html'}")
+
+
 def svg_polyline(points: list[tuple[float, float]], tx: Any, **attrs: str) -> str:
     attr_text = " ".join(f'{key.replace("_", "-")}="{html.escape(str(value))}"' for key, value in attrs.items())
     coords = " ".join(f"{tx(x, y)[0]:.2f},{tx(x, y)[1]:.2f}" for x, y in points)
@@ -4717,6 +4826,190 @@ def split_pose_runs(poses: list[dict[str, Any]], predicate: Any) -> list[list[tu
     return runs
 
 
+LAWN_PREVIEW_RESOLUTION_M_PER_PX = 0.005
+LAWN_PREVIEW_POSE_STEP_M = 0.02
+LAWN_PREVIEW_MAX_PX = 8000
+LAWN_PREVIEW_DEFAULT_WHEEL_LENGTH_M = 0.10
+LAWN_PREVIEW_DEFAULT_WHEEL_WIDTH_M = 0.05
+LAWN_PREVIEW_COLOR_OVERGROWN = "#234D1E"
+LAWN_PREVIEW_COLOR_MOWED = "#5FA94A"
+LAWN_PREVIEW_COLOR_WHEEL = "#7CC365"
+LAWN_PREVIEW_COLOR_OBSTACLE = "#8A8A8A"
+LAWN_PREVIEW_COLOR_BACKGROUND = "#FFFFFF"
+
+
+def _interpolate_lawn_preview_poses(
+    poses: list[tuple[float, float, float, bool]], step: float
+) -> list[tuple[float, float, float, bool]]:
+    """Linearly interpolate xy and shortest-arc yaw between consecutive poses.
+
+    Density `step` (metres) should be << cutting radius so adjacent cutting
+    disks overlap and the imprint has no gaps. The `cutting` flag jumps to the
+    destination value at the segment midpoint -- close enough since the
+    cutting flag changes happen at segment boundaries.
+    """
+    if not poses:
+        return []
+    out: list[tuple[float, float, float, bool]] = [poses[0]]
+    for (x0, y0, t0, c0), (x1, y1, t1, c1) in zip(poses, poses[1:]):
+        dx, dy = x1 - x0, y1 - y0
+        d = math.hypot(dx, dy)
+        if d <= step:
+            out.append((x1, y1, t1, c1))
+            continue
+        n = int(math.ceil(d / step))
+        dyaw = (t1 - t0 + math.pi) % (2.0 * math.pi) - math.pi
+        for i in range(1, n + 1):
+            f = i / n
+            out.append((x0 + dx * f, y0 + dy * f, t0 + dyaw * f, c1 if f > 0.5 else c0))
+    return out
+
+
+def render_lawn_preview_png(
+    run_dir: pathlib.Path,
+    model: OpenMowerMap,
+    config: dict[str, Any],
+    simulation_preview: dict[str, Any],
+) -> pathlib.Path | None:
+    """Write `lawn_preview.png`: a raster picture of what the lawn will look
+    like after the planned cut.
+
+    Render order, per interpolated pose:
+      1. Footprint (mowed-grass colour) -- erases prior wheel marks under it.
+      2. Cutting disk (mowed-grass colour) -- painted only when the blade is on.
+      3. Rear wheels (wheel-track colour) -- drawn AFTER the footprint so they
+         remain visible at the current pose, and are only later erased when a
+         subsequent footprint sweeps over them.
+
+    Poses are taken from `simulation_preview["timeline"]` in execution order
+    and interpolated to LAWN_PREVIEW_POSE_STEP_M so no area is skipped.
+    Clipping to the lawn (minus holes) is done via an L-mask composite so
+    paint that strays outside the lawn doesn't leak onto the background.
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        print("lawn preview skipped: Pillow not installed", file=sys.stderr)
+        return None
+
+    if not model.lawns:
+        return None
+
+    footprint_local = [(float(p[0]), float(p[1])) for p in (config.get("footprint") or [])]
+    if len(footprint_local) < 3:
+        return None
+    tool_center = tool_center_offset(config)
+    cutting_radius = float(config["tool_width"]) / 2.0
+    track = wheel_track_m(config)
+    contact_x = wheel_contact_x_m(config)
+    wheel_length = LAWN_PREVIEW_DEFAULT_WHEEL_LENGTH_M
+    wheel_width = LAWN_PREVIEW_DEFAULT_WHEEL_WIDTH_M
+
+    # Canvas bounds: lawn AABB padded by the largest mower extent.
+    all_lawn_pts: list[tuple[float, float]] = []
+    for lawn in model.lawns:
+        all_lawn_pts.extend(lawn.area.outline)
+    xs = [p[0] for p in all_lawn_pts]
+    ys = [p[1] for p in all_lawn_pts]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    fp_xs = [p[0] for p in footprint_local]
+    fp_ys = [p[1] for p in footprint_local]
+    pad = max(abs(min(fp_xs)), abs(max(fp_xs)), abs(min(fp_ys)), abs(max(fp_ys)),
+              cutting_radius) + 0.5
+    min_x -= pad; min_y -= pad; max_x += pad; max_y += pad
+
+    res_m = LAWN_PREVIEW_RESOLUTION_M_PER_PX
+    width_px = int(math.ceil((max_x - min_x) / res_m))
+    height_px = int(math.ceil((max_y - min_y) / res_m))
+    # Bound the canvas so a huge yard doesn't allocate gigapixels.
+    longest = max(width_px, height_px)
+    if longest > LAWN_PREVIEW_MAX_PX:
+        scale_down = longest / LAWN_PREVIEW_MAX_PX
+        res_m *= scale_down
+        width_px = int(math.ceil((max_x - min_x) / res_m))
+        height_px = int(math.ceil((max_y - min_y) / res_m))
+
+    def w2p(x: float, y: float) -> tuple[float, float]:
+        return ((x - min_x) / res_m, (max_y - y) / res_m)
+
+    def transform(local_pts: list[tuple[float, float]], x: float, y: float, yaw: float) -> list[tuple[float, float]]:
+        c, s = math.cos(yaw), math.sin(yaw)
+        return [w2p(x + c * lx - s * ly, y + s * lx + c * ly) for lx, ly in local_pts]
+
+    # Lawn mask: 255 inside any lawn polygon, minus all holes.
+    mask = Image.new("L", (width_px, height_px), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    for lawn in model.lawns:
+        mask_draw.polygon([w2p(*p) for p in lawn.area.outline], fill=255)
+    for lawn in model.lawns:
+        for hole in lawn.holes:
+            mask_draw.polygon([w2p(*p) for p in hole.outline], fill=0)
+
+    # Background under the mask: white plus obstacle fills so holes are visible.
+    background = Image.new("RGB", (width_px, height_px), LAWN_PREVIEW_COLOR_BACKGROUND)
+    bg_draw = ImageDraw.Draw(background)
+    for lawn in model.lawns:
+        for hole in lawn.holes:
+            bg_draw.polygon([w2p(*p) for p in hole.outline], fill=LAWN_PREVIEW_COLOR_OBSTACLE)
+
+    # Working canvas: overgrown grass, with the mower's stamps painted in order.
+    canvas = Image.new("RGB", (width_px, height_px), LAWN_PREVIEW_COLOR_OVERGROWN)
+    canvas_draw = ImageDraw.Draw(canvas)
+
+    raw_poses: list[tuple[float, float, float, bool]] = [
+        (
+            float(t["x"]),
+            float(t["y"]),
+            float(t["yaw"]),
+            bool(t.get("cutting_enabled", True)),
+        )
+        for t in simulation_preview.get("timeline", [])
+        if "x" in t and "y" in t and "yaw" in t
+    ]
+    poses = _interpolate_lawn_preview_poses(raw_poses, LAWN_PREVIEW_POSE_STEP_M)
+
+    # Pre-build the rectangles in body frame; rotated per pose in transform().
+    wheel_rect_left = [
+        (contact_x + wheel_length / 2.0, +track / 2.0 + wheel_width / 2.0),
+        (contact_x + wheel_length / 2.0, +track / 2.0 - wheel_width / 2.0),
+        (contact_x - wheel_length / 2.0, +track / 2.0 - wheel_width / 2.0),
+        (contact_x - wheel_length / 2.0, +track / 2.0 + wheel_width / 2.0),
+    ]
+    wheel_rect_right = [
+        (contact_x + wheel_length / 2.0, -track / 2.0 + wheel_width / 2.0),
+        (contact_x + wheel_length / 2.0, -track / 2.0 - wheel_width / 2.0),
+        (contact_x - wheel_length / 2.0, -track / 2.0 - wheel_width / 2.0),
+        (contact_x - wheel_length / 2.0, -track / 2.0 + wheel_width / 2.0),
+    ]
+    cr_px = cutting_radius / res_m
+
+    for (x, y, yaw, cutting) in poses:
+        # 1) Footprint -- always painted; erases prior wheel marks under it.
+        canvas_draw.polygon(transform(footprint_local, x, y, yaw), fill=LAWN_PREVIEW_COLOR_MOWED)
+        # 2) Cutting disk -- only when blade is on.
+        if cutting:
+            c, s = math.cos(yaw), math.sin(yaw)
+            cx = x + c * tool_center[0] - s * tool_center[1]
+            cy = y + s * tool_center[0] + c * tool_center[1]
+            px, py = w2p(cx, cy)
+            canvas_draw.ellipse(
+                [px - cr_px, py - cr_px, px + cr_px, py + cr_px],
+                fill=LAWN_PREVIEW_COLOR_MOWED,
+            )
+        # 3) Wheels -- drawn AFTER footprint so they persist at this pose.
+        canvas_draw.polygon(transform(wheel_rect_left, x, y, yaw), fill=LAWN_PREVIEW_COLOR_WHEEL)
+        canvas_draw.polygon(transform(wheel_rect_right, x, y, yaw), fill=LAWN_PREVIEW_COLOR_WHEEL)
+
+    out_path = run_dir / "lawn_preview.png"
+    Image.composite(canvas, background, mask).save(out_path)
+    print(
+        f"lawn preview: {len(poses)} interpolated poses "
+        f"({len(raw_poses)} timeline), {width_px}x{height_px} px @ {res_m:.4f} m/px -> {out_path.name}"
+    )
+    return out_path
+
+
 def render_run(run_dir: pathlib.Path) -> None:
     source = read_json(run_dir / "source_map_snapshot.json")
     compat = read_json(run_dir / "planpath_compat.json")
@@ -4760,6 +5053,7 @@ def render_run(run_dir: pathlib.Path) -> None:
     }
     simulation_preview = build_simulation_preview(model, preview_compat, debug, metrics, config, view)
     write_json(run_dir / "simulation_preview.json", simulation_preview)
+    render_lawn_preview_png(run_dir, model, config, simulation_preview)
 
     def tx(x: float, y: float) -> tuple[float, float]:
         return (pad + (x - min_x) * scale, pad + (max_y - y) * scale)
@@ -5616,6 +5910,33 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--repair-rings", action="store_true", help="append closing points before validation")
     validate.add_argument("--json", action="store_true", help="print JSON summary")
     validate.set_defaults(func=cmd_validate_map)
+
+    classify_v2 = sub.add_parser("classify-v2", help="run V2 map conditioning and macro-zone classification")
+    classify_v2.add_argument("--map", required=True, help="path to OpenMower map.json")
+    classify_v2.add_argument("--config", default=str(DEFAULT_CONFIG), help="planner config YAML")
+    classify_v2.add_argument("--output", help="output run directory")
+    classify_v2.add_argument("--area-index", type=int, help="classify one active mow area by index")
+    classify_v2.add_argument("--repair-rings", action="store_true", help="append closing points before classification")
+    classify_v2.add_argument(
+        "--conditioning-profile",
+        choices=["conservative", "normal", "aggressive"],
+        default="normal",
+        help="mower-scale boundary conditioning strength",
+    )
+    classify_v2.add_argument("--simplify-tolerance-m", type=float, help="override boundary simplification tolerance")
+    classify_v2.add_argument("--min-zone-area-m2", type=float, help="override minimum macro-zone area")
+    classify_v2.add_argument(
+        "--drivable-boundary-clearance-m",
+        type=float,
+        help="boundary clearance for the main V2 mowable/drivable region",
+    )
+    classify_v2.add_argument(
+        "--corridor-width-factor",
+        type=float,
+        help="corridor threshold as a factor of configured safety footprint width",
+    )
+    classify_v2.add_argument("--task-annotations", help="lab-only V2 task annotation JSON exported from the report")
+    classify_v2.set_defaults(func=cmd_classify_v2)
 
     plan = sub.add_parser("plan", help="run Fields2Cover and write evaluation artifacts")
     plan.add_argument("--map", required=True, help="path to OpenMower map.json")
