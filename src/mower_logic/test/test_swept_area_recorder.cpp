@@ -201,3 +201,8 @@ TEST(SweptAreaRecorder, OpenObstacleLoopFailsCleanly) {
   EXPECT_FALSE(result.success);
   EXPECT_NE(result.error.find("interior hole"), std::string::npos);
 }
+
+int main(int argc, char** argv) {
+  testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

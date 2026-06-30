@@ -1,0 +1,6 @@
+string map_id
+string name
+---
+bool success
+string message
+MapSummary summary

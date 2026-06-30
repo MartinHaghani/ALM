@@ -231,10 +231,11 @@ export OM_USE_F9R_SENSOR_FUSION=False
 # export OM_CONFIDENCE_SCAN_MATCH_NEAR_M=0.15
 # export OM_CONFIDENCE_SCAN_MATCH_FAR_M=0.35
 
-# Read-only unified localization shadow publisher. This publishes
+# Unified localization shadow publisher. This publishes
 # /localization_fusion/pose, /localization_fusion/odom, /localization_fusion/status,
-# and map -> fused_base_link for WebUI comparison only. It does not replace
-# map -> base_link and does not feed navigation, planning, costmaps, or control.
+# and map -> fused_base_link. Area recording can use /localization_fusion/pose
+# for saved geometry, but it does not replace map -> base_link and does not feed
+# navigation, planning, costmaps, or control.
 # GPS contribution uses /xbot_positioning/xb_pose and is accepted only while
 # raw GPS is RTK fixed; RTK float is ignored so LIDAR can stand alone.
 # export OM_USE_LOCALIZATION_FUSION=True
@@ -248,9 +249,11 @@ export OM_USE_F9R_SENSOR_FUSION=False
 # export OM_LOCALIZATION_FUSION_PUBLISH_TF=True
 
 # Area recording saves mowing outlines from the exterior boundary of the full
-# mower footprint swept along RTK-fixed poses. Obstacles require a closed loop and
-# are saved from the largest interior hole in that swept footprint. Existing maps
-# should be cleared and rerecorded after deploying the swept-footprint recorder.
+# mower footprint swept along the selected recording pose. The default selected
+# pose is /localization_fusion/pose, with GPS/xbot_positioning available as a
+# runtime fallback from /next/. Boundary samples used for GPS/LIDAR alignment
+# remain RTK-fixed GPS truth only. Existing maps should be cleared and rerecorded
+# after deploying the swept-footprint recorder.
 
 
 ################################
@@ -321,8 +324,17 @@ export OM_OUTLINE_COUNT=4
 # How many outlines should the fill (lanes) overlap
 export OM_OUTLINE_OVERLAP_COUNT=0
 
-# Full-footprint swept-union area recording. Smaller pose/yaw steps preserve more
-# detail but add union work when the recording is saved.
+# Full-footprint swept-union area recording. The default geometry source is the
+# fused localization pose; switch OM_AREA_RECORDING_USE_LOCALIZATION_FUSION to
+# False to preserve the legacy GPS/xbot_positioning recording behavior. Smaller
+# pose/yaw steps preserve more detail but add union work when the recording is
+# saved.
+# export OM_AREA_RECORDING_USE_LOCALIZATION_FUSION=True
+# export OM_AREA_RECORDING_FUSED_POSE_TOPIC=/localization_fusion/pose
+# export OM_AREA_RECORDING_LEGACY_POSE_TOPIC=/xbot_positioning/xb_pose
+# export OM_AREA_RECORDING_MAX_POSE_AGE_SEC=1.0
+# export OM_AREA_RECORDING_MAX_FUSED_POSITION_ACCURACY_M=0.2
+# export OM_AREA_RECORDING_MAX_FUSED_YAW_ACCURACY_RAD=0.15
 # export OM_AREA_RECORDING_POSE_STEP_M=0.03
 # export OM_AREA_RECORDING_YAW_STEP_RAD=0.05
 # export OM_AREA_RECORDING_SIMPLIFY_EPSILON_M=0.03
@@ -359,6 +371,8 @@ export OM_MOWING_MOTOR_TEMP_LOW=40.0
 
 export OM_GPS_WAIT_TIME_SEC=10.0
 export OM_GPS_TIMEOUT_SEC=5.0
+# Maximum distance from the selected map bounds before Start Mowing is blocked.
+# export OM_MAP_SELECTOR_MAX_START_DISTANCE_M=50.0
 
 # Mowing Behavior Settings
 # True to enable mowing motor

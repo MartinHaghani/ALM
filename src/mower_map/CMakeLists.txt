@@ -61,19 +61,28 @@ find_package(catkin REQUIRED
 add_message_files(
         FILES
         BoundarySample.msg
+        MapEditStroke.msg
         MapArea.msg
+        MapSummary.msg
 )
 
 ## Generate services in the 'srv' folder
 add_service_files(
         FILES
         AddMowingAreaSrv.srv
+        ApplyMapEditSrv.srv
+        ApplyRecordingEditSrv.srv
         GetDockingPointSrv.srv
         GetMowingAreaSrv.srv
         SetDockingPointSrv.srv
         ClearNavPointSrv.srv
         SetNavPointSrv.srv
         ClearMapSrv.srv
+        CreateMapSrv.srv
+        DeleteMapSrv.srv
+        GetMapCatalogSrv.srv
+        RenameMapSrv.srv
+        SelectMapSrv.srv
 )
 
 ## Generate actions in the 'action' folder
@@ -120,13 +129,44 @@ generate_messages(
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-        #  INCLUDE_DIRS include
-        #  LIBRARIES mower_map
+        INCLUDE_DIRS include
+        LIBRARIES mower_map_edit_geometry
         CATKIN_DEPENDS message_runtime std_msgs geometry_msgs
         #  DEPENDS system_lib
 )
 
 add_subdirectory(../lib/json json EXCLUDE_FROM_ALL)
+
+set(CLIPPER2_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../mower_logic/third_party/clipper2)
+
+add_library(mower_map_clipper2
+        ${CLIPPER2_DIR}/include/clipper2/clipper.core.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.engine.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.export.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.minkowski.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.offset.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.rectclip.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.triangulation.h
+        ${CLIPPER2_DIR}/include/clipper2/clipper.version.h
+        ${CLIPPER2_DIR}/src/clipper.engine.cpp
+        ${CLIPPER2_DIR}/src/clipper.offset.cpp
+        ${CLIPPER2_DIR}/src/clipper.rectclip.cpp
+        ${CLIPPER2_DIR}/src/clipper.triangulation.cpp
+)
+target_include_directories(mower_map_clipper2 PUBLIC ${CLIPPER2_DIR}/include)
+target_compile_definitions(mower_map_clipper2 PUBLIC CLIPPER2_MAX_DECIMAL_PRECISION=8)
+target_link_libraries(mower_map_clipper2 m)
+
+add_library(mower_map_edit_geometry
+        src/map_edit_geometry.cpp
+)
+add_dependencies(mower_map_edit_geometry ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
+target_include_directories(mower_map_edit_geometry PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${catkin_INCLUDE_DIRS}
+)
+target_link_libraries(mower_map_edit_geometry mower_map_clipper2 ${catkin_LIBRARIES})
 
 ###########
 ## Build ##
@@ -135,7 +175,7 @@ add_subdirectory(../lib/json json EXCLUDE_FROM_ALL)
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-        # include
+         include
          ${catkin_INCLUDE_DIRS}
 )
 
@@ -171,7 +211,7 @@ include_directories(
 
 add_executable(mower_map_service src/mower_map_service.cpp)
 add_dependencies(mower_map_service ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
-target_link_libraries(mower_map_service ${catkin_LIBRARIES} ${OpenCV_LIBS} nlohmann_json::nlohmann_json xbot_rpc)
+target_link_libraries(mower_map_service mower_map_edit_geometry ${catkin_LIBRARIES} ${OpenCV_LIBS} nlohmann_json::nlohmann_json xbot_rpc)
 
 #############
 ## Install ##
@@ -227,3 +267,10 @@ target_link_libraries(mower_map_service ${catkin_LIBRARIES} ${OpenCV_LIBS} nlohm
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_map_edit_geometry test/test_map_edit_geometry.cpp)
+  if(TARGET test_map_edit_geometry)
+    target_link_libraries(test_map_edit_geometry mower_map_edit_geometry ${catkin_LIBRARIES})
+  endif()
+endif()

@@ -1,0 +1,4 @@
+MapEditStroke edit
+---
+bool success
+string message

@@ -23,6 +23,8 @@ find_package(catkin REQUIRED COMPONENTS
         tf2_ros
         sensor_msgs
         robot_localization
+        std_msgs
+        std_srvs
         xbot_msgs
         xbot_positioning
 )
@@ -122,7 +124,7 @@ generate_dynamic_reconfigure_options(
 catkin_package(
         #  INCLUDE_DIRS include
         #  LIBRARIES mower_logic
-        #  CATKIN_DEPENDS dynamic_reconfigure ftc_local_planner mbf_msgs mower_map mower_msgs nav_msgs roscpp slic3r_coverage_planner tf2 tf2_geometry_msgs tf2_ros
+        CATKIN_DEPENDS std_msgs std_srvs
         #  DEPENDS system_lib
 )
 
@@ -214,7 +216,7 @@ add_executable(mower_logic
         src/mower_logic/behaviors/AreaRecordingBehavior.cpp
 )
 add_dependencies(mower_logic ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
-target_link_libraries(mower_logic mower_logic_swept_area ${catkin_LIBRARIES} ${CRYPTOPP_LIBRARIES})
+target_link_libraries(mower_logic mower_logic_swept_area mower_map_edit_geometry ${catkin_LIBRARIES} ${CRYPTOPP_LIBRARIES})
 
 add_executable(monitoring src/monitoring/monitoring.cpp)
 add_dependencies(monitoring ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
@@ -277,6 +279,11 @@ if(CATKIN_ENABLE_TESTING)
   catkin_add_gtest(test_swept_area_recorder test/test_swept_area_recorder.cpp)
   if(TARGET test_swept_area_recorder)
     target_link_libraries(test_swept_area_recorder mower_logic_swept_area ${catkin_LIBRARIES})
+  endif()
+  catkin_add_gtest(test_area_recording_pose_gate test/test_area_recording_pose_gate.cpp)
+  if(TARGET test_area_recording_pose_gate)
+    target_include_directories(test_area_recording_pose_gate PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_link_libraries(test_area_recording_pose_gate ${catkin_LIBRARIES})
   endif()
 endif()
 

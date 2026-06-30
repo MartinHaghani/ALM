@@ -19,15 +19,19 @@
 #include <mbf_msgs/ExePathAction.h>
 #include <mbf_msgs/MoveBaseAction.h>
 #include <mower_map/GetDockingPointSrv.h>
+#include <atomic>
+#include <mutex>
 #include <string>
 #include <tf2/LinearMath/Transform.h>
 
 #include "Behavior.h"
 #include "DockingBehavior.h"
 #include "IdleBehavior.h"
+#include "AreaRecordingPoseGate.h"
 #include "SweptAreaRecorder.h"
 #include "geometry_msgs/Twist.h"
 #include "mower_map/AddMowingAreaSrv.h"
+#include "mower_map/ApplyRecordingEditSrv.h"
 #include "mower_map/BoundarySample.h"
 #include "mower_map/MapArea.h"
 #include "mower_map/SetDockingPointSrv.h"
@@ -61,22 +65,34 @@ class AreaRecordingBehavior : public Behavior {
     std::vector<mower_map::BoundarySample> front_right_samples;
   };
 
-  bool has_odom = false;
+  struct RecordingPoseSnapshot {
+    xbot_msgs::AbsolutePose pose;
+    bool boundary_sample_allowed = false;
+    xbot_msgs::AbsolutePose boundary_sample_pose;
+    xbot_msgs::AbsolutePose boundary_gps_pose;
+  };
+
+  bool has_legacy_pose = false;
+  bool has_fused_pose = false;
   bool has_gps_pose = false;
 
   std::vector<xbot_msgs::ActionInfo> actions;
 
   sensor_msgs::Joy last_joy;
-  xbot_msgs::AbsolutePose last_pose;
+  xbot_msgs::AbsolutePose last_legacy_pose;
+  xbot_msgs::AbsolutePose last_fused_pose;
   xbot_msgs::AbsolutePose last_gps_pose;
+  ros::Time last_legacy_pose_time = ros::Time(0);
+  ros::Time last_fused_pose_time = ros::Time(0);
   ros::Time last_gps_pose_time = ros::Time(0);
 
   ros::Publisher boundary_sample_pub;
+  ros::Publisher use_fused_pose_pub;
   ros::Publisher map_overlay_pub;
   ros::Publisher marker_pub;
   ros::Publisher marker_array_pub;
 
-  ros::Subscriber joy_sub, pose_sub, gps_pose_sub;
+  ros::Subscriber joy_sub, legacy_pose_sub, fused_pose_sub, gps_pose_sub;
 
   ros::Subscriber dock_sub, polygon_sub, mow_area_sub, nav_area_sub, auto_point_collecting_sub, collect_point_sub;
 
@@ -105,6 +121,12 @@ class AreaRecordingBehavior : public Behavior {
   ros::Time manual_mowing_stop_guard_until = ros::Time(0);
   bool manual_mowing_stop_pending = false;
   double max_recording_gps_accuracy = 0.2;
+  double max_recording_pose_age_s = 1.0;
+  double max_recording_fused_position_accuracy_m = 0.2;
+  double max_recording_fused_yaw_accuracy_rad = 0.15;
+  std::string fused_pose_topic = "/localization_fusion/pose";
+  std::string legacy_pose_topic = "/xbot_positioning/xb_pose";
+  std::atomic_bool use_localization_fusion{true};
   mower_logic::area_recording::SweptAreaOptions swept_area_options;
 
   visualization_msgs::MarkerArray markers;
@@ -112,6 +134,9 @@ class AreaRecordingBehavior : public Behavior {
   std::vector<geometry_msgs::Point32> footprint_polygon;
   geometry_msgs::Point32 footprint_front_left;
   geometry_msgs::Point32 footprint_front_right;
+  std::vector<mower_map::MapEditStroke> pending_recording_edits;
+  std::mutex pending_recording_edits_mutex;
+  mutable std::mutex pose_mutex;
 
  private:
   bool recordNewPolygon(RecordedPolygon& polygon, xbot_msgs::MapOverlay& resultOverlay, uint8_t preview_point_mode);
@@ -121,15 +146,24 @@ class AreaRecordingBehavior : public Behavior {
                           const std::string& label,
                           geometry_msgs::Polygon& result) const;
   bool recordedPolygonValid(const geometry_msgs::Polygon& polygon, const std::string& label) const;
-  bool recordingGpsQualityOk(const xbot_msgs::AbsolutePose& pose, std::string& reason) const;
+  bool selectedRecordingPose(RecordingPoseSnapshot& snapshot, std::string& reason) const;
   geometry_msgs::Point32 projectPoint(const geometry_msgs::Pose& pose, const geometry_msgs::Point32& offset) const;
-  void addRecordedPoint(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose, uint32_t index, bool auto_collected);
-  void addSweptPose(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose, bool start_new_segment);
+  geometry_msgs::Polygon footprintAtPose(const geometry_msgs::Pose& pose) const;
+  void addRecordedPoint(RecordedPolygon& polygon,
+                        const RecordingPoseSnapshot& snapshot,
+                        uint32_t index,
+                        bool auto_collected);
+  bool addSweptPose(RecordedPolygon& polygon, const xbot_msgs::AbsolutePose& pose, bool start_new_segment);
+  bool applyPendingRecordingEdits(mower_map::MapArea& result, std::string& error);
+  void appendFootprintPreview(xbot_msgs::MapOverlay& overlay, const geometry_msgs::Pose& pose, const std::string& color);
+  void clearPendingRecordingEdits();
+  void fused_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);
   void gps_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);
+  void legacy_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);
   void loadAreaRecordingParams();
   void loadFootprintRecordingPoints();
+  void publishUseLocalizationFusion();
   void publishBoundarySamples(const std::vector<mower_map::BoundarySample>& samples, uint8_t area_type);
-  void pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg);
   void joy_received(const sensor_msgs::Joy& joy_msg);
   void record_dock_received(std_msgs::Bool state_msg);
   void record_polygon_received(std_msgs::Bool state_msg);
@@ -173,6 +207,13 @@ class AreaRecordingBehavior : public Behavior {
   uint8_t get_state() override;
 
   void handle_action(std::string action) override;
+
+  void initializeRecordingPoseModePublisher(ros::NodeHandle* node);
+  bool setUseLocalizationFusion(bool enabled, std::string& message);
+  bool recordingPolygonActive() const;
+
+  bool applyRecordingEdit(mower_map::ApplyRecordingEditSrvRequest& req,
+                          mower_map::ApplyRecordingEditSrvResponse& res);
 };
 
 #endif  // SRC_AREA_RECORDING_BEHAVIOR_H

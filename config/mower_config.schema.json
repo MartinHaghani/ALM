@@ -765,7 +765,7 @@
           "type": "boolean",
           "default": true,
           "title": "Use localization fusion shadow publisher",
-          "description": "Start the read-only GPS/LIDAR fusion shadow publisher. It publishes /localization_fusion/pose and map -> fused_base_link for WebUI comparison only. GPS contribution uses /xbot_positioning/xb_pose and is accepted only while raw GPS is RTK fixed; RTK float is ignored. It does not replace map -> base_link or feed navigation.",
+          "description": "Start the GPS/LIDAR fusion shadow publisher. It publishes /localization_fusion/pose and map -> fused_base_link for WebUI display and optional area-recording geometry. GPS contribution uses /xbot_positioning/xb_pose and is accepted only while raw GPS is RTK fixed; RTK float is ignored. It does not replace map -> base_link or feed navigation.",
           "x-environment-variable": "OM_USE_LOCALIZATION_FUSION"
         },
         "OM_LOCALIZATION_FUSION_POSE_TOPIC": {
@@ -994,18 +994,60 @@
           "description": "How many outlines should the mover drive. It's not recommended to set this below 4.",
           "x-environment-variable": "OM_OUTLINE_COUNT"
         },
+        "OM_AREA_RECORDING_USE_LOCALIZATION_FUSION": {
+          "type": "boolean",
+          "default": true,
+          "title": "Area Recording Use Fused Pose",
+          "description": "Use the localization fusion pose as the default geometry source for area recording. Disable to use the legacy GPS/xbot_positioning pose gate.",
+          "x-environment-variable": "OM_AREA_RECORDING_USE_LOCALIZATION_FUSION"
+        },
+        "OM_AREA_RECORDING_FUSED_POSE_TOPIC": {
+          "type": "string",
+          "default": "/localization_fusion/pose",
+          "title": "Area Recording Fused Pose Topic",
+          "description": "AbsolutePose topic used for area recording geometry while fused-pose recording is enabled.",
+          "x-environment-variable": "OM_AREA_RECORDING_FUSED_POSE_TOPIC"
+        },
+        "OM_AREA_RECORDING_LEGACY_POSE_TOPIC": {
+          "type": "string",
+          "default": "/xbot_positioning/xb_pose",
+          "title": "Area Recording Legacy Pose Topic",
+          "description": "AbsolutePose topic used for area recording geometry while fused-pose recording is disabled.",
+          "x-environment-variable": "OM_AREA_RECORDING_LEGACY_POSE_TOPIC"
+        },
+        "OM_AREA_RECORDING_MAX_POSE_AGE_SEC": {
+          "type": "number",
+          "default": 1.0,
+          "title": "Area Recording Max Pose Age",
+          "description": "Maximum accepted age in seconds for the selected area-recording pose before a sample is skipped and a new swept segment starts.",
+          "x-environment-variable": "OM_AREA_RECORDING_MAX_POSE_AGE_SEC"
+        },
+        "OM_AREA_RECORDING_MAX_FUSED_POSITION_ACCURACY_M": {
+          "type": "number",
+          "default": 0.2,
+          "title": "Area Recording Max Fused Position Accuracy",
+          "description": "Maximum accepted fused-pose position accuracy in meters for area recording geometry.",
+          "x-environment-variable": "OM_AREA_RECORDING_MAX_FUSED_POSITION_ACCURACY_M"
+        },
+        "OM_AREA_RECORDING_MAX_FUSED_YAW_ACCURACY_RAD": {
+          "type": "number",
+          "default": 0.15,
+          "title": "Area Recording Max Fused Yaw Accuracy",
+          "description": "Maximum accepted fused-pose yaw accuracy in radians for area recording geometry.",
+          "x-environment-variable": "OM_AREA_RECORDING_MAX_FUSED_YAW_ACCURACY_RAD"
+        },
         "OM_AREA_RECORDING_POSE_STEP_M": {
           "type": "number",
           "default": 0.03,
           "title": "Area Recording Pose Step",
-          "description": "Maximum interpolation distance in meters between retained RTK-fixed poses when area recording builds the full-footprint swept union.",
+          "description": "Maximum interpolation distance in meters between retained selected recording poses when area recording builds the full-footprint swept union.",
           "x-environment-variable": "OM_AREA_RECORDING_POSE_STEP_M"
         },
         "OM_AREA_RECORDING_YAW_STEP_RAD": {
           "type": "number",
           "default": 0.05,
           "title": "Area Recording Yaw Step",
-          "description": "Maximum interpolation yaw step in radians between retained RTK-fixed poses when area recording builds the full-footprint swept union.",
+          "description": "Maximum interpolation yaw step in radians between retained selected recording poses when area recording builds the full-footprint swept union.",
           "x-environment-variable": "OM_AREA_RECORDING_YAW_STEP_RAD"
         },
         "OM_AREA_RECORDING_SIMPLIFY_EPSILON_M": {
@@ -1084,6 +1126,14 @@
           "title": "GPS Timeout",
           "description": "Timeout for GPS in [s]. Mowing will pause, if no GPS update was received within this configured time.",
           "x-environment-variable": "OM_GPS_TIMEOUT_SEC"
+        },
+        "OM_MAP_SELECTOR_MAX_START_DISTANCE_M": {
+          "type": "number",
+          "default": 50.0,
+          "minimum": 0.0,
+          "title": "Map selector max start distance",
+          "description": "Maximum distance in meters from the current fused mower pose to the selected map bounds before Start Mowing is blocked.",
+          "x-environment-variable": "OM_MAP_SELECTOR_MAX_START_DISTANCE_M"
         },
         "OM_ENABLE_MOWER": {
           "type": "boolean",

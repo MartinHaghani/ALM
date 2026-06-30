@@ -22,6 +22,8 @@
 #include <cmath>
 #include <limits>
 
+#include "mower_map/map_edit_geometry.h"
+
 extern ros::ServiceClient dockingPointClient;
 extern ros::ServiceClient emergencyClient;
 extern actionlib::SimpleActionClient<mbf_msgs::MoveBaseAction>* mbfClient;
@@ -86,6 +88,13 @@ double normalizeAngle(double angle) {
 
 double poseDistance2D(const geometry_msgs::Pose& a, const geometry_msgs::Pose& b) {
   return std::hypot(a.position.x - b.position.x, a.position.y - b.position.y);
+}
+
+double ageSec(const ros::Time& now, const ros::Time& stamp) {
+  if (stamp == ros::Time(0)) {
+    return std::numeric_limits<double>::infinity();
+  }
+  return std::max(0.0, (now - stamp).toSec());
 }
 
 std::size_t sweptPoseCount(const std::vector<std::vector<geometry_msgs::Pose>>& swept_pose_segments) {
@@ -254,6 +263,14 @@ Behavior* AreaRecordingBehavior::execute() {
       }
 
       if (ready_to_add_area) {
+        std::string edit_error;
+        if (!applyPendingRecordingEdits(result, edit_error)) {
+          ready_to_add_area = false;
+          ROS_WARN_STREAM("Area recording was not saved because draft edits failed: " << edit_error);
+        }
+      }
+
+      if (ready_to_add_area) {
         mower_map::AddMowingAreaSrv srv;
         srv.request.isNavigationArea = !is_mowing_area;
         srv.request.area = result;
@@ -281,6 +298,7 @@ Behavior* AreaRecordingBehavior::execute() {
     finished_all = false;
 
     has_outline = false;
+    clearPendingRecordingEdits();
     update_actions();
   }
 
@@ -298,12 +316,15 @@ void AreaRecordingBehavior::enter() {
   update_actions();
 
   has_first_docking_pos = false;
-  has_odom = false;
+  has_legacy_pose = false;
+  has_fused_pose = false;
+  has_gps_pose = false;
   poly_recording_enabled = false;
   finished_all = false;
   set_docking_position = false;
   markers = visualization_msgs::MarkerArray();
   paused = aborted = false;
+  clearPendingRecordingEdits();
 
   ros::param::param<double>("/xbot_positioning/max_gps_accuracy", max_recording_gps_accuracy, 0.2);
   loadAreaRecordingParams();
@@ -332,17 +353,15 @@ void AreaRecordingBehavior::enter() {
       n->subscribe("/record_auto_point_collecting", 100, &AreaRecordingBehavior::record_auto_point_collecting, this);
   collect_point_sub = n->subscribe("/record_collect_point", 100, &AreaRecordingBehavior::record_collect_point, this);
 
-  pose_sub = n->subscribe("/xbot_positioning/xb_pose", 100, &AreaRecordingBehavior::pose_received, this);
+  legacy_pose_sub = n->subscribe(legacy_pose_topic, 100, &AreaRecordingBehavior::legacy_pose_received, this);
+  fused_pose_sub = n->subscribe(fused_pose_topic, 100, &AreaRecordingBehavior::fused_pose_received, this);
   gps_pose_sub = n->subscribe("/hw/position/gps", 100, &AreaRecordingBehavior::gps_pose_received, this);
 }
 
 void AreaRecordingBehavior::exit() {
   stopManualMowing(manual_mowing, manual_mowing_stop_guard_until, manual_mowing_stop_pending);
 
-  for (auto& a : actions) {
-    a.enabled = false;
-  }
-  registerActions("mower_logic:area_recording", actions);
+  registerActions("mower_logic:area_recording", {});
 
   map_overlay_pub.shutdown();
   marker_pub.shutdown();
@@ -356,7 +375,8 @@ void AreaRecordingBehavior::exit() {
   nav_area_sub.shutdown();
   auto_point_collecting_sub.shutdown();
   collect_point_sub.shutdown();
-  pose_sub.shutdown();
+  legacy_pose_sub.shutdown();
+  fused_pose_sub.shutdown();
   add_mowing_area_client.shutdown();
   set_docking_point_client.shutdown();
 }
@@ -376,44 +396,137 @@ bool AreaRecordingBehavior::is_manual_mowing_stop_guard_active() const {
   return manual_mowing && ros::Time::now() <= manual_mowing_stop_guard_until;
 }
 
-void AreaRecordingBehavior::pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg) {
-  last_pose = *msg;
-  has_odom = true;
+void AreaRecordingBehavior::legacy_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg) {
+  std::lock_guard<std::mutex> lock(pose_mutex);
+  last_legacy_pose = *msg;
+  last_legacy_pose_time = ros::Time::now();
+  has_legacy_pose = true;
+}
+
+void AreaRecordingBehavior::fused_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg) {
+  std::lock_guard<std::mutex> lock(pose_mutex);
+  last_fused_pose = *msg;
+  last_fused_pose_time = ros::Time::now();
+  has_fused_pose = true;
 }
 
 void AreaRecordingBehavior::gps_pose_received(const xbot_msgs::AbsolutePose::ConstPtr& msg) {
+  std::lock_guard<std::mutex> lock(pose_mutex);
   last_gps_pose = *msg;
   last_gps_pose_time = ros::Time::now();
   has_gps_pose = true;
 }
 
-bool AreaRecordingBehavior::recordingGpsQualityOk(const xbot_msgs::AbsolutePose& pose, std::string& reason) const {
-  auto flags = pose.flags;
-  double accuracy = pose.position_accuracy;
-
-  if (has_gps_pose && (ros::Time::now() - last_gps_pose_time).toSec() <= kGpsPoseFreshSec) {
-    flags = last_gps_pose.flags;
-    accuracy = last_gps_pose.position_accuracy;
+bool AreaRecordingBehavior::selectedRecordingPose(RecordingPoseSnapshot& snapshot, std::string& reason) const {
+  xbot_msgs::AbsolutePose legacy_pose;
+  xbot_msgs::AbsolutePose fused_pose;
+  xbot_msgs::AbsolutePose raw_gps_pose;
+  ros::Time legacy_time;
+  ros::Time fused_time;
+  ros::Time raw_gps_time;
+  bool have_legacy = false;
+  bool have_fused = false;
+  bool have_raw_gps = false;
+  {
+    std::lock_guard<std::mutex> lock(pose_mutex);
+    legacy_pose = last_legacy_pose;
+    fused_pose = last_fused_pose;
+    raw_gps_pose = last_gps_pose;
+    legacy_time = last_legacy_pose_time;
+    fused_time = last_fused_pose_time;
+    raw_gps_time = last_gps_pose_time;
+    have_legacy = has_legacy_pose;
+    have_fused = has_fused_pose;
+    have_raw_gps = has_gps_pose;
   }
 
-  if ((flags & xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED) == 0) {
-    reason = "RTK fixed GPS is required for area recording";
-    return false;
-  }
-  if (!std::isfinite(accuracy)) {
-    reason = "GPS accuracy is unavailable";
-    return false;
-  }
-  if (accuracy > max_recording_gps_accuracy) {
-    reason = "GPS accuracy is above the recording limit";
-    return false;
+  const ros::Time now = ros::Time::now();
+  const double legacy_age_s = ageSec(now, legacy_time);
+  const double fused_age_s = ageSec(now, fused_time);
+  const double raw_gps_age_s = ageSec(now, raw_gps_time);
+  const bool raw_gps_fresh = have_raw_gps && raw_gps_age_s <= kGpsPoseFreshSec;
+  const auto* raw_gps = raw_gps_fresh ? &raw_gps_pose : nullptr;
+
+  mower_logic::area_recording::RecordingPoseGateOptions gate_options;
+  gate_options.max_gps_accuracy_m = max_recording_gps_accuracy;
+  gate_options.max_pose_age_s = max_recording_pose_age_s;
+  gate_options.max_fused_position_accuracy_m = max_recording_fused_position_accuracy_m;
+  gate_options.max_fused_yaw_accuracy_rad = max_recording_fused_yaw_accuracy_rad;
+
+  auto select_legacy_pose = [&](const std::string& fused_rejection_reason, bool warn_on_fallback) {
+    if (!have_legacy) {
+      reason = fused_rejection_reason.empty()
+                   ? "Legacy recording pose has not been received"
+                   : fused_rejection_reason + "; legacy fallback has not been received";
+      return false;
+    }
+
+    const auto legacy_gate =
+        mower_logic::area_recording::evaluateLegacyRecordingPose(legacy_pose, legacy_age_s, raw_gps, gate_options);
+    if (!legacy_gate.accepted) {
+      reason = fused_rejection_reason.empty()
+                   ? legacy_gate.reason
+                   : fused_rejection_reason + "; legacy fallback rejected: " + legacy_gate.reason;
+      return false;
+    }
+
+    if (warn_on_fallback && !fused_rejection_reason.empty()) {
+      ROS_WARN_STREAM_THROTTLE(2.0,
+                               "Area recorder falling back to legacy pose because fused pose was rejected: "
+                                   << fused_rejection_reason);
+    }
+
+    snapshot.pose = legacy_pose;
+    snapshot.boundary_sample_allowed = legacy_gate.boundary_sample_allowed;
+    if (snapshot.boundary_sample_allowed) {
+      snapshot.boundary_sample_pose = legacy_pose;
+      snapshot.boundary_gps_pose = raw_gps ? raw_gps_pose : legacy_pose;
+    }
+    reason.clear();
+    return true;
+  };
+
+  if (use_localization_fusion.load()) {
+    if (!have_fused) {
+      return select_legacy_pose("Fused recording pose has not been received", true);
+    }
+    const auto gate =
+        mower_logic::area_recording::evaluateFusedRecordingPose(fused_pose, fused_age_s, raw_gps, gate_options);
+    if (!gate.accepted) {
+      return select_legacy_pose(gate.reason, true);
+    }
+    snapshot.pose = fused_pose;
+    snapshot.boundary_sample_allowed = false;
+    if (gate.boundary_sample_allowed && have_legacy && legacy_age_s <= max_recording_pose_age_s &&
+        mower_logic::area_recording::absolutePoseFinite(legacy_pose)) {
+      snapshot.boundary_sample_allowed = true;
+      snapshot.boundary_sample_pose = legacy_pose;
+      snapshot.boundary_gps_pose = raw_gps_pose;
+    }
+    reason.clear();
+    return true;
   }
 
-  reason.clear();
-  return true;
+  return select_legacy_pose("", false);
 }
 
 void AreaRecordingBehavior::loadAreaRecordingParams() {
+  bool use_fused_pose = true;
+  ros::param::param<bool>("/mower_logic/area_recording_use_localization_fusion", use_fused_pose, true);
+  use_localization_fusion.store(use_fused_pose);
+  ros::param::param<std::string>("/mower_logic/area_recording_fused_pose_topic",
+                                 fused_pose_topic,
+                                 "/localization_fusion/pose");
+  ros::param::param<std::string>("/mower_logic/area_recording_legacy_pose_topic",
+                                 legacy_pose_topic,
+                                 "/xbot_positioning/xb_pose");
+  ros::param::param<double>("/mower_logic/area_recording_max_pose_age_sec", max_recording_pose_age_s, 1.0);
+  ros::param::param<double>("/mower_logic/area_recording_max_fused_position_accuracy_m",
+                            max_recording_fused_position_accuracy_m,
+                            0.2);
+  ros::param::param<double>("/mower_logic/area_recording_max_fused_yaw_accuracy_rad",
+                            max_recording_fused_yaw_accuracy_rad,
+                            0.15);
   ros::param::param<double>("/mower_logic/area_recording_pose_step_m", swept_area_options.pose_step_m, 0.03);
   ros::param::param<double>("/mower_logic/area_recording_yaw_step_rad", swept_area_options.yaw_step_rad, 0.05);
   ros::param::param<double>("/mower_logic/area_recording_simplify_epsilon_m",
@@ -428,7 +541,18 @@ void AreaRecordingBehavior::loadAreaRecordingParams() {
   swept_area_options.simplify_epsilon_m = std::max(0.0, std::min(0.5, swept_area_options.simplify_epsilon_m));
   swept_area_options.min_polygon_area_m2 =
       std::max(0.001, std::min(100.0, swept_area_options.min_polygon_area_m2));
+  max_recording_pose_age_s = std::max(0.1, std::min(10.0, max_recording_pose_age_s));
+  max_recording_fused_position_accuracy_m =
+      std::max(0.01, std::min(5.0, max_recording_fused_position_accuracy_m));
+  max_recording_fused_yaw_accuracy_rad =
+      std::max(0.01, std::min(M_PI, max_recording_fused_yaw_accuracy_rad));
+  publishUseLocalizationFusion();
 
+  ROS_INFO_STREAM("Area recorder pose source params: use_localization_fusion="
+                  << use_localization_fusion.load() << ", fused_pose_topic=" << fused_pose_topic
+                  << ", legacy_pose_topic=" << legacy_pose_topic << ", max_pose_age_s=" << max_recording_pose_age_s
+                  << ", max_fused_position_accuracy_m=" << max_recording_fused_position_accuracy_m
+                  << ", max_fused_yaw_accuracy_rad=" << max_recording_fused_yaw_accuracy_rad);
   ROS_INFO_STREAM("Area recorder swept geometry params: pose_step_m=" << swept_area_options.pose_step_m
                                                                       << ", yaw_step_rad="
                                                                       << swept_area_options.yaw_step_rad
@@ -436,6 +560,44 @@ void AreaRecordingBehavior::loadAreaRecordingParams() {
                                                                       << swept_area_options.simplify_epsilon_m
                                                                       << ", min_polygon_area_m2="
                                                                       << swept_area_options.min_polygon_area_m2);
+}
+
+void AreaRecordingBehavior::initializeRecordingPoseModePublisher(ros::NodeHandle* node) {
+  bool use_fused_pose = true;
+  ros::param::param<bool>("/mower_logic/area_recording_use_localization_fusion", use_fused_pose, true);
+  use_localization_fusion.store(use_fused_pose);
+  if (node) {
+    use_fused_pose_pub = node->advertise<std_msgs::Bool>("area_recorder/use_fused_pose", 1, true);
+  }
+  publishUseLocalizationFusion();
+}
+
+void AreaRecordingBehavior::publishUseLocalizationFusion() {
+  if (!use_fused_pose_pub) {
+    return;
+  }
+  std_msgs::Bool message;
+  message.data = use_localization_fusion.load();
+  use_fused_pose_pub.publish(message);
+}
+
+bool AreaRecordingBehavior::setUseLocalizationFusion(bool enabled, std::string& message) {
+  if (recordingPolygonActive()) {
+    message = "Cannot switch area recording pose source while a polygon is recording.";
+    return false;
+  }
+
+  use_localization_fusion.store(enabled);
+  ros::param::set("/mower_logic/area_recording_use_localization_fusion", enabled);
+  publishUseLocalizationFusion();
+  message = enabled ? "Area recording will use fused localization pose."
+                    : "Area recording will use legacy GPS positioning pose.";
+  ROS_INFO_STREAM(message);
+  return true;
+}
+
+bool AreaRecordingBehavior::recordingPolygonActive() const {
+  return poly_recording_enabled;
 }
 
 geometry_msgs::Point32 AreaRecordingBehavior::projectPoint(const geometry_msgs::Pose& pose,
@@ -446,6 +608,18 @@ geometry_msgs::Point32 AreaRecordingBehavior::projectPoint(const geometry_msgs::
   return makePoint(
       pose.position.x + cos_yaw * offset.x - sin_yaw * offset.y,
       pose.position.y + sin_yaw * offset.x + cos_yaw * offset.y);
+}
+
+geometry_msgs::Polygon AreaRecordingBehavior::footprintAtPose(const geometry_msgs::Pose& pose) const {
+  geometry_msgs::Polygon polygon;
+  polygon.points.reserve(footprint_polygon.size() + 1);
+  for (const auto& offset : footprint_polygon) {
+    polygon.points.push_back(projectPoint(pose, offset));
+  }
+  if (!polygon.points.empty()) {
+    polygon.points.push_back(polygon.points.front());
+  }
+  return polygon;
 }
 
 void AreaRecordingBehavior::loadFootprintRecordingPoints() {
@@ -550,9 +724,10 @@ void AreaRecordingBehavior::loadFootprintRecordingPoints() {
 }
 
 void AreaRecordingBehavior::addRecordedPoint(RecordedPolygon& polygon,
-                                             const xbot_msgs::AbsolutePose& pose,
+                                             const RecordingPoseSnapshot& snapshot,
                                              uint32_t index,
                                              bool auto_collected) {
+  const auto& pose = snapshot.pose;
   const auto base_point = makePoint(pose.pose.pose.position.x, pose.pose.pose.position.y);
   const auto front_left_point = projectPoint(pose.pose.pose, footprint_front_left);
   const auto front_right_point = projectPoint(pose.pose.pose, footprint_front_right);
@@ -561,36 +736,43 @@ void AreaRecordingBehavior::addRecordedPoint(RecordedPolygon& polygon,
   polygon.front_left.points.push_back(front_left_point);
   polygon.front_right.points.push_back(front_right_point);
 
+  if (!snapshot.boundary_sample_allowed) {
+    return;
+  }
+
+  const auto& boundary_pose = snapshot.boundary_sample_pose;
+  const auto& boundary_gps = snapshot.boundary_gps_pose;
+  const auto boundary_base_point =
+      makePoint(boundary_pose.pose.pose.position.x, boundary_pose.pose.pose.position.y);
+  const auto boundary_front_left_point = projectPoint(boundary_pose.pose.pose, footprint_front_left);
+  const auto boundary_front_right_point = projectPoint(boundary_pose.pose.pose, footprint_front_right);
+
   auto make_sample = [&](uint8_t point_mode, const geometry_msgs::Point32& point) {
     mower_map::BoundarySample sample;
-    sample.header = pose.header;
+    sample.header = boundary_pose.header;
     if (sample.header.stamp == ros::Time()) {
       sample.header.stamp = ros::Time::now();
     }
     sample.header.frame_id = "map";
     sample.point_mode = point_mode;
     sample.point_index = index;
-    sample.fused_pose = pose.pose.pose;
+    sample.fused_pose = boundary_pose.pose.pose;
     sample.gps_point = point;
-    sample.gps_flags = pose.flags;
-    sample.gps_accuracy = pose.position_accuracy;
+    sample.gps_flags = boundary_gps.flags;
+    sample.gps_accuracy = boundary_gps.position_accuracy;
     sample.rtk_fixed = (sample.gps_flags & xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED) != 0;
     sample.auto_collected = auto_collected;
-
-    if (has_gps_pose && (ros::Time::now() - last_gps_pose_time).toSec() <= kGpsPoseFreshSec) {
-      sample.gps_flags = last_gps_pose.flags;
-      sample.gps_accuracy = last_gps_pose.position_accuracy;
-      sample.rtk_fixed = (sample.gps_flags & xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED) != 0;
-    }
     return sample;
   };
 
-  polygon.base_samples.push_back(make_sample(mower_map::BoundarySample::POINT_BASE, base_point));
-  polygon.front_left_samples.push_back(make_sample(mower_map::BoundarySample::POINT_FRONT_LEFT, front_left_point));
-  polygon.front_right_samples.push_back(make_sample(mower_map::BoundarySample::POINT_FRONT_RIGHT, front_right_point));
+  polygon.base_samples.push_back(make_sample(mower_map::BoundarySample::POINT_BASE, boundary_base_point));
+  polygon.front_left_samples.push_back(
+      make_sample(mower_map::BoundarySample::POINT_FRONT_LEFT, boundary_front_left_point));
+  polygon.front_right_samples.push_back(
+      make_sample(mower_map::BoundarySample::POINT_FRONT_RIGHT, boundary_front_right_point));
 }
 
-void AreaRecordingBehavior::addSweptPose(RecordedPolygon& polygon,
+bool AreaRecordingBehavior::addSweptPose(RecordedPolygon& polygon,
                                          const xbot_msgs::AbsolutePose& pose,
                                          bool start_new_segment) {
   if (start_new_segment || polygon.swept_pose_segments.empty()) {
@@ -600,7 +782,7 @@ void AreaRecordingBehavior::addSweptPose(RecordedPolygon& polygon,
   auto& segment = polygon.swept_pose_segments.back();
   const auto& pose_in_map = pose.pose.pose;
   if (!std::isfinite(pose_in_map.position.x) || !std::isfinite(pose_in_map.position.y)) {
-    return;
+    return false;
   }
 
   if (!segment.empty()) {
@@ -610,11 +792,82 @@ void AreaRecordingBehavior::addSweptPose(RecordedPolygon& polygon,
     const bool moved_far_enough = distance >= swept_area_options.pose_step_m;
     const bool rotated_far_enough = yaw_delta >= swept_area_options.yaw_step_rad;
     if (!moved_far_enough && !rotated_far_enough) {
-      return;
+      return false;
     }
   }
 
   segment.push_back(pose_in_map);
+  return true;
+}
+
+void AreaRecordingBehavior::appendFootprintPreview(xbot_msgs::MapOverlay& overlay,
+                                                   const geometry_msgs::Pose& pose,
+                                                   const std::string& color) {
+  xbot_msgs::MapOverlayPolygon footprint_viz;
+  footprint_viz.closed = true;
+  footprint_viz.line_width = 0.035;
+  footprint_viz.color = color;
+  footprint_viz.polygon = footprintAtPose(pose);
+  overlay.polygons.push_back(footprint_viz);
+}
+
+void AreaRecordingBehavior::clearPendingRecordingEdits() {
+  std::lock_guard<std::mutex> lock(pending_recording_edits_mutex);
+  pending_recording_edits.clear();
+}
+
+bool AreaRecordingBehavior::applyPendingRecordingEdits(mower_map::MapArea& result, std::string& error) {
+  std::vector<mower_map::MapEditStroke> edits;
+  {
+    std::lock_guard<std::mutex> lock(pending_recording_edits_mutex);
+    edits = pending_recording_edits;
+  }
+  if (edits.empty()) {
+    return true;
+  }
+
+  for (const auto& edit : edits) {
+    if (edit.operation == mower_map::MapEditStroke::REPLACE_POLYGON) {
+      geometry_msgs::Polygon normalized;
+      if (!mower_map::edit_geometry::normalizeReplacementPolygon(edit.replacement_polygon, normalized, error)) {
+        error = "invalid replacement polygon: " + error;
+        return false;
+      }
+      result.area = normalized;
+      continue;
+    }
+
+    if (edit.operation == mower_map::MapEditStroke::BRUSH_ADD) {
+      const auto edit_result = mower_map::edit_geometry::applyBrushAdd(result.area, edit.path, edit.brush_diameter_m);
+      if (!edit_result.success) {
+        error = "brush add failed: " + edit_result.error;
+        return false;
+      }
+      result.area = edit_result.outline;
+      continue;
+    }
+
+    if (edit.operation == mower_map::MapEditStroke::BRUSH_ERASE) {
+      const auto edit_result = mower_map::edit_geometry::applyBrushErase(result.area, edit.path, edit.brush_diameter_m);
+      if (!edit_result.success) {
+        error = "brush erase failed: " + edit_result.error;
+        return false;
+      }
+      if (!edit_result.extra_outlines.empty()) {
+        error = "draft erase split the area; finish recording first and edit the saved map";
+        return false;
+      }
+      result.area = edit_result.outline;
+      result.obstacles.insert(result.obstacles.end(), edit_result.obstacles.begin(), edit_result.obstacles.end());
+      continue;
+    }
+
+    error = "unknown recording edit operation";
+    return false;
+  }
+
+  error.clear();
+  return true;
 }
 
 bool AreaRecordingBehavior::buildSweptBoundary(const RecordedPolygon& polygon,
@@ -661,7 +914,7 @@ bool AreaRecordingBehavior::buildSweptBoundary(const RecordedPolygon& polygon,
   if (swept_result.pose_segment_count > 1) {
     ROS_WARN_STREAM("Area recorder diagnostics for " << label << ": recording has "
                                                      << swept_result.pose_segment_count
-                                                     << " swept segments; GPS quality dropouts are not bridged.");
+                                                     << " swept segments; recording-pose quality gaps are not bridged.");
   }
   if (swept_result.exterior_ring_count > 1) {
     ROS_WARN_STREAM("Area recorder diagnostics for " << label << ": swept union has "
@@ -815,8 +1068,6 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
 
   ros::Rate updateRate(10);
 
-  has_odom = false;
-
   // push a new poly to the visualization overlay
   {
     xbot_msgs::MapOverlayPolygon poly_viz;
@@ -825,7 +1076,7 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
     poly_viz.color = "blue";
     resultOverlay.polygons.push_back(poly_viz);
   }
-  auto& poly_viz = resultOverlay.polygons.back();
+  const auto poly_viz_index = resultOverlay.polygons.size() - 1;
   bool start_new_swept_segment = true;
   auto finish_recording = [&]() {
     if (polygon.base.points.size() > 2) {
@@ -848,14 +1099,19 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
 
     updateRate.sleep();
 
-    if (!has_odom) continue;
     if (!poly_recording_enabled) {
       finish_recording();
       break;
     }
 
-    const auto pose_snapshot = last_pose;
-    const auto pose_in_map = pose_snapshot.pose.pose;
+    RecordingPoseSnapshot pose_snapshot;
+    std::string pose_quality_reason;
+    if (!selectedRecordingPose(pose_snapshot, pose_quality_reason)) {
+      ROS_WARN_THROTTLE(2.0, "Area recorder skipping polygon point: %s", pose_quality_reason.c_str());
+      start_new_swept_segment = true;
+      continue;
+    }
+    const auto& pose_in_map = pose_snapshot.pose.pose.pose;
     const auto preview_point =
         preview_point_mode == mower_map::BoundarySample::POINT_FRONT_LEFT
             ? projectPoint(pose_in_map, footprint_front_left)
@@ -863,14 +1119,12 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
                   ? projectPoint(pose_in_map, footprint_front_right)
                   : makePoint(pose_in_map.position.x, pose_in_map.position.y);
 
-    std::string gps_quality_reason;
-    if (!recordingGpsQualityOk(pose_snapshot, gps_quality_reason)) {
-      ROS_WARN_THROTTLE(2.0, "Area recorder skipping polygon point: %s", gps_quality_reason.c_str());
-      start_new_swept_segment = true;
-      continue;
-    }
-    addSweptPose(polygon, pose_snapshot, start_new_swept_segment);
+    const bool added_swept_pose = addSweptPose(polygon, pose_snapshot.pose, start_new_swept_segment);
     start_new_swept_segment = false;
+    if (added_swept_pose) {
+      appendFootprintPreview(resultOverlay, pose_in_map, has_outline ? "red" : "green");
+      map_overlay_pub.publish(resultOverlay);
+    }
 
     if (polygon.base.points.empty()) {
       // add the first point
@@ -891,9 +1145,10 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
 
       marker_pub.publish(marker);
 
-      poly_viz.polygon.points.push_back(pt);
+      resultOverlay.polygons[poly_viz_index].polygon.points.push_back(pt);
       map_overlay_pub.publish(resultOverlay);
     } else {
+      auto& poly_viz = resultOverlay.polygons[poly_viz_index];
       auto last = poly_viz.polygon.points.back();
       tf2::Vector3 last_point(last.x, last.y, 0.0);
       tf2::Vector3 current_point(preview_point.x, preview_point.y, 0.0);
@@ -938,6 +1193,7 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
   marker_pub.publish(marker);
 
   // close poly
+  auto& poly_viz = resultOverlay.polygons[poly_viz_index];
   poly_viz.closed = true;
   poly_viz.line_width = 0.05;
   if (resultOverlay.polygons.size() == 1) {
@@ -951,23 +1207,24 @@ bool AreaRecordingBehavior::recordNewPolygon(RecordedPolygon& polygon,
 }
 
 bool AreaRecordingBehavior::getDockingPosition(geometry_msgs::Pose& pos) {
+  RecordingPoseSnapshot pose_snapshot;
+  std::string reason;
+  if (!selectedRecordingPose(pose_snapshot, reason)) {
+    ROS_WARN_STREAM("Could not record docking position: " << reason);
+    return false;
+  }
+
   if (!has_first_docking_pos) {
     ROS_INFO_STREAM("Recording first docking position");
 
-    auto odom_ptr =
-        ros::topic::waitForMessage<xbot_msgs::AbsolutePose>("/xbot_positioning/xb_pose", ros::Duration(1, 0));
-
-    first_docking_pos = odom_ptr->pose.pose;
+    first_docking_pos = pose_snapshot.pose.pose.pose;
     has_first_docking_pos = true;
     update_actions();
     return false;
   } else {
     ROS_INFO_STREAM("Recording second docking position");
 
-    auto odom_ptr =
-        ros::topic::waitForMessage<xbot_msgs::AbsolutePose>("/xbot_positioning/xb_pose", ros::Duration(1, 0));
-
-    pos.position = odom_ptr->pose.pose.position;
+    pos.position = pose_snapshot.pose.pose.pose.position;
 
     double yaw = atan2(pos.position.y - first_docking_pos.position.y, pos.position.x - first_docking_pos.position.x);
     tf2::Quaternion docking_orientation(0.0, 0.0, yaw);
@@ -1229,4 +1486,43 @@ void AreaRecordingBehavior::record_collect_point(std_msgs::Bool state_msg) {
     ROS_INFO_STREAM("Recording collect point");
     collect_point = true;
   }
+}
+
+bool AreaRecordingBehavior::applyRecordingEdit(mower_map::ApplyRecordingEditSrvRequest& req,
+                                               mower_map::ApplyRecordingEditSrvResponse& res) {
+  if (poly_recording_enabled) {
+    res.success = false;
+    res.message = "Pause polygon recording before applying draft edits.";
+    return true;
+  }
+  if (!has_outline && !is_mowing_area && !is_navigation_area) {
+    res.success = false;
+    res.message = "Record an outline before applying draft edits.";
+    return true;
+  }
+
+  if (req.edit.operation == mower_map::MapEditStroke::REPLACE_POLYGON) {
+    geometry_msgs::Polygon normalized;
+    std::string error;
+    if (!mower_map::edit_geometry::normalizeReplacementPolygon(req.edit.replacement_polygon, normalized, error)) {
+      res.success = false;
+      res.message = "Invalid replacement polygon: " + error;
+      return true;
+    }
+    req.edit.replacement_polygon = normalized;
+  } else if (req.edit.operation != mower_map::MapEditStroke::BRUSH_ADD &&
+             req.edit.operation != mower_map::MapEditStroke::BRUSH_ERASE) {
+    res.success = false;
+    res.message = "Unknown recording edit operation.";
+    return true;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(pending_recording_edits_mutex);
+    pending_recording_edits.push_back(req.edit);
+  }
+
+  res.success = true;
+  res.message = "Recording edit queued for the next saved area.";
+  return true;
 }

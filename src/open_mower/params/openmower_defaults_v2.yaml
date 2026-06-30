@@ -32,6 +32,12 @@ mower_logic:
   docking_retry_count: 4
   docking_redock: false
   outline_overlap_count: 0
+  area_recording_use_localization_fusion: true
+  area_recording_fused_pose_topic: "/localization_fusion/pose"
+  area_recording_legacy_pose_topic: "/xbot_positioning/xb_pose"
+  area_recording_max_pose_age_sec: 1.0
+  area_recording_max_fused_position_accuracy_m: 0.2
+  area_recording_max_fused_yaw_accuracy_rad: 0.15
   area_recording_pose_step_m: 0.03
   area_recording_yaw_step_rad: 0.05
   area_recording_simplify_epsilon_m: 0.03

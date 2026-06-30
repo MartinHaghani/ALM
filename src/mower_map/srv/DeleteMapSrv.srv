@@ -1,0 +1,6 @@
+string map_id
+---
+bool success
+string message
+string selected_map_id
+MapSummary[] maps
