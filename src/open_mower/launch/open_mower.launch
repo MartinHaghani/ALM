@@ -17,6 +17,10 @@
         <param name="default_source" value="$(optenv OM_MANUAL_INPUT_DEFAULT_SOURCE web_gamepad)"/>
     </node>
 
+    <node if="$(eval optenv('OM_NO_BLUETOOTH_GAMEPAD_MANAGER', 'False').lower() != 'true')" pkg="open_mower" type="bluetooth_gamepad_manager.py" name="bluetooth_gamepad_manager" output="screen" respawn="true" respawn_delay="5">
+        <param name="profile_param" value="/direct_gamepad/profile"/>
+    </node>
+
 
     <node if="$(eval optenv('OM_NO_MAP_SERVICE', 'False').lower() != 'true')" pkg="mower_map" type="mower_map_service" name="map_service" output="screen" respawn="true" respawn_delay="10"/>
     <node if="$(eval optenv('OM_NO_LOGIC', 'False').lower() != 'true')" pkg="mower_logic" type="mower_logic" name="mower_logic" output="screen" respawn="true" respawn_delay="10">

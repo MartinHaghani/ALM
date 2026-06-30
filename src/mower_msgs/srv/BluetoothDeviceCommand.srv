@@ -1,0 +1,5 @@
+string address
+string controller_type
+---
+bool success
+string message

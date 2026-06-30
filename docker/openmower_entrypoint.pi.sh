@@ -18,7 +18,7 @@ install_runtime_packages() {
   local missing_packages package file
   missing_packages=""
 
-  for package in libcrypto++6 nginx; do
+  for package in libcrypto++6 nginx python3-dbus python3-gi; do
     if ! dpkg -s "$package" >/dev/null 2>&1; then
       missing_packages="$missing_packages $package"
     fi
@@ -42,7 +42,9 @@ install_runtime_packages() {
   trap - EXIT
 }
 
-install_runtime_packages
+if [ "${OM_SKIP_RUNTIME_PACKAGE_INSTALL:-False}" != "True" ] && [ "${OM_SKIP_RUNTIME_PACKAGE_INSTALL:-False}" != "true" ]; then
+  install_runtime_packages
+fi
 
 configure_web_services() {
   mkdir -p /var/lib/nginx /run/nginx /var/log/nginx

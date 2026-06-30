@@ -5,6 +5,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install required base packages only (no nginx/mosquitto here)
 RUN apt-get update && apt-get install --yes \
     git \
+    python3-dbus \
+    python3-gi \
     python3.8-venv \
     && rm -rf /var/lib/apt/lists/*
 
@@ -83,6 +85,7 @@ ARG USER_GID=1000
 RUN groupadd --gid ${USER_GID} ${USERNAME} \
     && useradd --uid ${USER_UID} --gid ${USER_GID} --create-home --shell /bin/bash ${USERNAME} \
     && adduser ${USERNAME} dialout \
+    && adduser ${USERNAME} input \
     && chown -R ${USER_UID}:${USER_GID} /config /home/${USERNAME}
 
 # Append our bashrc extension to user's .bashrc

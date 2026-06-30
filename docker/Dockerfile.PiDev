@@ -9,6 +9,8 @@ RUN apt-get update && \
       git \
       nginx \
       pkg-config \
+      python3-dbus \
+      python3-gi \
       python3-venv \
       python3.8-venv && \
     rm -rf /var/lib/apt/lists/*
@@ -21,7 +23,7 @@ COPY src /opt/open_mower_ros/src
 RUN rosdep install --from-paths src --ignore-src --simulate | \
     sed --expression '1d' | sort | tr -d '\n' | sed --expression 's/  apt-get install//g' > /apt-install_list && \
     apt-get update && \
-    apt-get install --no-install-recommends --yes $(cat /apt-install_list) libasio-dev libcrypto++-dev libcrypto++6 && \
+    apt-get install --no-install-recommends --yes $(cat /apt-install_list) libasio-dev libcrypto++-dev libcrypto++6 python3-dbus python3-gi && \
     rm -rf /var/lib/apt/lists/* /apt-install_list
 
 RUN mkdir -p /config

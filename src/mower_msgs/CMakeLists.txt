@@ -22,6 +22,7 @@ add_message_files(
 
 add_service_files(
         FILES
+        BluetoothDeviceCommand.srv
         EmergencyStopSrv.srv
         GPSControlSrv.srv
         MowerControlSrv.srv

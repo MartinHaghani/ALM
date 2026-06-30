@@ -159,6 +159,7 @@ include_directories(
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
   scripts/battery_voltage_logger.py
+  scripts/bluetooth_gamepad_manager.py
   scripts/direct_gamepad_mapper.py
   scripts/localization_confidence.py
   scripts/localization_fusion.py

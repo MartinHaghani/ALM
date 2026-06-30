@@ -73,28 +73,33 @@ open_mower_ensure_version_info() {
 }
 
 open_mower_docker_run() {
+  local docker_args=()
   if [ -t 0 ] && [ -t 1 ]; then
-    docker run \
-      -it \
-      --privileged \
-      -v /dev:/dev \
-      -v "$OPEN_MOWER_CONFIG_FILE:/config/mower_config.sh:ro" \
-      -v "$OPEN_MOWER_ROSCONSOLE_CONFIG:/config/rosconsole.config:ro" \
-      -v "$OPEN_MOWER_REPO_DIR:/opt/open_mower_ros" \
-      -v "$OPEN_MOWER_ROS_HOME:/root/.ros" \
-      --network host \
-      "$@"
-  else
-    docker run \
-      --privileged \
-      -v /dev:/dev \
-      -v "$OPEN_MOWER_CONFIG_FILE:/config/mower_config.sh:ro" \
-      -v "$OPEN_MOWER_ROSCONSOLE_CONFIG:/config/rosconsole.config:ro" \
-      -v "$OPEN_MOWER_REPO_DIR:/opt/open_mower_ros" \
-      -v "$OPEN_MOWER_ROS_HOME:/root/.ros" \
-      --network host \
-      "$@"
+    docker_args+=(-it)
   fi
+
+  docker_args+=(
+    --privileged
+    -v /dev:/dev
+  )
+
+  if [ -S /run/dbus/system_bus_socket ]; then
+    docker_args+=(-v /run/dbus/system_bus_socket:/run/dbus/system_bus_socket)
+  fi
+
+  if [ -n "${OM_SKIP_RUNTIME_PACKAGE_INSTALL:-}" ]; then
+    docker_args+=(-e "OM_SKIP_RUNTIME_PACKAGE_INSTALL=$OM_SKIP_RUNTIME_PACKAGE_INSTALL")
+  fi
+
+  docker_args+=(
+    -v "$OPEN_MOWER_CONFIG_FILE:/config/mower_config.sh:ro"
+    -v "$OPEN_MOWER_ROSCONSOLE_CONFIG:/config/rosconsole.config:ro"
+    -v "$OPEN_MOWER_REPO_DIR:/opt/open_mower_ros"
+    -v "$OPEN_MOWER_ROS_HOME:/root/.ros"
+    --network host
+  )
+
+  docker run "${docker_args[@]}" "$@"
 }
 
 open_mower_start_mqtt_sidecar() {
