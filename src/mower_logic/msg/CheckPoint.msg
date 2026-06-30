@@ -3,3 +3,5 @@ int32 currentMowingArea
 int32 currentMowingPathIndex
 string currentMowingPlanDigest
 float32 currentMowingAngleIncrementSum
+string selected_map_id
+string selected_map_hash

@@ -34,6 +34,7 @@ extern void setConfig(mower_logic::MowerLogicConfig);
 extern ll::PowerConfig getPowerConfig();
 extern dynamic_reconfigure::Server<mower_logic::MowerLogicConfig>* reconfigServer;
 extern bool isGpsGood();
+extern bool selectedMapAllowsMowingStart(std::string* reason);
 
 extern ros::ServiceClient mapClient;
 
@@ -66,6 +67,9 @@ Behavior* IdleBehavior::execute() {
   setGPS(!stay_docked);
 
   ros::Rate r(25);
+  ros::Time last_map_start_check(0.0);
+  bool selected_map_ready = false;
+  std::string map_start_reason = "map selector has not been checked yet";
   while (ros::ok()) {
     stopMoving();
     stopBlade();
@@ -76,7 +80,14 @@ Behavior* IdleBehavior::execute() {
     const bool gps_ready_for_mowing = last_config.ignore_gps_errors || isGpsGood();
     const bool battery_ready =
         last_power.battery_voltage_valid && last_power.v_battery > last_power_config.battery_empty_voltage;
-    const bool start_mowing_enabled = gps_ready_for_mowing && battery_ready;
+    if (ros::Time::now() - last_map_start_check > ros::Duration(1.0)) {
+      selected_map_ready = selectedMapAllowsMowingStart(&map_start_reason);
+      last_map_start_check = ros::Time::now();
+    }
+    if (!selected_map_ready) {
+      ROS_WARN_STREAM_THROTTLE(5, "Cannot start mowing with selected map: " << map_start_reason);
+    }
+    const bool start_mowing_enabled = gps_ready_for_mowing && battery_ready && selected_map_ready;
 
     if (actions[0].enabled != start_mowing_enabled || !actions[1].enabled) {
       actions[0].enabled = start_mowing_enabled;
@@ -100,6 +111,12 @@ Behavior* IdleBehavior::execute() {
       }
       if (!battery_ready) {
         ROS_WARN_THROTTLE(5, "Cannot start mowing: battery voltage is below the configured parking threshold or invalid.");
+        manual_start_mowing.store(false);
+        r.sleep();
+        continue;
+      }
+      if (!selected_map_ready) {
+        ROS_WARN_STREAM_THROTTLE(5, "Cannot start mowing with selected map: " << map_start_reason);
         manual_start_mowing.store(false);
         r.sleep();
         continue;
@@ -134,10 +151,7 @@ void IdleBehavior::enter() {
   // disable it, so that we don't start mowing immediately
   manual_start_mowing.store(false);
 
-  for (auto& a : actions) {
-    a.enabled = false;
-  }
-  registerActions("mower_logic:idle", actions);
+  registerActions("mower_logic:idle", {});
 }
 
 void IdleBehavior::exit() {

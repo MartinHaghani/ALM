@@ -26,8 +26,12 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <ios>
+#include <limits>
 #include <mutex>
 #include <sstream>
 
@@ -39,11 +43,19 @@
 #include "mbf_msgs/ExePathAction.h"
 #include "mbf_msgs/MoveBaseAction.h"
 #include "mower_logic/MowerLogicConfig.h"
+#include "mower_map/ApplyMapEditSrv.h"
+#include "mower_map/ApplyRecordingEditSrv.h"
 #include "mower_map/ClearMapSrv.h"
 #include "mower_map/ClearNavPointSrv.h"
+#include "mower_map/CreateMapSrv.h"
+#include "mower_map/DeleteMapSrv.h"
 #include "mower_map/GetDockingPointSrv.h"
+#include "mower_map/GetMapCatalogSrv.h"
 #include "mower_map/GetMowingAreaSrv.h"
+#include "mower_map/MapSummary.h"
+#include "mower_map/RenameMapSrv.h"
 #include "mower_map/SetNavPointSrv.h"
+#include "mower_map/SelectMapSrv.h"
 #include "mower_msgs/EmergencyStopSrv.h"
 #include "mower_msgs/HighLevelControlSrv.h"
 #include "mower_msgs/HighLevelStatus.h"
@@ -51,13 +63,17 @@
 #include "ros/ros.h"
 #include "slic3r_coverage_planner/PlanPath.h"
 #include "std_msgs/String.h"
+#include "std_srvs/SetBool.h"
+#include "std_srvs/Trigger.h"
 #include "xbot_msgs/AbsolutePose.h"
+#include "xbot_msgs/MapOverlay.h"
 #include "xbot_msgs/RegisterActionsSrv.h"
 #include "xbot_positioning/GPSControlSrv.h"
 #include "xbot_positioning/SetPoseSrv.h"
 
 ros::ServiceClient pathClient, mapClient, dockingPointClient, gpsClient, mowClient, emergencyClient, pathProgressClient,
-    setNavPointClient, clearNavPointClient, clearMapClient, positioningClient, actionRegistrationClient;
+    setNavPointClient, clearNavPointClient, clearMapClient, positioningClient, actionRegistrationClient,
+    getMapCatalogClient, createMapClient, selectMapClient, renameMapClient, deleteMapClient, applyMapEditClient;
 
 ros::NodeHandle* n;
 ros::NodeHandle* paramNh;
@@ -66,7 +82,7 @@ dynamic_reconfigure::Server<mower_logic::MowerLogicConfig>* reconfigServer;
 actionlib::SimpleActionClient<mbf_msgs::MoveBaseAction>* mbfClient;
 actionlib::SimpleActionClient<mbf_msgs::ExePathAction>* mbfClientExePath;
 
-ros::Publisher cmd_vel_pub, high_level_state_publisher;
+ros::Publisher cmd_vel_pub, high_level_state_publisher, map_overlay_clear_pub;
 mower_logic::MowerLogicConfig last_config;
 ll::PowerConfig last_power_config;
 
@@ -96,6 +112,8 @@ double max_v_battery_seen = 0.0;
 bool mower_has_motor_temp = true;
 double manual_drive_linear_scale = 1.0;
 double manual_drive_angular_scale = 1.0;
+double map_selector_max_start_distance_m = 50.0;
+bool map_catalog_clients_ready = false;
 
 /**
  * Some thread safe methods to get a copy of the logic state
@@ -136,6 +154,112 @@ mower_msgs::HwPower getPower() {
 
 xbot_msgs::AbsolutePose getPose() {
   return pose_state_subscriber.getMessage();
+}
+
+bool getSelectedMapSummary(mower_map::MapSummary& summary, std::string* error = nullptr) {
+  if (!map_catalog_clients_ready) {
+    if (error) *error = "map catalog client not initialized";
+    return false;
+  }
+
+  mower_map::GetMapCatalogSrv catalog_srv;
+  if (!getMapCatalogClient.call(catalog_srv) || !catalog_srv.response.success) {
+    if (error) {
+      *error = catalog_srv.response.message.empty() ? "map catalog unavailable" : catalog_srv.response.message;
+    }
+    return false;
+  }
+
+  for (const auto& candidate : catalog_srv.response.maps) {
+    if (candidate.id == catalog_srv.response.selected_map_id || candidate.selected) {
+      summary = candidate;
+      return true;
+    }
+  }
+
+  if (error) *error = "no selected map in catalog";
+  return false;
+}
+
+bool getSelectedMapIdentity(std::string& map_id, std::string& map_hash) {
+  mower_map::MapSummary summary;
+  if (!getSelectedMapSummary(summary)) {
+    map_id.clear();
+    map_hash.clear();
+    return false;
+  }
+  map_id = summary.id;
+  map_hash = summary.map_hash;
+  return true;
+}
+
+double distanceToBounds(const mower_map::MapSummary& summary, const xbot_msgs::AbsolutePose& pose) {
+  if (!summary.bounds_valid) {
+    return std::numeric_limits<double>::infinity();
+  }
+
+  const double x = pose.pose.pose.position.x;
+  const double y = pose.pose.pose.position.y;
+  double dx = 0.0;
+  double dy = 0.0;
+  if (x < summary.min_x) {
+    dx = summary.min_x - x;
+  } else if (x > summary.max_x) {
+    dx = x - summary.max_x;
+  }
+  if (y < summary.min_y) {
+    dy = summary.min_y - y;
+  } else if (y > summary.max_y) {
+    dy = y - summary.max_y;
+  }
+  return std::hypot(dx, dy);
+}
+
+bool selectedMapAllowsMowingStart(std::string* reason = nullptr) {
+  mower_map::MapSummary summary;
+  std::string error;
+  if (!getSelectedMapSummary(summary, &error)) {
+    if (reason) *reason = error;
+    return false;
+  }
+
+  if (summary.mowing_area_count == 0) {
+    if (reason) *reason = "selected map has no mowing areas";
+    return false;
+  }
+
+  const auto pose = getPose();
+  const double distance = distanceToBounds(summary, pose);
+  if (distance <= map_selector_max_start_distance_m) {
+    return true;
+  }
+
+  std::ostringstream stream;
+  stream << "current pose is " << distance << "m from selected map '" << summary.name << "'";
+  if (reason) *reason = stream.str();
+  return false;
+}
+
+bool isMapCatalogMutationAllowed() {
+  return currentBehavior == &IdleBehavior::INSTANCE || currentBehavior == &IdleBehavior::DOCKED_INSTANCE;
+}
+
+void clearStoredMowingCheckpoint() {
+  if (std::remove("checkpoint.bag") != 0 && errno != ENOENT) {
+    ROS_WARN_STREAM("Failed to remove checkpoint.bag after map catalog change: " << std::strerror(errno));
+  }
+}
+
+void clearMapOverlay() {
+  if (map_overlay_clear_pub) {
+    xbot_msgs::MapOverlay overlay;
+    map_overlay_clear_pub.publish(overlay);
+  }
+}
+
+void afterMapCatalogMutation() {
+  clearStoredMowingCheckpoint();
+  clearMapOverlay();
 }
 
 void setEmergencyMode(bool emergency);
@@ -587,17 +711,16 @@ bool highLevelCommand(mower_msgs::HighLevelControlSrvRequest& req, mower_msgs::H
       break;
     case mower_msgs::HighLevelControlSrvRequest::COMMAND_DELETE_MAPS: {
       ROS_WARN_STREAM("COMMAND_DELETE_MAPS");
-      if (currentBehavior != &AreaRecordingBehavior::INSTANCE && currentBehavior != &IdleBehavior::INSTANCE &&
-          currentBehavior != &IdleBehavior::DOCKED_INSTANCE && currentBehavior != nullptr) {
-        ROS_ERROR_STREAM("Deleting maps is only allowed during IDLE or AreaRecording!");
+      if (!isMapCatalogMutationAllowed()) {
+        ROS_ERROR_STREAM("Clearing the selected map is only allowed during IDLE!");
         return true;
       }
       mower_map::ClearMapSrv clear_map_srv;
       // TODO check result
       clearMapClient.call(clear_map_srv);
+      afterMapCatalogMutation();
 
-      // Abort the current behavior. Idle will refresh and go to AreaRecorder, AreaRecorder will to to Idle wich will go
-      // to a fresh AreaRecorder
+      // Abort idle so it refreshes against the now-empty selected map.
       currentBehavior->abort();
     } break;
     case mower_msgs::HighLevelControlSrvRequest::COMMAND_RESET_EMERGENCY:
@@ -605,6 +728,114 @@ bool highLevelCommand(mower_msgs::HighLevelControlSrvRequest& req, mower_msgs::H
       setEmergencyMode(false);
       break;
   }
+  return true;
+}
+
+bool createMapGated(mower_map::CreateMapSrvRequest& req, mower_map::CreateMapSrvResponse& res) {
+  if (!isMapCatalogMutationAllowed()) {
+    res.success = false;
+    res.message = "Map creation is only allowed while idle.";
+    return true;
+  }
+
+  if (!createMapClient.call(req, res)) {
+    res.success = false;
+    res.message = "mower_map_service/create_map unavailable";
+    return true;
+  }
+  if (res.success) afterMapCatalogMutation();
+  return true;
+}
+
+bool selectMapGated(mower_map::SelectMapSrvRequest& req, mower_map::SelectMapSrvResponse& res) {
+  if (!isMapCatalogMutationAllowed()) {
+    res.success = false;
+    res.message = "Map selection is only allowed while idle.";
+    return true;
+  }
+
+  if (!selectMapClient.call(req, res)) {
+    res.success = false;
+    res.message = "mower_map_service/select_map unavailable";
+    return true;
+  }
+  if (res.success) afterMapCatalogMutation();
+  return true;
+}
+
+bool renameMapGated(mower_map::RenameMapSrvRequest& req, mower_map::RenameMapSrvResponse& res) {
+  if (!isMapCatalogMutationAllowed()) {
+    res.success = false;
+    res.message = "Map rename is only allowed while idle.";
+    return true;
+  }
+
+  if (!renameMapClient.call(req, res)) {
+    res.success = false;
+    res.message = "mower_map_service/rename_map unavailable";
+    return true;
+  }
+  return true;
+}
+
+bool deleteMapGated(mower_map::DeleteMapSrvRequest& req, mower_map::DeleteMapSrvResponse& res) {
+  if (!isMapCatalogMutationAllowed()) {
+    res.success = false;
+    res.message = "Map deletion is only allowed while idle.";
+    res.selected_map_id = "";
+    return true;
+  }
+
+  if (!deleteMapClient.call(req, res)) {
+    res.success = false;
+    res.message = "mower_map_service/delete_map unavailable";
+    res.selected_map_id = "";
+    return true;
+  }
+  if (res.success) afterMapCatalogMutation();
+  return true;
+}
+
+bool applyMapEditGated(mower_map::ApplyMapEditSrvRequest& req, mower_map::ApplyMapEditSrvResponse& res) {
+  if (!isMapCatalogMutationAllowed()) {
+    res.success = false;
+    res.message = "Map editing is only allowed while idle.";
+    return true;
+  }
+
+  if (!applyMapEditClient.call(req, res)) {
+    res.success = false;
+    res.message = "mower_map_service/apply_map_edit unavailable";
+    return true;
+  }
+  if (res.success) afterMapCatalogMutation();
+  return true;
+}
+
+bool applyRecordingEdit(mower_map::ApplyRecordingEditSrvRequest& req,
+                        mower_map::ApplyRecordingEditSrvResponse& res) {
+  if (currentBehavior != &AreaRecordingBehavior::INSTANCE) {
+    res.success = false;
+    res.message = "Recording edits are only allowed while area recording is active.";
+    return true;
+  }
+  return AreaRecordingBehavior::INSTANCE.applyRecordingEdit(req, res);
+}
+
+bool previewMowingPlan(std_srvs::Trigger::Request&,
+                       std_srvs::Trigger::Response& res) {
+  if (!isMapCatalogMutationAllowed()) {
+    res.success = false;
+    res.message = "Route preview is only allowed while idle.";
+    return true;
+  }
+
+  res.success = MowingBehavior::INSTANCE.preview_route_plan(res.message);
+  return true;
+}
+
+bool setAreaRecordingUseFusedPose(std_srvs::SetBool::Request& req, std_srvs::SetBool::Response& res) {
+  res.success = AreaRecordingBehavior::INSTANCE.setUseLocalizationFusion(req.data, res.message);
   return true;
 }
 
@@ -655,8 +886,10 @@ int main(int argc, char** argv) {
   const double default_manual_drive_scale = 1.0;
   manual_drive_linear_scale = n->param("/mower_logic/manual_drive_linear_scale", default_manual_drive_scale);
   manual_drive_angular_scale = n->param("/mower_logic/manual_drive_angular_scale", default_manual_drive_scale);
+  map_selector_max_start_distance_m = n->param("/mower_logic/map_selector/max_start_distance_m", 50.0);
   ROS_INFO_STREAM("Manual drive linear scale: " << manual_drive_linear_scale);
   ROS_INFO_STREAM("Manual drive angular scale: " << manual_drive_angular_scale);
+  ROS_INFO_STREAM("Map selector max start distance: " << map_selector_max_start_distance_m << "m");
 
   boost::recursive_mutex mutex;
 
@@ -667,12 +900,22 @@ int main(int argc, char** argv) {
   last_power_config.__fromServer__(powerNodeHandle);
 
   cmd_vel_pub = n->advertise<geometry_msgs::Twist>("/logic_vel", 1);
+  map_overlay_clear_pub = n->advertise<xbot_msgs::MapOverlay>("xbot_monitoring/map_overlay", 10);
 
   high_level_state_publisher = n->advertise<mower_msgs::HighLevelStatus>("mower_logic/current_state", 100, true);
+  MowingBehavior::INSTANCE.advertise_route_plan();
+  AreaRecordingBehavior::INSTANCE.initializeRecordingPoseModePublisher(n);
 
   pathClient = n->serviceClient<slic3r_coverage_planner::PlanPath>("slic3r_coverage_planner/plan_path");
   mapClient = n->serviceClient<mower_map::GetMowingAreaSrv>("mower_map_service/get_mowing_area");
   clearMapClient = n->serviceClient<mower_map::ClearMapSrv>("mower_map_service/clear_map");
+  getMapCatalogClient = n->serviceClient<mower_map::GetMapCatalogSrv>("mower_map_service/get_map_catalog");
+  createMapClient = n->serviceClient<mower_map::CreateMapSrv>("mower_map_service/create_map");
+  selectMapClient = n->serviceClient<mower_map::SelectMapSrv>("mower_map_service/select_map");
+  renameMapClient = n->serviceClient<mower_map::RenameMapSrv>("mower_map_service/rename_map");
+  deleteMapClient = n->serviceClient<mower_map::DeleteMapSrv>("mower_map_service/delete_map");
+  applyMapEditClient = n->serviceClient<mower_map::ApplyMapEditSrv>("mower_map_service/apply_map_edit");
+  map_catalog_clients_ready = true;
 
   gpsClient = n->serviceClient<xbot_positioning::GPSControlSrv>("xbot_positioning/set_gps_state");
   positioningClient = n->serviceClient<xbot_positioning::SetPoseSrv>("xbot_positioning/set_robot_pose");
@@ -703,6 +946,17 @@ int main(int argc, char** argv) {
   ros::Subscriber action = n->subscribe("xbot/action", 0, actionReceived, ros::TransportHints().tcpNoDelay(true));
 
   ros::ServiceServer high_level_control_srv = n->advertiseService("mower_service/high_level_control", highLevelCommand);
+  ros::ServiceServer create_map_srv = n->advertiseService("mower_service/create_map", createMapGated);
+  ros::ServiceServer select_map_srv = n->advertiseService("mower_service/select_map", selectMapGated);
+  ros::ServiceServer rename_map_srv = n->advertiseService("mower_service/rename_map", renameMapGated);
+  ros::ServiceServer delete_map_srv = n->advertiseService("mower_service/delete_map", deleteMapGated);
+  ros::ServiceServer apply_map_edit_srv = n->advertiseService("mower_service/apply_map_edit", applyMapEditGated);
+  ros::ServiceServer apply_recording_edit_srv =
+      n->advertiseService("mower_service/apply_recording_edit", applyRecordingEdit);
+  ros::ServiceServer preview_mowing_plan_srv =
+      n->advertiseService("mower_service/preview_mowing_plan", previewMowingPlan);
+  ros::ServiceServer set_area_recording_use_fused_pose_srv =
+      n->advertiseService("mower_service/set_area_recording_use_fused_pose", setAreaRecordingUseFusedPose);
 
   // Keep timers and state subscribers responsive even if one callback is waiting on
   // a service call or transport hiccup during mowing recovery.
@@ -784,14 +1038,9 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  ROS_INFO("Waiting for path server");
-  if (!pathClient.waitForExistence(ros::Duration(60.0, 0.0))) {
-    ROS_ERROR("Path service not found.");
-    delete (reconfigServer);
-    delete (mbfClient);
-    delete (mbfClientExePath);
-
-    return 1;
+  ROS_INFO("Checking path server");
+  if (!pathClient.waitForExistence(ros::Duration(2.0, 0.0))) {
+    ROS_WARN("Path service not available at startup. Mowing plan requests will fail until /slic3r_coverage_planner/plan_path is available.");
   }
   ROS_INFO("Waiting for mower service");
   if (!mowClient.waitForExistence(ros::Duration(60.0, 0.0))) {

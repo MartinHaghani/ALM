@@ -26,6 +26,7 @@ class MowingBehavior : public Behavior {
  private:
   std::vector<xbot_msgs::ActionInfo> actions;
   ros::Publisher map_overlay_pub;
+  ros::Publisher route_plan_pub;
 
   bool skip_area;
   bool skip_path;
@@ -34,6 +35,7 @@ class MowingBehavior : public Behavior {
   bool execute_mowing_plan();
   void publish_mowing_overlay();
   void clear_mowing_overlay();
+  void publish_route_plan(bool active);
 
   // Progress
   bool mowerEnabled = false;
@@ -45,11 +47,18 @@ class MowingBehavior : public Behavior {
   int currentMowingPathIndex;
   std::string currentMowingPlanDigest;
   double currentMowingAngleIncrementSum;
+  std::string lastMowingEvent;
+  std::string lastMowingError;
+  int lastMbfState;
+  void set_mowing_diagnostic(const std::string& event, const std::string& error = "", int mbf_state = -1);
 
  public:
   MowingBehavior();
 
   static MowingBehavior INSTANCE;
+
+  void advertise_route_plan();
+  bool preview_route_plan(std::string& message);
 
   std::string state_name() override;
 

@@ -16,14 +16,19 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <cryptopp/cryptlib.h>
 #include <cryptopp/hex.h>
 #include <cryptopp/sha.h>
+#include <iomanip>
+#include <limits>
 #include <nav_msgs/Path.h>
 #include <rosbag/bag.h>
 #include <rosbag/view.h>
+#include <sstream>
+#include <std_msgs/String.h>
 
 #include "mower_logic/CheckPoint.h"
 #include "mower_map/ClearNavPointSrv.h"
@@ -44,7 +49,9 @@ extern ros::ServiceClient dockingPointClient;
 extern actionlib::SimpleActionClient<mbf_msgs::MoveBaseAction>* mbfClient;
 extern actionlib::SimpleActionClient<mbf_msgs::ExePathAction>* mbfClientExePath;
 extern mower_logic::MowerLogicConfig getConfig();
+extern xbot_msgs::AbsolutePose getPose();
 extern bool isGpsGood();
+extern bool getSelectedMapIdentity(std::string& map_id, std::string& map_hash);
 extern void setConfig(mower_logic::MowerLogicConfig);
 extern void stopBlade();
 extern void stopMoving();
@@ -59,6 +66,270 @@ constexpr char kFullPlanOverlayColor[] = "blue";
 constexpr char kRemainingPlanOverlayColor[] = "green";
 constexpr float kFullPlanOverlayLineWidth = 0.05f;
 constexpr float kRemainingPlanOverlayLineWidth = 0.10f;
+constexpr double kFirstPointMaxStartDistanceM = 0.30;
+constexpr double kFirstPointMaxStartYawErrorRad = 35.0 * M_PI / 180.0;
+constexpr double kClosedOutlineDuplicateMaxDistanceM = 0.15;
+constexpr double kOutlineEntryLeadInLengthM = 1.20;
+constexpr double kOutlineEntryLeadInInsetM = 0.80;
+constexpr size_t kOutlineEntryLeadInSamples = 8;
+
+double yaw_from_quaternion(const geometry_msgs::Quaternion& q) {
+  const double siny_cosp = 2.0 * (q.w * q.z + q.x * q.y);
+  const double cosy_cosp = 1.0 - 2.0 * (q.y * q.y + q.z * q.z);
+  return std::atan2(siny_cosp, cosy_cosp);
+}
+
+double normalized_angle(double angle) {
+  return std::atan2(std::sin(angle), std::cos(angle));
+}
+
+geometry_msgs::Quaternion quaternion_from_yaw(double yaw) {
+  geometry_msgs::Quaternion q;
+  q.x = 0.0;
+  q.y = 0.0;
+  q.z = std::sin(yaw * 0.5);
+  q.w = std::cos(yaw * 0.5);
+  return q;
+}
+
+void append_json_string(std::ostringstream& out, const std::string& value) {
+  out << '"';
+  for (const char ch : value) {
+    switch (ch) {
+      case '"':
+        out << "\\\"";
+        break;
+      case '\\':
+        out << "\\\\";
+        break;
+      case '\b':
+        out << "\\b";
+        break;
+      case '\f':
+        out << "\\f";
+        break;
+      case '\n':
+        out << "\\n";
+        break;
+      case '\r':
+        out << "\\r";
+        break;
+      case '\t':
+        out << "\\t";
+        break;
+      default:
+        if (static_cast<unsigned char>(ch) < 0x20) {
+          out << "\\u" << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(static_cast<unsigned char>(ch))
+              << std::dec << std::setfill(' ');
+        } else {
+          out << ch;
+        }
+    }
+  }
+  out << '"';
+}
+
+bool live_pose_reached_target(const xbot_msgs::AbsolutePose& pose, const geometry_msgs::PoseStamped& target,
+                              double& distance, double& yaw_error) {
+  const auto& current_position = pose.pose.pose.position;
+  const auto& target_position = target.pose.position;
+  distance = std::hypot(current_position.x - target_position.x, current_position.y - target_position.y);
+  yaw_error = normalized_angle(yaw_from_quaternion(pose.pose.pose.orientation) - yaw_from_quaternion(target.pose.orientation));
+  return distance <= kFirstPointMaxStartDistanceM && std::abs(yaw_error) <= kFirstPointMaxStartYawErrorRad;
+}
+
+double pose_distance(const geometry_msgs::Pose& a, const geometry_msgs::Pose& b) {
+  return std::hypot(a.position.x - b.position.x, a.position.y - b.position.y);
+}
+
+size_t unique_closed_pose_count(const std::vector<geometry_msgs::PoseStamped>& poses) {
+  if (poses.size() < 2) {
+    return poses.size();
+  }
+  const bool has_duplicate_end =
+      pose_distance(poses.front().pose, poses.back().pose) <= kClosedOutlineDuplicateMaxDistanceM;
+  return has_duplicate_end ? poses.size() - 1 : poses.size();
+}
+
+double signed_outline_area(const std::vector<geometry_msgs::PoseStamped>& poses, size_t unique_pose_count) {
+  double area = 0.0;
+  if (unique_pose_count < 3) {
+    return area;
+  }
+  for (size_t index = 0; index < unique_pose_count; ++index) {
+    const auto& a = poses[index].pose.position;
+    const auto& b = poses[(index + 1) % unique_pose_count].pose.position;
+    area += a.x * b.y - b.x * a.y;
+  }
+  return 0.5 * area;
+}
+
+bool rotate_closed_outline_start(slic3r_coverage_planner::Path& path, const xbot_msgs::AbsolutePose& current_pose) {
+  auto& poses = path.path.poses;
+  if (!path.is_outline || poses.size() < 4) {
+    return false;
+  }
+
+  const size_t unique_pose_count = unique_closed_pose_count(poses);
+  const bool has_duplicate_end = unique_pose_count + 1 == poses.size();
+  if (unique_pose_count < 3) {
+    return false;
+  }
+
+  const auto& current_position = current_pose.pose.pose.position;
+  const double current_yaw = yaw_from_quaternion(current_pose.pose.pose.orientation);
+  size_t best_index = 0;
+  double best_score = std::numeric_limits<double>::infinity();
+  double best_distance = 0.0;
+  double best_heading_error = 0.0;
+
+  for (size_t index = 0; index < unique_pose_count; ++index) {
+    const auto& candidate = poses[index].pose;
+    const double dx = candidate.position.x - current_position.x;
+    const double dy = candidate.position.y - current_position.y;
+    const double distance = std::hypot(dx, dy);
+    const double candidate_yaw = yaw_from_quaternion(candidate.orientation);
+    const double heading_error = std::abs(normalized_angle(current_yaw - candidate_yaw));
+    const double forward_projection = dx * std::cos(candidate_yaw) + dy * std::sin(candidate_yaw);
+    const double lateral_projection = std::abs(-dx * std::sin(candidate_yaw) + dy * std::cos(candidate_yaw));
+
+    const double behind_penalty = std::max(0.0, -forward_projection);
+    const double score = distance + 0.6 * heading_error + 0.35 * behind_penalty + 0.15 * lateral_projection;
+    if (score < best_score) {
+      best_score = score;
+      best_index = index;
+      best_distance = distance;
+      best_heading_error = heading_error;
+    }
+  }
+
+  if (best_index == 0) {
+    return false;
+  }
+
+  std::vector<geometry_msgs::PoseStamped> rotated;
+  rotated.reserve(unique_pose_count + (has_duplicate_end ? 1 : 0));
+  for (size_t offset = 0; offset < unique_pose_count; ++offset) {
+    rotated.push_back(poses[(best_index + offset) % unique_pose_count]);
+  }
+  if (has_duplicate_end) {
+    rotated.push_back(rotated.front());
+  }
+  poses = rotated;
+
+  ROS_WARN_STREAM("MowingBehavior: Rotated closed outline start to pose index "
+                  << best_index << " based on current mower pose. distance=" << best_distance
+                  << " heading_error_deg=" << best_heading_error * (180.0 / M_PI)
+                  << " score=" << best_score);
+  return true;
+}
+
+bool prepend_closed_outline_entry_lead_in(slic3r_coverage_planner::Path& path) {
+  auto& poses = path.path.poses;
+  if (!path.is_outline || poses.size() < 4) {
+    return false;
+  }
+
+  const size_t unique_pose_count = unique_closed_pose_count(poses);
+  if (unique_pose_count < 3) {
+    return false;
+  }
+
+  const auto entry_pose = poses.front();
+  const double entry_yaw = yaw_from_quaternion(entry_pose.pose.orientation);
+  const double tangent_x = std::cos(entry_yaw);
+  const double tangent_y = std::sin(entry_yaw);
+
+  double inward_x = -tangent_y;
+  double inward_y = tangent_x;
+  if (signed_outline_area(poses, unique_pose_count) < 0.0) {
+    inward_x *= -1.0;
+    inward_y *= -1.0;
+  }
+
+  const auto& entry_position = entry_pose.pose.position;
+  geometry_msgs::Point p0;
+  p0.x = entry_position.x - tangent_x * kOutlineEntryLeadInLengthM + inward_x * kOutlineEntryLeadInInsetM;
+  p0.y = entry_position.y - tangent_y * kOutlineEntryLeadInLengthM + inward_y * kOutlineEntryLeadInInsetM;
+  p0.z = entry_position.z;
+
+  geometry_msgs::Point p1;
+  p1.x = p0.x + tangent_x * (kOutlineEntryLeadInLengthM * 0.55);
+  p1.y = p0.y + tangent_y * (kOutlineEntryLeadInLengthM * 0.55);
+  p1.z = entry_position.z;
+
+  geometry_msgs::Point p2;
+  p2.x = entry_position.x - tangent_x * (kOutlineEntryLeadInLengthM * 0.55);
+  p2.y = entry_position.y - tangent_y * (kOutlineEntryLeadInLengthM * 0.55);
+  p2.z = entry_position.z;
+
+  geometry_msgs::Point p3 = entry_position;
+
+  std::vector<geometry_msgs::PoseStamped> lead_in;
+  lead_in.reserve(kOutlineEntryLeadInSamples + 1);
+
+  auto make_pose = [&](const geometry_msgs::Point& point, double yaw) {
+    geometry_msgs::PoseStamped pose = entry_pose;
+    pose.pose.position = point;
+    pose.pose.orientation = quaternion_from_yaw(yaw);
+    return pose;
+  };
+
+  lead_in.push_back(make_pose(p0, entry_yaw));
+  for (size_t sample = 1; sample <= kOutlineEntryLeadInSamples; ++sample) {
+    const double u = static_cast<double>(sample) / static_cast<double>(kOutlineEntryLeadInSamples + 1);
+    const double one_minus_u = 1.0 - u;
+    geometry_msgs::Point point;
+    point.x = one_minus_u * one_minus_u * one_minus_u * p0.x +
+              3.0 * one_minus_u * one_minus_u * u * p1.x +
+              3.0 * one_minus_u * u * u * p2.x + u * u * u * p3.x;
+    point.y = one_minus_u * one_minus_u * one_minus_u * p0.y +
+              3.0 * one_minus_u * one_minus_u * u * p1.y +
+              3.0 * one_minus_u * u * u * p2.y + u * u * u * p3.y;
+    point.z = entry_position.z;
+
+    const double dx = 3.0 * one_minus_u * one_minus_u * (p1.x - p0.x) +
+                      6.0 * one_minus_u * u * (p2.x - p1.x) + 3.0 * u * u * (p3.x - p2.x);
+    const double dy = 3.0 * one_minus_u * one_minus_u * (p1.y - p0.y) +
+                      6.0 * one_minus_u * u * (p2.y - p1.y) + 3.0 * u * u * (p3.y - p2.y);
+    lead_in.push_back(make_pose(point, std::atan2(dy, dx)));
+  }
+
+  std::vector<geometry_msgs::PoseStamped> with_lead_in;
+  with_lead_in.reserve(lead_in.size() + poses.size());
+  with_lead_in.insert(with_lead_in.end(), lead_in.begin(), lead_in.end());
+  with_lead_in.insert(with_lead_in.end(), poses.begin(), poses.end());
+  poses = with_lead_in;
+
+  ROS_WARN_STREAM("MowingBehavior: Prepended outline entry lead-in. staging=("
+                  << p0.x << ", " << p0.y << ") entry=(" << entry_position.x << ", " << entry_position.y
+                  << ") length=" << kOutlineEntryLeadInLengthM << " inset=" << kOutlineEntryLeadInInsetM
+                  << " samples=" << kOutlineEntryLeadInSamples);
+  return true;
+}
+
+const char* nav_state_name(int state) {
+  switch (state) {
+    case actionlib::SimpleClientGoalState::PENDING:
+      return "PENDING";
+    case actionlib::SimpleClientGoalState::ACTIVE:
+      return "ACTIVE";
+    case actionlib::SimpleClientGoalState::RECALLED:
+      return "RECALLED";
+    case actionlib::SimpleClientGoalState::REJECTED:
+      return "REJECTED";
+    case actionlib::SimpleClientGoalState::PREEMPTED:
+      return "PREEMPTED";
+    case actionlib::SimpleClientGoalState::ABORTED:
+      return "ABORTED";
+    case actionlib::SimpleClientGoalState::SUCCEEDED:
+      return "SUCCEEDED";
+    case actionlib::SimpleClientGoalState::LOST:
+      return "LOST";
+    default:
+      return "UNKNOWN";
+  }
+}
 
 void add_overlay_polyline(xbot_msgs::MapOverlay& overlay, const std::vector<geometry_msgs::PoseStamped>& poses,
                           size_t start_index, const char* color, float line_width) {
@@ -127,6 +398,7 @@ Behavior* MowingBehavior::execute() {
     if (finished) {
       // skip to next area if current
       ROS_INFO_STREAM("MowingBehavior: Executing mowing plan - finished");
+      publish_route_plan(false);
       currentMowingArea++;
       currentMowingPaths.clear();
       currentMowingPath = 0;
@@ -148,7 +420,9 @@ void MowingBehavior::enter() {
   skip_path = false;
   paused = aborted = false;
   map_overlay_pub = n->advertise<xbot_msgs::MapOverlay>("xbot_monitoring/map_overlay", 10);
+  advertise_route_plan();
   clear_mowing_overlay();
+  restore_checkpoint();
 
   for (auto& a : actions) {
     a.enabled = true;
@@ -158,20 +432,20 @@ void MowingBehavior::enter() {
 
 void MowingBehavior::exit() {
   clear_mowing_overlay();
+  publish_route_plan(false);
   if (map_overlay_pub) {
     map_overlay_pub.shutdown();
   }
-  for (auto& a : actions) {
-    a.enabled = false;
-  }
-  registerActions("mower_logic:mowing", actions);
+  registerActions("mower_logic:mowing", {});
 }
 
 void MowingBehavior::reset() {
+  publish_route_plan(false);
   currentMowingPaths.clear();
   currentMowingArea = 0;
   currentMowingPath = 0;
   currentMowingPathIndex = 0;
+  set_mowing_diagnostic("reset");
   clear_mowing_overlay();
   // increase cumulative mowing angle offset increment
   currentMowingAngleIncrementSum = std::fmod(currentMowingAngleIncrementSum + getConfig().mow_angle_increment, 360);
@@ -262,12 +536,26 @@ bool MowingBehavior::create_mowing_plan(int area_index) {
   pathSrv.request.fill_type = slic3r_coverage_planner::PlanPathRequest::FILL_LINEAR;
   pathSrv.request.outer_offset = config.outline_offset;
   pathSrv.request.distance = config.tool_width;
+  if (!pathClient.waitForExistence(ros::Duration(5.0, 0.0))) {
+    ROS_ERROR_STREAM("MowingBehavior: Coverage planning service is unavailable");
+    return false;
+  }
   if (!pathClient.call(pathSrv)) {
     ROS_ERROR_STREAM("MowingBehavior: Error during coverage planning");
     return false;
   }
 
   currentMowingPaths = pathSrv.response.paths;
+  for (auto& mowing_path : currentMowingPaths) {
+    if (!mowing_path.is_outline) {
+      continue;
+    }
+    const auto current_pose = getPose();
+    rotate_closed_outline_start(mowing_path, current_pose);
+    prepend_closed_outline_entry_lead_in(mowing_path);
+    break;
+  }
+  set_mowing_diagnostic("plan_created");
 
   // Calculate mowing plan digest from the poses
   // TODO: move to slic3r_coverage_planner
@@ -328,8 +616,6 @@ void printNavState(int state) {
 }
 
 bool MowingBehavior::execute_mowing_plan() {
-  int first_point_attempt_counter = 0;
-  int first_point_trim_counter = 0;
   ros::Time paused_time(0.0);
 
   // loop through all mowingPaths to execute the plan fully.
@@ -410,6 +696,8 @@ bool MowingBehavior::execute_mowing_plan() {
       mbf_msgs::MoveBaseGoal moveBaseGoal;
       moveBaseGoal.target_pose = path.path.poses[currentMowingPathIndex];
       moveBaseGoal.controller = "FTCPlanner";
+      set_mowing_diagnostic("first_point_goal_sent");
+      publish_route_plan(true);
       mbfClient->sendGoal(moveBaseGoal);
       sleep(1);
       actionlib::SimpleClientGoalState current_status(actionlib::SimpleClientGoalState::PENDING);
@@ -460,52 +748,40 @@ bool MowingBehavior::execute_mowing_plan() {
         r.sleep();
       }
 
-      first_point_attempt_counter++;
-      if (current_status.state_ != actionlib::SimpleClientGoalState::SUCCEEDED) {
-        // we cannot reach the start point
-        ROS_ERROR_STREAM("MowingBehavior: (FIRST POINT) - Could not reach goal (first point). Planner Status was: "
-                         << current_status.state_);
-        // we have 3 attempts to get to the start pose of the mowing area
-        if (first_point_attempt_counter < config.max_first_point_attempts) {
-          ROS_WARN_STREAM("MowingBehavior: (FIRST POINT) - Attempt " << first_point_attempt_counter << " / "
-                                                                     << config.max_first_point_attempts
-                                                                     << " Making a little pause ...");
-          paused = true;
-          update_actions();
-        } else {
-          // We failed to reach the first point in the mow path by simply repeating the drive to process
-          // So now we will trim the path by removing the first pose
-          if (first_point_trim_counter < config.max_first_point_trim_attempts) {
-            // We try now to remove the first point so the 2nd, 3rd etc point becomes our target
-            // mow path points are offset by 10cm
-            ROS_WARN_STREAM("MowingBehavior: (FIRST POINT) - Attempt "
-                            << first_point_trim_counter << " / " << config.max_first_point_trim_attempts
-                            << " Trimming first point off the beginning of the mow path.");
-            currentMowingPathIndex++;
-            publish_mowing_overlay();
-            first_point_trim_counter++;
-            first_point_attempt_counter = 0;  // give it another <config.max_first_point_attempts> attempts
-            paused = true;
-            update_actions();
-          } else {
-            // Unable to reach the start of the mow path (we tried multiple attempts for the same point, and we skipped
-            // points which also didnt work, time to give up)
-            ROS_ERROR_STREAM(
-                "MowingBehavior: (FIRST POINT) Max retries reached, we are unable to reach any of the first points - "
-                "aborting at index: "
-                << currentMowingPathIndex << " path: " << currentMowingPath << " area: " << currentMowingArea);
-            this->abort();
-          }
+      bool first_point_reached = current_status.state_ == actionlib::SimpleClientGoalState::SUCCEEDED;
+      if (first_point_reached) {
+        double first_point_distance = 0.0;
+        double first_point_yaw_error = 0.0;
+        if (!live_pose_reached_target(getPose(), path.path.poses[currentMowingPathIndex], first_point_distance,
+                                      first_point_yaw_error)) {
+          ROS_WARN_STREAM("MowingBehavior: (FIRST POINT) FTCPlanner reported success, but live pose is still "
+                          << first_point_distance << " m and " << first_point_yaw_error * (180.0 / M_PI)
+                          << " deg from the target. Pausing for inspection.");
+          stopMoving();
+          first_point_reached = false;
         }
+      }
+
+      if (!first_point_reached) {
+        // we cannot reach the start point
+        std::ostringstream first_point_error;
+        first_point_error << "Could not reach first point. MBF state=" << nav_state_name(current_status.state_)
+                          << " progress_index=" << currentMowingPathIndex << " path=" << currentMowingPath
+                          << " area=" << currentMowingArea;
+        set_mowing_diagnostic("first_point_error_pause", first_point_error.str(), current_status.state_);
+        publish_route_plan(true);
+        ROS_ERROR_STREAM("MowingBehavior: (FIRST POINT) - " << first_point_error.str());
+        ROS_WARN_STREAM("MowingBehavior: (FIRST POINT) - Pausing without retrying or trimming the route.");
+        mowerEnabled = false;
+        stopBlade();
+        stopMoving();
+        requestPause(pauseType::PAUSE_MANUAL);
+        update_actions();
         continue;
       }
 
       mower_map::ClearNavPointSrv clear_nav_point_srv;
       clearNavPointClient.call(clear_nav_point_srv);
-
-      // we have reached the start pose of the mow area, reset error handling values
-      first_point_attempt_counter = 0;
-      first_point_trim_counter = 0;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -529,6 +805,8 @@ bool MowingBehavior::execute_mowing_plan() {
 
       ROS_INFO_STREAM("MowingBehavior: (MOW) First point reached - Executing mow path with "
                       << path.path.poses.size() << " poses, from index " << exePathStartIndex);
+      set_mowing_diagnostic("mow_path_goal_sent");
+      publish_route_plan(true);
       mbfClientExePath->sendGoal(exePathGoal);
       sleep(1);
       actionlib::SimpleClientGoalState current_status(actionlib::SimpleClientGoalState::PENDING);
@@ -545,6 +823,7 @@ bool MowingBehavior::execute_mowing_plan() {
             ROS_INFO_STREAM("MowingBehavior: (MOW) SKIP AREA was requested.");
             // remove all paths in current area and return true
             mowerEnabled = false;
+            publish_route_plan(false);
             currentMowingPaths.clear();
             skip_area = false;
             clear_mowing_overlay();
@@ -592,39 +871,56 @@ bool MowingBehavior::execute_mowing_plan() {
         r.sleep();
       }
 
+      if (aborted) {
+        return false;
+      }
+      if (requested_pause_flag) {
+        publish_mowing_overlay();
+        continue;
+      }
+
       // Only skip/trim if goal execution began
       if (current_status.state_ != actionlib::SimpleClientGoalState::PENDING &&
           current_status.state_ != actionlib::SimpleClientGoalState::RECALLED) {
         ROS_INFO_STREAM(">> MowingBehavior: (MOW) PlannerGetProgress currentMowingPathIndex = "
                         << currentMowingPathIndex << " of " << path.path.poses.size());
         printNavState(current_status.state_);
+        const bool planner_succeeded = current_status.state_ == actionlib::SimpleClientGoalState::SUCCEEDED;
+        const int path_pose_count = static_cast<int>(path.path.poses.size());
+        const int remaining_pose_count = path_pose_count - currentMowingPathIndex;
+        const bool progress_at_end = currentMowingPathIndex >= path_pose_count || remaining_pose_count < 5;
         // if we have fully processed the segment or we have encountered an error, drop the path segment
         /* TODO: we can not trust the SUCCEEDED state because the planner sometimes says suceeded with
             the currentIndex far from the size of the poses ! (BUG in planner ?)
             instead we trust only the currentIndex vs. poses.size() */
-        if (currentMowingPathIndex >= path.path.poses.size() ||
-            (path.path.poses.size() - currentMowingPathIndex) < 5)  // fully mowed the path ?
+        if (planner_succeeded && progress_at_end)  // fully mowed the path ?
         {
           ROS_INFO_STREAM("MowingBehavior: (MOW) Mow path finished, skipping to next mow path.");
+          set_mowing_diagnostic("mow_path_finished");
           currentMowingPath++;
           currentMowingPathIndex = 0;
           publish_mowing_overlay();
           // continue with next segment
         } else {
-          // we didnt drive all points in the mow path, so we go into pause mode
-          // TODO: we should figure out the likely reason for our failure to complete the path
-          // if GPS -> PAUSE
-          // if something else -> Recovery Behaviour ?
+          std::ostringstream mow_error;
+          mow_error << "MBF/FTC did not complete mow path. state=" << nav_state_name(current_status.state_)
+                    << " progress=" << currentMowingPathIndex << "/" << path_pose_count
+                    << " remaining=" << std::max(remaining_pose_count, 0) << " path=" << currentMowingPath
+                    << " area=" << currentMowingArea;
+          if (planner_succeeded) {
+            mow_error << " note=planner_reported_success_before_progress_end";
+          }
+          ROS_ERROR_STREAM("MowingBehavior: (MOW) " << mow_error.str()
+                                                    << ". Holding manual pause for inspection instead of auto-resuming.");
+          set_mowing_diagnostic("mow_path_error_pause", mow_error.str(), current_status.state_);
 
-          // currentMowingPathIndex might be 0 if we never consumed one of the points, we advance at least 1 point
-          if (currentMowingPathIndex == 0) currentMowingPathIndex++;
           publish_mowing_overlay();
           if (!requested_pause_flag) {
             mowerEnabled = false;
             stopBlade();
             stopMoving();
-            ROS_INFO_STREAM("MowingBehavior: (MOW) PAUSED due to MBF Error at " << currentMowingPathIndex);
-            paused = true;
+            requestPause(pauseType::PAUSE_MANUAL);
+            ROS_INFO_STREAM("MowingBehavior: (MOW) PAUSED due to MBF/FTC error at " << currentMowingPathIndex);
             update_actions();
           }
         }
@@ -639,12 +935,15 @@ bool MowingBehavior::execute_mowing_plan() {
 }
 
 void MowingBehavior::command_home() {
-  if (shared_state->active_semiautomatic_task) {
-    // We are in semiautomatic task, mark it as manually paused.
-    ROS_INFO_STREAM("Manually pausing semiautomatic task");
-    auto config = getConfig();
-    config.manual_pause_mowing = true;
+  auto config = getConfig();
+  if (config.manual_pause_mowing) {
+    ROS_INFO_STREAM("MowingBehavior: clearing manual pause because stop/home was requested");
+    config.manual_pause_mowing = false;
     setConfig(config);
+  }
+  if (shared_state->active_semiautomatic_task) {
+    ROS_INFO_STREAM("MowingBehavior: stopping semiautomatic task");
+    shared_state->active_semiautomatic_task = false;
   }
   if (paused) {
     // Request continue to wait for odom
@@ -702,6 +1001,11 @@ int16_t MowingBehavior::get_current_path_index() {
 
 MowingBehavior::MowingBehavior() {
   last_checkpoint = ros::Time(0.0);
+  currentMowingPath = 0;
+  currentMowingArea = 0;
+  currentMowingPathIndex = 0;
+  currentMowingAngleIncrementSum = 0.0;
+  lastMbfState = -1;
   xbot_msgs::ActionInfo pause_action;
   pause_action.action_id = "pause";
   pause_action.enabled = false;
@@ -733,7 +1037,6 @@ MowingBehavior::MowingBehavior() {
   actions.push_back(abort_mowing_action);
   actions.push_back(skip_area_action);
   actions.push_back(skip_path_action);
-  restore_checkpoint();
 }
 
 void MowingBehavior::handle_action(std::string action) {
@@ -764,6 +1067,7 @@ void MowingBehavior::checkpoint() {
   cp.currentMowingPathIndex = currentMowingPathIndex;
   cp.currentMowingPlanDigest = currentMowingPlanDigest;
   cp.currentMowingAngleIncrementSum = currentMowingAngleIncrementSum;
+  getSelectedMapIdentity(cp.selected_map_id, cp.selected_map_hash);
   bag.open("checkpoint.bag", rosbag::bagmode::Write);
   bag.write("checkpoint", ros::Time::now(), cp);
   bag.close();
@@ -773,14 +1077,15 @@ void MowingBehavior::checkpoint() {
 bool MowingBehavior::restore_checkpoint() {
   rosbag::Bag bag;
   bool found = false;
+  currentMowingArea = 0;
+  currentMowingPath = 0;
+  currentMowingPathIndex = 0;
+  currentMowingAngleIncrementSum = 0;
+  currentMowingPlanDigest.clear();
   try {
     bag.open("checkpoint.bag");
   } catch (rosbag::BagIOException& e) {
     // Checkpoint does not exist or is corrupt, start at the very beginning
-    currentMowingArea = 0;
-    currentMowingPath = 0;
-    currentMowingPathIndex = 0;
-    currentMowingAngleIncrementSum = 0;
     return false;
   }
   {
@@ -788,6 +1093,16 @@ bool MowingBehavior::restore_checkpoint() {
     for (rosbag::MessageInstance const m : view) {
       auto cp = m.instantiate<mower_logic::CheckPoint>();
       if (cp) {
+        std::string active_map_id;
+        std::string active_map_hash;
+        if (!getSelectedMapIdentity(active_map_id, active_map_hash) || cp->selected_map_id.empty() ||
+            cp->selected_map_hash.empty() || cp->selected_map_id != active_map_id ||
+            cp->selected_map_hash != active_map_hash) {
+          ROS_WARN_STREAM("MowingBehavior: Ignoring checkpoint because it belongs to map "
+                          << cp->selected_map_id << " (" << cp->selected_map_hash << ") but active map is "
+                          << active_map_id << " (" << active_map_hash << ")");
+          continue;
+        }
         ROS_INFO_STREAM("Restoring checkpoint for plan ("
                         << cp->currentMowingPlanDigest << ")"
                         << " area: " << cp->currentMowingArea << " path: " << cp->currentMowingPath
@@ -815,11 +1130,18 @@ void MowingBehavior::start_new_session() {
   currentMowingPathIndex = 0;
   currentMowingPlanDigest.clear();
   currentMowingAngleIncrementSum = 0.0;
+  set_mowing_diagnostic("fresh_session");
   last_checkpoint = ros::Time(0.0);
 
   if (std::remove("checkpoint.bag") != 0 && errno != ENOENT) {
     ROS_WARN_STREAM("MowingBehavior: Failed to remove checkpoint.bag: " << std::strerror(errno));
   }
+}
+
+void MowingBehavior::set_mowing_diagnostic(const std::string& event, const std::string& error, int mbf_state) {
+  lastMowingEvent = event;
+  lastMowingError = error;
+  lastMbfState = mbf_state;
 }
 
 void MowingBehavior::publish_mowing_overlay() {
@@ -854,6 +1176,7 @@ void MowingBehavior::publish_mowing_overlay() {
   }
 
   map_overlay_pub.publish(overlay);
+  publish_route_plan(true);
 }
 
 void MowingBehavior::clear_mowing_overlay() {
@@ -863,4 +1186,129 @@ void MowingBehavior::clear_mowing_overlay() {
 
   xbot_msgs::MapOverlay overlay;
   map_overlay_pub.publish(overlay);
+}
+
+void MowingBehavior::advertise_route_plan() {
+  if (!route_plan_pub) {
+    route_plan_pub = n->advertise<std_msgs::String>("mower_logic/route_plan_json", 1, true);
+  }
+}
+
+bool MowingBehavior::preview_route_plan(std::string& message) {
+  advertise_route_plan();
+
+  const auto saved_paths = currentMowingPaths;
+  const int saved_area = currentMowingArea;
+  const int saved_path = currentMowingPath;
+  const int saved_path_index = currentMowingPathIndex;
+  const std::string saved_digest = currentMowingPlanDigest;
+
+  currentMowingArea = 0;
+  currentMowingPath = 0;
+  currentMowingPathIndex = 0;
+
+  const bool created = create_mowing_plan(currentMowingArea);
+  const bool preview_available = created && !currentMowingPaths.empty();
+  if (created && !currentMowingPaths.empty()) {
+    publish_route_plan(false);
+    std::ostringstream status;
+    status << "Previewed " << currentMowingPaths.size() << " path";
+    if (currentMowingPaths.size() != 1) {
+      status << "s";
+    }
+    status << " before mowing.";
+    message = status.str();
+  } else if (created) {
+    message = "No active mowing area was available to preview.";
+  } else {
+    message = "Could not create route preview. Check the selected map and PlanPath service.";
+  }
+
+  currentMowingPaths = saved_paths;
+  currentMowingArea = saved_area;
+  currentMowingPath = saved_path;
+  currentMowingPathIndex = saved_path_index;
+  currentMowingPlanDigest = saved_digest;
+
+  return preview_available;
+}
+
+void MowingBehavior::publish_route_plan(bool active) {
+  advertise_route_plan();
+  if (!route_plan_pub || currentMowingPaths.empty()) {
+    return;
+  }
+
+  std::string frame_id = "map";
+  for (const auto& mowing_path : currentMowingPaths) {
+    if (!mowing_path.path.header.frame_id.empty()) {
+      frame_id = mowing_path.path.header.frame_id;
+      break;
+    }
+  }
+
+  const ros::Time stamp = ros::Time::now();
+  std::string map_id;
+  std::string map_hash;
+  const bool has_map_identity = getSelectedMapIdentity(map_id, map_hash);
+
+  std::ostringstream out;
+  out << std::setprecision(10);
+  out << "{";
+  out << "\"schema\":\"open_mower.route_plan.v0\",";
+  out << "\"source\":\"mower_logic\",";
+  out << "\"plan_id\":";
+  append_json_string(out, currentMowingPlanDigest);
+  out << ",\"frame_id\":";
+  append_json_string(out, frame_id);
+  out << ",\"stamp\":{\"secs\":" << stamp.sec << ",\"nsecs\":" << stamp.nsec << "},";
+  out << "\"active\":" << (active ? "true" : "false") << ",";
+  out << "\"current_area_index\":" << currentMowingArea << ",";
+  out << "\"current_path_index\":" << currentMowingPath << ",";
+  out << "\"current_pose_index\":" << currentMowingPathIndex;
+  out << ",\"last_event\":";
+  append_json_string(out, lastMowingEvent);
+  out << ",\"last_error\":";
+  append_json_string(out, lastMowingError);
+  out << ",\"last_mbf_state\":" << lastMbfState;
+  if (has_map_identity) {
+    out << ",\"map_id\":";
+    append_json_string(out, map_id);
+    out << ",\"map_hash\":";
+    append_json_string(out, map_hash);
+  }
+  out << ",\"paths\":[";
+  for (size_t path_index = 0; path_index < currentMowingPaths.size(); ++path_index) {
+    const auto& mowing_path = currentMowingPaths[path_index];
+    const std::string label = std::string("path ") + std::to_string(path_index + 1) +
+                              (mowing_path.is_outline ? " outline" : " fill");
+    const std::string path_frame_id = mowing_path.path.header.frame_id.empty() ? frame_id : mowing_path.path.header.frame_id;
+    if (path_index > 0) {
+      out << ",";
+    }
+    out << "{\"path_index\":" << path_index << ",";
+    out << "\"label\":";
+    append_json_string(out, label);
+    out << ",\"is_outline\":" << (mowing_path.is_outline ? "true" : "false") << ",";
+    out << "\"frame_id\":";
+    append_json_string(out, path_frame_id);
+    out << ",\"poses\":[";
+    const auto& poses = mowing_path.path.poses;
+    for (size_t pose_index = 0; pose_index < poses.size(); ++pose_index) {
+      const auto& pose = poses[pose_index].pose;
+      if (pose_index > 0) {
+        out << ",";
+      }
+      out << "{\"pose_index\":" << pose_index << ",";
+      out << "\"x\":" << pose.position.x << ",";
+      out << "\"y\":" << pose.position.y << ",";
+      out << "\"yaw\":" << yaw_from_quaternion(pose.orientation) << "}";
+    }
+    out << "]}";
+  }
+  out << "]}";
+
+  std_msgs::String message;
+  message.data = out.str();
+  route_plan_pub.publish(message);
 }
