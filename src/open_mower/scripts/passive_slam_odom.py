@@ -41,6 +41,9 @@ class PassiveSlamOdom:
         self.gyro_stationary_wz_threshold = float(rospy.get_param("~gyro_stationary_wz_threshold", 0.04))
         self.gyro_warning_yaw_rate_threshold = float(rospy.get_param("~gyro_warning_yaw_rate_threshold", 0.025))
         self.gyro_warning_seconds = float(rospy.get_param("~gyro_warning_seconds", 2.0))
+        self.gyro_calibration_max_abs_offset = float(rospy.get_param("~gyro_calibration_max_abs_offset", 0.05))
+        self.gyro_calibration_max_stddev = float(rospy.get_param("~gyro_calibration_max_stddev", 0.01))
+        self.gyro_calibration_max_range = float(rospy.get_param("~gyro_calibration_max_range", 0.03))
         self.publish_tf = bool(rospy.get_param("~publish_tf", True))
 
         self.lock = threading.Lock()
@@ -52,9 +55,16 @@ class PassiveSlamOdom:
         self.raw_yaw_rate = 0.0
         self.yaw_rate = 0.0
         self.gyro_offset = 0.0
+        self.previous_gyro_offset = 0.0
         self.gyro_offset_sum = 0.0
+        self.gyro_offset_sum_sq = 0.0
+        self.gyro_offset_min = 0.0
+        self.gyro_offset_max = 0.0
         self.gyro_offset_samples = 0
         self.calibration_start = None
+        self.calibration_had_valid_offset = False
+        self.last_calibration_rejected = False
+        self.last_calibration_message = None
         self.calibrated = self.gyro_calibration_seconds <= 0.0
         self.last_imu_stamp = None
         self.last_imu_wall_time = None
@@ -124,9 +134,16 @@ class PassiveSlamOdom:
         )
 
     def start_gyro_calibration_locked(self):
+        self.previous_gyro_offset = self.gyro_offset
+        self.calibration_had_valid_offset = self.calibrated
+        self.last_calibration_rejected = False
+        self.last_calibration_message = None
         self.calibrated = False
         self.calibration_start = None
         self.gyro_offset_sum = 0.0
+        self.gyro_offset_sum_sq = 0.0
+        self.gyro_offset_min = 0.0
+        self.gyro_offset_max = 0.0
         self.gyro_offset_samples = 0
         self.last_imu_stamp = None
         self.raw_yaw_rate = 0.0
@@ -210,19 +227,62 @@ class PassiveSlamOdom:
                 if self.calibration_start is None:
                     self.calibration_start = now
                     self.gyro_offset_sum = 0.0
+                    self.gyro_offset_sum_sq = 0.0
                     self.gyro_offset_samples = 0
+                    self.gyro_offset_min = msg.angular_velocity.z
+                    self.gyro_offset_max = msg.angular_velocity.z
                     rospy.loginfo("Passive SLAM odom gyro calibration started.")
 
                 self.gyro_offset_sum += msg.angular_velocity.z
+                self.gyro_offset_sum_sq += msg.angular_velocity.z * msg.angular_velocity.z
+                self.gyro_offset_min = min(self.gyro_offset_min, msg.angular_velocity.z)
+                self.gyro_offset_max = max(self.gyro_offset_max, msg.angular_velocity.z)
                 self.gyro_offset_samples += 1
                 if (now - self.calibration_start).to_sec() < self.gyro_calibration_seconds:
                     self.last_imu_stamp = now
                     return
 
-                self.gyro_offset = self.gyro_offset_sum / max(1, self.gyro_offset_samples)
+                mean_offset = self.gyro_offset_sum / max(1, self.gyro_offset_samples)
+                variance = max(0.0, self.gyro_offset_sum_sq / max(1, self.gyro_offset_samples) - mean_offset * mean_offset)
+                stddev = math.sqrt(variance)
+                sample_range = self.gyro_offset_max - self.gyro_offset_min
+                valid_calibration = (
+                    abs(mean_offset) <= self.gyro_calibration_max_abs_offset
+                    and stddev <= self.gyro_calibration_max_stddev
+                    and sample_range <= self.gyro_calibration_max_range
+                )
+
+                if not valid_calibration:
+                    self.last_calibration_rejected = True
+                    self.last_calibration_message = (
+                        "rejected gyro calibration: mean={:.6f} stddev={:.6f} range={:.6f}".format(
+                            mean_offset,
+                            stddev,
+                            sample_range,
+                        )
+                    )
+                    rospy.logerr("Passive SLAM odom %s", self.last_calibration_message)
+                    self.gyro_offset_sum = 0.0
+                    self.gyro_offset_sum_sq = 0.0
+                    self.gyro_offset_samples = 0
+                    if self.calibration_had_valid_offset:
+                        self.gyro_offset = self.previous_gyro_offset
+                        self.calibrated = True
+                        self.last_imu_stamp = now
+                        self.yaw_rate = msg.angular_velocity.z - self.gyro_offset
+                        self.update_gyro_warning_locked()
+                        return
+
+                    self.calibration_start = None
+                    self.last_imu_stamp = now
+                    return
+
+                self.gyro_offset = mean_offset
                 self.calibrated = True
                 self.last_imu_stamp = now
                 self.yaw_rate = 0.0
+                self.last_calibration_rejected = False
+                self.last_calibration_message = None
                 self.update_gyro_warning_locked()
                 rospy.loginfo("Passive SLAM odom gyro offset: %s", self.gyro_offset)
                 return
@@ -301,6 +361,11 @@ class PassiveSlamOdom:
                 "calibrated": self.calibrated,
                 "gyro_calibrating": not self.calibrated,
                 "gyro_calibration_elapsed": calibration_elapsed,
+                "gyro_calibration_last_message": self.last_calibration_message,
+                "gyro_calibration_last_rejected": self.last_calibration_rejected,
+                "gyro_calibration_max_abs_offset": self.gyro_calibration_max_abs_offset,
+                "gyro_calibration_max_range": self.gyro_calibration_max_range,
+                "gyro_calibration_max_stddev": self.gyro_calibration_max_stddev,
                 "gyro_calibration_progress": calibration_progress,
                 "gyro_calibration_seconds": self.gyro_calibration_seconds,
                 "gyro_offset": self.gyro_offset,

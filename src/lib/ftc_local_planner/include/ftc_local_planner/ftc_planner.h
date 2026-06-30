@@ -14,6 +14,7 @@
 #include <ftc_local_planner/FTCPlannerConfig.h>
 #include <ftc_local_planner/PID.h>
 #include <nav_core/base_local_planner.h>
+#include <string>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
@@ -45,6 +46,7 @@ namespace ftc_local_planner
         ros::Time state_entered_time;
 
         bool is_crashed;
+        std::string failure_reason;
 
         dynamic_reconfigure::Server<FTCPlannerConfig> *reconfig_server;
 
@@ -85,6 +87,8 @@ namespace ftc_local_planner
         uint32_t current_index;
         double current_progress;
         Eigen::Affine3d local_control_point;
+        double last_control_distance = 0.0;
+        double last_control_yaw_error = 0.0;
 
         /**
          * Private members
@@ -96,9 +100,13 @@ namespace ftc_local_planner
         bool oscillation_warning_ = false;
 
         double distanceLookahead();
+        const char* plannerStateName() const;
         PlannerState update_planner_state();
         void update_control_point(double dt);
         void calculate_velocity_commands(double dt, geometry_msgs::TwistStamped &cmd_vel);
+        void markFailure(const std::string &reason);
+        void publishDebugPid(const geometry_msgs::TwistStamped &cmd_vel, double d_lat = 0.0, double d_lon = 0.0,
+                             double d_angle = 0.0);
 
         /**
          * @brief check for obstacles in path as well as collision at actual pose

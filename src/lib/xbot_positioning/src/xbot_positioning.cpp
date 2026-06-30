@@ -4,6 +4,8 @@
 //
 
 #include <geometry_msgs/TwistStamped.h>
+#include <algorithm>
+#include <cmath>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/Imu.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -15,6 +17,7 @@
 #include "geometry_msgs/PoseWithCovarianceStamped.h"
 #include "geometry_msgs/TwistWithCovarianceStamped.h"
 #include "ros/ros.h"
+#include "std_srvs/Trigger.h"
 #include "xbot_msgs/AbsolutePose.h"
 #include "xbot_msgs/WheelTick.h"
 #include "xbot_positioning/GPSControlSrv.h"
@@ -46,7 +49,15 @@ bool has_gyro;
 sensor_msgs::Imu last_imu;
 ros::Time gyro_calibration_start;
 double gyro_offset;
+double gyro_offset_sum_sq;
+double gyro_offset_min;
+double gyro_offset_max;
+double gyro_previous_offset;
 int gyro_offset_samples;
+bool gyro_recalibration_active;
+double max_gyro_calibration_abs_offset;
+double max_gyro_calibration_stddev;
+double max_gyro_calibration_range;
 
 // Current speed calculated by wheel ticks
 double vx = 0.0;
@@ -82,20 +93,49 @@ void onImu(const sensor_msgs::Imu::ConstPtr &msg) {
                 ROS_INFO_STREAM("Started gyro calibration");
                 gyro_calibration_start = msg->header.stamp;
                 gyro_offset = 0;
+                gyro_offset_sum_sq = 0;
+                gyro_offset_min = msg->angular_velocity.z;
+                gyro_offset_max = msg->angular_velocity.z;
             }
-            gyro_offset += msg->angular_velocity.z;
+            const double yaw_rate = msg->angular_velocity.z;
+            gyro_offset += yaw_rate;
+            gyro_offset_sum_sq += yaw_rate * yaw_rate;
+            gyro_offset_min = std::min(gyro_offset_min, yaw_rate);
+            gyro_offset_max = std::max(gyro_offset_max, yaw_rate);
             gyro_offset_samples++;
             if ((msg->header.stamp - gyro_calibration_start).toSec() < 5) {
                 last_imu = *msg;
                 return;
             }
-            has_gyro = true;
-            if (gyro_offset_samples > 0) {
-                gyro_offset /= gyro_offset_samples;
-            } else {
-                gyro_offset = 0;
+
+            const double mean_offset = gyro_offset / std::max(1, gyro_offset_samples);
+            const double variance = std::max(
+                0.0, gyro_offset_sum_sq / std::max(1, gyro_offset_samples) - mean_offset * mean_offset);
+            const double stddev = std::sqrt(variance);
+            const double range = gyro_offset_max - gyro_offset_min;
+            const bool valid_calibration =
+                std::abs(mean_offset) <= max_gyro_calibration_abs_offset &&
+                stddev <= max_gyro_calibration_stddev &&
+                range <= max_gyro_calibration_range;
+
+            if (!valid_calibration) {
+                ROS_ERROR_STREAM("Rejected gyro calibration window: mean=" << mean_offset
+                                 << " stddev=" << stddev << " range=" << range);
+                gyro_offset = gyro_previous_offset;
+                gyro_offset_sum_sq = 0;
+                gyro_offset_samples = 0;
+                if (gyro_recalibration_active) {
+                    has_gyro = true;
+                    gyro_recalibration_active = false;
+                }
+                last_imu = *msg;
+                return;
             }
+
+            has_gyro = true;
+            gyro_offset = mean_offset;
             gyro_offset_samples = 0;
+            gyro_recalibration_active = false;
             ROS_INFO_STREAM("Calibrated gyro offset: " << gyro_offset);
         } else {
             ROS_WARN("Skipped gyro calibration");
@@ -223,6 +263,31 @@ bool setPose(xbot_positioning::SetPoseSrvRequest &req, xbot_positioning::SetPose
     return true;
 }
 
+// Drop the cached gyro bias and re-run the 5-second IMU averaging calibration
+// the next time IMU samples arrive. The caller must keep the mower stationary
+// during that calibration window.
+bool recalibrateGyro(std_srvs::TriggerRequest &req, std_srvs::TriggerResponse &res) {
+    if (skip_gyro_calibration) {
+        res.success = false;
+        res.message = "skip_gyro_calibration is set; refusing to recalibrate";
+        return true;
+    }
+
+    has_gyro = false;
+    gyro_previous_offset = gyro_offset;
+    gyro_offset = 0;
+    gyro_previous_offset = 0;
+    gyro_offset_sum_sq = 0;
+    gyro_offset_samples = 0;
+    gyro_recalibration_active = true;
+    gyro_calibration_start = ros::Time(0);
+
+    ROS_WARN_STREAM("Gyro recalibration requested; keep the robot stationary for ~5 s.");
+    res.success = true;
+    res.message = "Gyro recalibration started; keep the robot stationary for ~5 s.";
+    return true;
+}
+
 void onPose(const xbot_msgs::AbsolutePose::ConstPtr &msg) {
     if (!gps_enabled) {
         ROS_INFO_STREAM_THROTTLE(gps_message_throttle, "dropping GPS update, since gps_enabled = false.");
@@ -317,7 +382,9 @@ int main(int argc, char **argv) {
     has_gyro = false;
     has_ticks = false;
     gyro_offset = 0;
+    gyro_offset_sum_sq = 0;
     gyro_offset_samples = 0;
+    gyro_recalibration_active = false;
 
     valid_gps_samples = 0;
     gps_outlier_count = 0;
@@ -329,9 +396,15 @@ int main(int argc, char **argv) {
 
     ros::ServiceServer gps_service = n.advertiseService("xbot_positioning/set_gps_state", setGpsState);
     ros::ServiceServer pose_service = n.advertiseService("xbot_positioning/set_robot_pose", setPose);
+    ros::ServiceServer recalibrate_service =
+        n.advertiseService("xbot_positioning/recalibrate_gyro", recalibrateGyro);
 
     paramNh.param("skip_gyro_calibration", skip_gyro_calibration, false);
     paramNh.param("gyro_offset", gyro_offset, 0.0);
+    gyro_previous_offset = gyro_offset;
+    paramNh.param("max_gyro_calibration_abs_offset", max_gyro_calibration_abs_offset, 0.05);
+    paramNh.param("max_gyro_calibration_stddev", max_gyro_calibration_stddev, 0.01);
+    paramNh.param("max_gyro_calibration_range", max_gyro_calibration_range, 0.03);
     paramNh.param("min_speed", min_speed, 0.01);
     paramNh.param("max_gps_accuracy", max_gps_accuracy, 0.1);
     paramNh.param("debug", publish_debug, false);

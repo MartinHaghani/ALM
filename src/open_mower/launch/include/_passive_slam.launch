@@ -28,6 +28,9 @@
     <arg name="gyro_stationary_wz_threshold" default="$(optenv OM_SLAM_ODOM_GYRO_STATIONARY_WZ_THRESHOLD 0.04)"/>
     <arg name="gyro_warning_yaw_rate_threshold" default="$(optenv OM_SLAM_ODOM_GYRO_WARNING_YAW_RATE_THRESHOLD 0.025)"/>
     <arg name="gyro_warning_seconds" default="$(optenv OM_SLAM_ODOM_GYRO_WARNING_SECONDS 2.0)"/>
+    <arg name="gyro_calibration_max_abs_offset" default="$(optenv OM_SLAM_ODOM_GYRO_CALIBRATION_MAX_ABS_OFFSET 0.05)"/>
+    <arg name="gyro_calibration_max_stddev" default="$(optenv OM_SLAM_ODOM_GYRO_CALIBRATION_MAX_STDDEV 0.01)"/>
+    <arg name="gyro_calibration_max_range" default="$(optenv OM_SLAM_ODOM_GYRO_CALIBRATION_MAX_RANGE 0.03)"/>
     <arg name="start_enabled" default="$(optenv OM_SLAM_START_ENABLED False)"/>
 
     <node pkg="tf" type="static_transform_publisher" name="passive_slam_lidar_static_tf" output="screen"
@@ -44,6 +47,9 @@
         <param name="gyro_stationary_wz_threshold" type="double" value="$(arg gyro_stationary_wz_threshold)"/>
         <param name="gyro_warning_yaw_rate_threshold" type="double" value="$(arg gyro_warning_yaw_rate_threshold)"/>
         <param name="gyro_warning_seconds" type="double" value="$(arg gyro_warning_seconds)"/>
+        <param name="gyro_calibration_max_abs_offset" type="double" value="$(arg gyro_calibration_max_abs_offset)"/>
+        <param name="gyro_calibration_max_stddev" type="double" value="$(arg gyro_calibration_max_stddev)"/>
+        <param name="gyro_calibration_max_range" type="double" value="$(arg gyro_calibration_max_range)"/>
         <remap from="~imu_in" to="$(arg imu_topic)"/>
         <remap from="~twist_in" to="$(arg twist_topic)"/>
         <remap from="~scan_in" to="$(arg raw_scan_topic)"/>

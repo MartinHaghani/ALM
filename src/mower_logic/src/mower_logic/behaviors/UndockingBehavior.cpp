@@ -162,10 +162,7 @@ void UndockingBehavior::enter() {
 }
 
 void UndockingBehavior::exit() {
-  for (auto& a : actions) {
-    a.enabled = false;
-  }
-  registerActions("mower_logic:undocking", actions);
+  registerActions("mower_logic:undocking", {});
 }
 
 void UndockingBehavior::reset() {

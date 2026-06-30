@@ -257,10 +257,7 @@ void DockingBehavior::enter() {
 }
 
 void DockingBehavior::exit() {
-  for (auto& a : actions) {
-    a.enabled = false;
-  }
-  registerActions("mower_logic:docking", actions);
+  registerActions("mower_logic:docking", {});
 }
 
 void DockingBehavior::reset() {

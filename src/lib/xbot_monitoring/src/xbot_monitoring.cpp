@@ -63,6 +63,7 @@ std::mutex mqtt_callback_mutex;
 ros::Publisher cmd_vel_pub;
 ros::Publisher action_pub;
 ros::Publisher rpc_request_pub;
+ros::Publisher actions_json_pub;
 bool teleop_override_active = false;
 
 namespace {
@@ -543,6 +544,12 @@ void publish_actions() {
 
     auto bson = json::to_bson(data);
     try_publish_binary("actions/bson", bson.data(), bson.size(), true);
+
+    if (actions_json_pub) {
+        std_msgs::String msg;
+        msg.data = actions.dump();
+        actions_json_pub.publish(msg);
+    }
 }
 
 void publish_map() {
@@ -740,6 +747,7 @@ int main(int argc, char **argv) {
 
     cmd_vel_pub = n->advertise<geometry_msgs::Twist>("xbot_monitoring/remote_cmd_vel", 1);
     action_pub = n->advertise<std_msgs::String>("xbot/action", 1);
+    actions_json_pub = n->advertise<std_msgs::String>("xbot_monitoring/actions_json", 1, true);
 
     rpc_request_pub = n->advertise<xbot_rpc::RpcRequest>(xbot_rpc::TOPIC_REQUEST, 100);
     ros::Subscriber rpc_response_sub = n->subscribe(xbot_rpc::TOPIC_RESPONSE, 100, rpc_response_callback);

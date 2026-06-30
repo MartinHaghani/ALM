@@ -23,3 +23,14 @@ float32 ang_err
 # speeds
 float32 ang_speed
 float32 lin_speed
+
+# planner state
+uint8 planner_state
+string planner_state_name
+uint32 current_index
+float32 current_progress
+float32 movement_speed
+bool is_crashed
+float32 control_distance
+float32 control_yaw_error
+string failure_reason
