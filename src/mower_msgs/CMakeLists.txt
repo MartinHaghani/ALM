@@ -27,6 +27,7 @@ add_service_files(
         MowerControlSrv.srv
         HighLevelControlSrv.srv
         PerimeterControlSrv.srv
+        SetManualInputSource.srv
 )
 
 ## Generate added messages and services with any dependencies listed here
@@ -35,4 +36,8 @@ generate_messages(
         std_msgs
 )
 
-catkin_package()
+catkin_package(
+        CATKIN_DEPENDS
+        message_runtime
+        std_msgs
+)

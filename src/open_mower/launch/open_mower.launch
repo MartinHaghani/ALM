@@ -8,10 +8,14 @@
     <include if="$(eval optenv('OM_USE_LOCALIZATION_CONFIDENCE', 'True').lower() == 'true')" file="$(find open_mower)/launch/include/_localization_confidence.launch"/>
     <include if="$(eval optenv('OM_USE_LOCALIZATION_FUSION', 'True').lower() == 'true')" file="$(find open_mower)/launch/include/_localization_fusion.launch"/>
     <include if="$(eval optenv('OM_NO_ROSBRIDGE', 'False').lower() != 'true')" file="$(find open_mower)/launch/include/_rosbridge.launch"/>
-    <include if="$(eval optenv('OM_NO_TELEOP', 'False').lower() != 'true')" file="$(find open_mower)/launch/include/_teleop.launch"/>
+    <include if="$(eval optenv('OM_NO_DIRECT_GAMEPAD', 'False').lower() != 'true')" file="$(find open_mower)/launch/include/_direct_gamepad.launch"/>
     <include if="$(eval optenv('OM_NO_RECORDING', 'False').lower() != 'true')" file="$(find open_mower)/launch/include/_record.launch">
         <arg name="prefix" value="mow_area"/>
     </include>
+
+    <node pkg="open_mower" type="mower_input_router.py" name="mower_input_router" output="screen" respawn="true" respawn_delay="5">
+        <param name="default_source" value="$(optenv OM_MANUAL_INPUT_DEFAULT_SOURCE web_gamepad)"/>
+    </node>
 
 
     <node if="$(eval optenv('OM_NO_MAP_SERVICE', 'False').lower() != 'true')" pkg="mower_map" type="mower_map_service" name="map_service" output="screen" respawn="true" respawn_delay="10"/>
@@ -27,7 +31,7 @@
 
     <node if="$(eval optenv('OM_NO_MONITORING', 'False').lower() != 'true')" pkg="xbot_monitoring" type="xbot_monitoring" name="xbot_monitoring" output="screen" respawn="true"
           respawn_delay="10">
-        <remap from="/xbot_monitoring/remote_cmd_vel" to="/joy_vel"/>
+        <remap from="/xbot_monitoring/remote_cmd_vel" to="/web_joy_vel"/>
     </node>
 
     <node if="$(eval optenv('OM_NO_MONITORING', 'False').lower() != 'true' and optenv('OM_HEATMAP_SENSOR_IDS', 'UNSET') != 'UNSET')" pkg="xbot_monitoring" type="heatmap_generator" name="heatmap_generator" output="screen" respawn="true"
@@ -35,7 +39,7 @@
     </node>
 
     <node if="$(eval optenv('OM_NO_REMOTE', 'False').lower() != 'true')" pkg="xbot_remote" type="xbot_remote" name="xbot_remote" output="screen" respawn="true" respawn_delay="10">
-        <remap from="/xbot_remote/cmd_vel" to="/joy_vel"/>
+        <remap from="/xbot_remote/cmd_vel" to="/web_joy_vel"/>
     </node>
 
     <node if="$(eval optenv('OM_NO_MONITORING', 'False').lower() != 'true')" pkg="mower_logic" type="monitoring" name="monitoring" output="screen" respawn="true" respawn_delay="10"/>

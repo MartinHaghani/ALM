@@ -5,7 +5,11 @@
     <include file="$(find open_mower)/launch/include/_params.launch"/>
     <include file="$(find open_mower)/launch/include/_comms.launch"/>
     <include file="$(find open_mower)/launch/include/_localization.launch"/>
-    <include file="$(find open_mower)/launch/include/_teleop.launch"/>
+    <include file="$(find open_mower)/launch/include/_direct_gamepad.launch"/>
+
+    <node pkg="open_mower" type="mower_input_router.py" name="mower_input_router" output="screen" respawn="true" respawn_delay="5">
+        <param name="default_source" value="$(optenv OM_MANUAL_INPUT_DEFAULT_SOURCE direct_bluetooth)"/>
+    </node>
 
     <node pkg="mower_map" type="mower_map_service" name="map_service" output="screen"/>
 </launch>

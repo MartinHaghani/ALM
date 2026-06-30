@@ -62,6 +62,53 @@
           "description": "Select your gamepad. The cheap ones are usually xbox360.",
           "x-environment-variable": "OM_MOWER_GAMEPAD"
         },
+        "OM_MANUAL_INPUT_DEFAULT_SOURCE": {
+          "type": "string",
+          "title": "Manual Input Default Source",
+          "enum": [
+            "web_gamepad",
+            "direct_bluetooth"
+          ],
+          "default": "web_gamepad",
+          "description": "Select which manual input source is active after launch. Keep web_gamepad as the normal default; direct_bluetooth is selected from the /next/ UI after pairing.",
+          "x-environment-variable": "OM_MANUAL_INPUT_DEFAULT_SOURCE"
+        },
+        "OM_DIRECT_GAMEPAD_PROFILE": {
+          "type": "string",
+          "title": "Direct Bluetooth Gamepad Profile",
+          "enum": [
+            "ps3",
+            "shield",
+            "steam_stick",
+            "steam_touch",
+            "switch_pro",
+            "xbox360"
+          ],
+          "default": "xbox360",
+          "description": "Controller profile used by the mower-side direct Bluetooth mapper.",
+          "x-environment-variable": "OM_DIRECT_GAMEPAD_PROFILE"
+        },
+        "OM_DIRECT_GAMEPAD_DEVICE": {
+          "type": "string",
+          "title": "Direct Gamepad Linux Device",
+          "default": "/dev/input/js0",
+          "description": "Linux joystick device exposed by the mower host for the direct Bluetooth controller.",
+          "x-environment-variable": "OM_DIRECT_GAMEPAD_DEVICE"
+        },
+        "OM_NO_DIRECT_GAMEPAD": {
+          "type": "boolean",
+          "default": false,
+          "title": "Disable Direct Gamepad Node",
+          "description": "Disable the mower-side joy_node and direct gamepad mapper.",
+          "x-environment-variable": "OM_NO_DIRECT_GAMEPAD"
+        },
+        "OM_NO_BLUETOOTH_GAMEPAD_MANAGER": {
+          "type": "boolean",
+          "default": false,
+          "title": "Disable Bluetooth Gamepad Manager",
+          "description": "Disable the mower-side BlueZ manager services used by the /next/ Bluetooth UI.",
+          "x-environment-variable": "OM_NO_BLUETOOTH_GAMEPAD_MANAGER"
+        },
         "OM_IGNORE_CHARGING_CURRENT": {
           "type": "boolean",
           "default": false,

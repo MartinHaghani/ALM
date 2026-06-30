@@ -1,0 +1,22 @@
+<launch>
+    <node name="direct_joy_node" pkg="joy" type="joy_node" respawn="true" respawn_delay="10">
+        <remap from="joy" to="/direct_joy"/>
+        <remap from="/joy" to="/direct_joy"/>
+        <param name="~dev" value="$(optenv OM_DIRECT_GAMEPAD_DEVICE /dev/input/js0)"/>
+        <param name="~autorepeat_rate" value="20.0"/>
+        <param name="~coalesce_interval" value="0.03"/>
+    </node>
+
+    <node name="direct_gamepad_mapper" pkg="open_mower" type="direct_gamepad_mapper.py" respawn="true" respawn_delay="10" output="screen">
+        <remap from="joy" to="/direct_joy"/>
+        <remap from="joy_vel" to="/direct_joy_vel"/>
+        <remap from="record_polygon" to="/direct_record_polygon"/>
+        <remap from="record_dock" to="/direct_record_dock"/>
+        <remap from="record_mowing" to="/direct_record_mowing"/>
+        <remap from="record_navigation" to="/direct_record_navigation"/>
+        <remap from="direct_action" to="/direct_action"/>
+        <param name="gamepad_params_dir" value="$(find open_mower)/params/gamepads"/>
+        <param name="profile" value="$(optenv OM_DIRECT_GAMEPAD_PROFILE xbox360)"/>
+        <param name="profile_param" value="/direct_gamepad/profile"/>
+    </node>
+</launch>

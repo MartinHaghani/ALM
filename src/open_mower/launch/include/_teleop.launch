@@ -1,12 +1,16 @@
 <launch>
+    <!-- Legacy teleop include retained for older launch files. It now publishes
+         direct-source topics so mower_input_router remains the only /joy_vel gate. -->
     <group if="$(eval optenv('OM_MOWER_GAMEPAD', 'xbox360') == 'xbox360')">
         <node name="joy" pkg="joy" type="joy_node"  respawn="true" respawn_delay="10">
+            <remap from="/joy" to="/direct_joy"/>
             <param name="~autorepeat_rate" value="10.0"/>
             <param name="~coalesce_interval" value="0.06"/>
         </node>
 
         <node name="joy_teleop" pkg="teleop_twist_joy" type="teleop_node"  respawn="true" respawn_delay="10">
-            <remap from="cmd_vel" to="/joy_vel"/>
+            <remap from="joy" to="/direct_joy"/>
+            <remap from="cmd_vel" to="/direct_joy_vel"/>
             <param name="~scale_linear" value="0.5"/>
             <param name="~scale_angular" value="1.5"/>
             <param name="~scale_linear_turbo" value="1.0"/>
@@ -17,14 +21,19 @@
 
     <group unless="$(eval optenv('OM_MOWER_GAMEPAD', 'xbox360') == 'xbox360')">
         <node name="joy" pkg="joy" type="joy_node"  respawn="true" respawn_delay="10">
-            <remap from="/joy" to="/teleop_joy"/>
+            <remap from="/joy" to="/direct_joy"/>
             <param name="~coalesce_interval" value="0.06"/>
         </node>
 
         <rosparam file="$(find open_mower)/params/gamepads/$(optenv OM_MOWER_GAMEPAD).yaml" command="load"/>
 
         <node name="joy_teleop" pkg="joy_teleop" type="joy_teleop.py"  respawn="true" respawn_delay="10">
-            <remap from="/joy" to="/teleop_joy"/>
+            <remap from="/joy" to="/direct_joy"/>
+            <remap from="joy_vel" to="/direct_joy_vel"/>
+            <remap from="record_polygon" to="/direct_record_polygon"/>
+            <remap from="record_dock" to="/direct_record_dock"/>
+            <remap from="record_mowing" to="/direct_record_mowing"/>
+            <remap from="record_navigation" to="/direct_record_navigation"/>
         </node>
     </group>
 </launch>

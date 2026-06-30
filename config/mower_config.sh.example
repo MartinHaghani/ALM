@@ -67,6 +67,15 @@ export OM_MOWER_ESC_TYPE="xesc_mini"
 # Currently supported: ps3, shield, steam_stick, steam_touch, switch_pro, xbox360
 export OM_MOWER_GAMEPAD="xbox360"
 
+# Manual input routing
+# web_gamepad keeps the existing browser/root WebUI remote-control path active by default.
+# direct_bluetooth lets a paired controller drive controller -> mower Bluetooth -> Linux input -> ROS.
+export OM_MANUAL_INPUT_DEFAULT_SOURCE="web_gamepad"
+export OM_DIRECT_GAMEPAD_PROFILE="xbox360"
+# export OM_DIRECT_GAMEPAD_DEVICE="/dev/input/js0"
+# export OM_NO_DIRECT_GAMEPAD=False
+# export OM_NO_BLUETOOTH_GAMEPAD_MANAGER=False
+
 # Ignore Charging Current (legacy low-level-board only)
 # If you're affected by a wrong IC2 sourcing, read here https://openmower.de/docs/versions/errata/ic2-is-wrong/
 # for more details. Mowrator batteries are removed for charging, so this setting is not used there.
