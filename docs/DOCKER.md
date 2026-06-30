@@ -28,6 +28,7 @@ Observed from `docker/Dockerfile`:
 - Builds the workspace inside the image and blacklists `slic3r_coverage_planner` because a prebuilt install is staged separately.
 - Copies `docker/openmower_entrypoint.sh` as the entrypoint.
 - Runs `roslaunch open_mower open_mower.launch --screen` as the default command.
+- The mower-side Bluetooth manager uses the host BlueZ daemon over `/run/dbus/system_bus_socket`. Pi runtime helpers mount that socket when it exists, and the images install `python3-dbus` plus `python3-gi` for D-Bus and pairing-agent support.
 
 ### Legacy image
 
@@ -126,6 +127,7 @@ Observed from `docker/Dockerfile.PiDev` and `docker/openmower_entrypoint.pi.sh`:
 - `utils/scripts/web/build_next_webui.sh` builds `webui/` into `web/next/` inside `node:22-bookworm-slim`.
 - MQTT is available from the sidecar on port `1883`, and MQTT-over-WebSockets is available from the sidecar on port `9001`.
 - `open_mower.launch` also conditionally includes `rosbridge` unless `OM_NO_ROSBRIDGE=True`.
+- `open_mower.launch` starts the manual input router, direct gamepad mapper, and Bluetooth gamepad manager by default. Set `OM_NO_DIRECT_GAMEPAD=True` or `OM_NO_BLUETOOTH_GAMEPAD_MANAGER=True` to disable those pieces for a container that does not mount `/dev/input` or the host D-Bus socket.
 
 ## Cautions when editing
 

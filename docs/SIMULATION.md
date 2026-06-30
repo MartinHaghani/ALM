@@ -37,7 +37,7 @@ Observed composition:
 - includes `_params.launch`
 - includes `_mower_simulation.launch`
 - includes `_move_base.launch`
-- includes `_teleop.launch`
+- includes `_direct_gamepad.launch` and `mower_input_router`
 - loads `src/open_mower/params/simulation_params.yaml`
 - starts RViz with `src/open_mower/rviz/sim_mower_logic.rviz` when `OM_START_RVIZ` is true
 - starts `rqt_reconfigure` when `OM_START_RVIZ` is true
@@ -56,7 +56,7 @@ Observed composition:
 - includes `_params.launch`
 - includes `_mower_simulation.launch`
 - includes `_move_base.launch`
-- includes `_teleop.launch`
+- includes `_direct_gamepad.launch` and `mower_input_router`
 - starts RViz with `src/open_mower/rviz/sim_navigation_test.rviz`
 - starts `mower_map_service`
 - starts `twist_mux`

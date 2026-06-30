@@ -46,7 +46,13 @@ For a fast orientation pass, read in this order:
 - [DOCKER.md](DOCKER.md): runtime versus development container behavior.
 - [SIMULATION.md](SIMULATION.md): simulation entrypoints and observed runtime shape.
 - [COVERAGE_PLANNER_LAB.md](COVERAGE_PLANNER_LAB.md): laptop-only Fields2Cover route-planning evaluation setup.
+- [COVERAGE_PLANNER_RESEARCH.md](COVERAGE_PLANNER_RESEARCH.md): durable source ledger for V2 coverage-planner research.
+- [COVERAGE_PLANNER_V2_DESIGN.md](COVERAGE_PLANNER_V2_DESIGN.md): fresh mower-first coverage planner architecture, path contract, and runtime redesign direction.
+- [COVERAGE_PLANNER_V2_ALGORITHM_PLAN.md](COVERAGE_PLANNER_V2_ALGORITHM_PLAN.md): comprehensive algorithm plan for task extraction, candidate generation, route optimization, and verification.
+- [COVERAGE_PLANNER_V2_PROTOTYPE_PLAN.md](COVERAGE_PLANNER_V2_PROTOTYPE_PLAN.md): implementation plan for the first V2 map-conditioning and macro-zone classification prototype.
 - [COVERAGE_PLANNER_ROADMAP.md](COVERAGE_PLANNER_ROADMAP.md): prioritized coverage planner work list (P0–P9), per-priority status, and edge case catalogue.
+- [PATH_RECORDING_ARCHITECTURE.md](PATH_RECORDING_ARCHITECTURE.md): manual-mowing path recording architecture for GPS, LIDAR, and fused teach-path/debug artifacts.
+- [FTC_EXECUTOR_LIMITATIONS.md](FTC_EXECUTOR_LIMITATIONS.md): current `PlanPath`/FTC executor limitations that teach-path recording must preserve rather than hide.
 - [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md): fork maintenance guidance.
 - [CODE_REVIEW.md](CODE_REVIEW.md): reusable review checklist.
 - [TODO.md](TODO.md): deferred fork-specific implementation ideas.

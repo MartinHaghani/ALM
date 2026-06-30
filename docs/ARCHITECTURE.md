@@ -26,14 +26,17 @@ This summary is grounded in:
 - `_localization_confidence.launch`: starts the read-only confidence monitor when `OM_USE_LOCALIZATION_CONFIDENCE=True`. It publishes GPS and LIDAR trust diagnostics for `/next/` and future fusion work, but does not feed localization, planning, costmaps, or control.
 - `_move_base.launch`: starts `mbf_costmap_nav` plus the legacy relay shim, loading costmap and planner YAML from `src/open_mower/params/`.
 - `_localization.launch`: starts `xbot_positioning`.
-- `_teleop.launch`: starts joystick input and teleop mapping based on the selected gamepad.
+- `_direct_gamepad.launch`: starts mower-side Linux joystick input on `/direct_joy` and maps supported controller profiles to `/direct_joy_vel`, `/direct_record_*`, and `/direct_action`.
 - `_record.launch`: enables rosbag recording or snapshot buffering when the matching environment variables are set.
+- `_manual_path_recording.launch`: optionally starts the passive manual path recorder when `OM_ENABLE_MANUAL_PATH_RECORDER=True`. It exposes teach-path recording services and status for `/next/`, writes normalized JSONL, optional raw bag, teacher path, reports, and a conservative PlanPath compatibility export, and does not publish motion or blade commands.
 
 ### Core nodes launched directly
 
 - `mower_map_service` from `mower_map`
 - `mower_logic` and `monitoring` from `mower_logic`
 - `slic3r_coverage_planner`
+- `mower_input_router` from `open_mower`, publishing the selected manual source to `/joy_vel`, `/record_*`, and `/xbot/action`
+- `bluetooth_gamepad_manager` from `open_mower`, exposing mower-side BlueZ scan/pair/connect services and `/bluetooth_gamepad/status`
 - `twist_mux`
 - `xbot_monitoring`
 - `heatmap_generator`, conditionally
@@ -44,14 +47,15 @@ This summary is grounded in:
 1. Parameters are assembled first from launch-time YAML and environment inputs.
 2. The supported Mowrator hardware layer exposes direct hardware state and control topics under `/hw/...`, including `/hw/power` battery voltage telemetry from the left drive, right drive, and mower/blade ESCs.
 3. `xbot_positioning` consumes GPS, IMU, and measured twist data to produce the mower pose.
-4. `mower_map_service` provides map storage, occupancy-grid publication, docking and mowing-area services, and an RPC method named `map.replace`.
-5. `mower_logic` coordinates mower behaviors such as idle, mowing, parking at the recorded docking point, and area recording, using `mower_map`, `slic3r_coverage_planner`, MBF actions, and `/hw` services. Area recording saves mowing and obstacle polygons by unioning the full costmap footprint swept along RTK-fixed pose segments; navigation-area recording remains a `base_link` breadcrumb polygon.
+4. `mower_map_service` provides saved-map catalog storage, selected active-map publication, selected-map edit geometry, docking and mowing-area services, and an RPC method named `map.replace`.
+5. `mower_logic` coordinates mower behaviors such as idle, mowing, parking at the recorded docking point, and area recording, using `mower_map`, `slic3r_coverage_planner`, MBF actions, and `/hw` services. Area recording saves mowing and obstacle polygons by unioning the full costmap footprint swept along the selected recording-pose segments, defaulting to `/localization_fusion/pose` with a `/next/` runtime fallback to legacy GPS positioning. Navigation-area recording remains a `base_link` breadcrumb polygon. UI map edits are gated here and do not rewrite GPS-truth boundary samples used for GPS/LIDAR alignment.
 6. Navigation runs through `mbf_costmap_nav` with configuration loaded from `src/open_mower/params/`.
-7. Operator and UI-facing pieces include teleop input, `xbot_monitoring`, `xbot_remote`, optional heatmap generation, rosbridge, the existing Flutter UI at `/`, and the React combined GPS/LIDAR map plus sensor viewer at `/next/`.
+7. Manual drive commands are gated by `mower_input_router`. Browser/root WebUI sources publish `/web_joy_vel`; mower-side Bluetooth/USB controllers publish `/direct_joy_vel`; only the selected source reaches `/joy_vel`. Source switches and direct-controller timeouts publish a zero drive command before changing authority.
+8. Operator and UI-facing pieces include direct gamepad input, the Bluetooth gamepad manager, `xbot_monitoring`, `xbot_remote`, optional heatmap generation, rosbridge, the existing Flutter UI at `/`, and the React combined GPS/LIDAR map plus sensor viewer at `/next/`.
 
 ## Package role split
 
-- `open_mower`: orchestration package. It provides launch, params, RViz assets, a small Python RTCM bridge script for raw TCP correction sources, a small Python LSM6DSO IMU publisher for the current Pi-I2C bench hardware path, the separate battery-voltage CSV logger, and optional C1 LIDAR launch wiring.
+- `open_mower`: orchestration package. It provides launch, params, RViz assets, a small Python RTCM bridge script for raw TCP correction sources, a small Python LSM6DSO IMU publisher for the current Pi-I2C bench hardware path, the separate battery-voltage CSV logger, manual input routing, mower-side Bluetooth controller management, direct gamepad mapping, optional C1 LIDAR launch wiring, and the optional passive manual path recorder.
 - `mower_hardware`: supported Mowrator direct hardware bridge. It drives left/right/blade ESCs through the xESC driver and publishes `/hw/status`, `/hw/power`, `/hw/emergency`, measured drive telemetry, and per-ESC battery voltage without the OpenMower low-level-board protocol.
 - `mower_logic`: high-level decision-making and mower state transitions.
 - `mower_map`: map storage and retrieval plus occupancy-grid and marker publication.
@@ -64,10 +68,11 @@ This summary is grounded in:
 
 Observed from `src/mower_map/src/mower_map_service.cpp`:
 
-- The current map file name is `map.json`.
-- A legacy file name `map.bag` is still defined in code.
-- The map service is the in-memory source of truth for loaded map data during runtime.
-- The service publishes JSON, occupancy-grid, visualization, and map-size topics under `mower_map_service/...`.
+- The runtime keeps one selected active map in memory and preserves the legacy `map.json` compatibility copy.
+- Saved maps live under `maps/<map_id>/map.json` with sidecar `metadata.json`; `maps/index.json` records the selected map id.
+- A legacy file name `map.bag` is still defined and imported into the catalog when no JSON catalog exists.
+- The service publishes active-map JSON, active occupancy grid, visualization, map-size, and catalog topics under `mower_map_service/...`.
+- Catalog mutation services exist under `mower_map_service/...`, while operator-facing create/select/rename/delete calls should go through the guarded `mower_service/...` services exposed by `mower_logic`.
 
 The exact runtime storage directory is not explicitly set in the files inspected here, so avoid claiming a fixed on-disk location without further verification.
 

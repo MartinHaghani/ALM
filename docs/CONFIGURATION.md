@@ -90,7 +90,14 @@ Observed examples:
 - `OM_MOWER`
 - `ESC_TYPE`
 - `OM_MOWER_GAMEPAD`
+- `OM_MANUAL_INPUT_DEFAULT_SOURCE`
+- `OM_DIRECT_GAMEPAD_PROFILE`
+- `OM_DIRECT_GAMEPAD_DEVICE`
+- `OM_NO_DIRECT_GAMEPAD`
+- `OM_NO_BLUETOOTH_GAMEPAD_MANAGER`
 - `OM_IGNORE_CHARGING_CURRENT`
+
+Manual input defaults to `web_gamepad`, so existing browser/root WebUI control remains the active source after launch. Select `direct_bluetooth` from `/next/` after pairing a mower-side controller, or set `OM_MANUAL_INPUT_DEFAULT_SOURCE=direct_bluetooth` only for controlled bench/test workflows where direct controller authority should come up active.
 
 ### GPS settings
 
@@ -109,6 +116,8 @@ Choose one correction source in normal operation:
 
 If both are truthy, the current launch wiring gives raw TCP precedence and skips the NTRIP client.
 
+Multi-lawn map selection uses the configured absolute GPS datum as one shared `map` frame for all saved maps. Do not expect v1 map selection to switch GPS datum per lawn. Keep `OM_DATUM_LAT` and `OM_DATUM_LONG` stable for the mower's service region, and tune `OM_MAP_SELECTOR_MAX_START_DISTANCE_M` only if the default 50 m start guard is too tight for a recorded lawn.
+
 ### IMU settings
 
 Observed examples:
@@ -121,8 +130,11 @@ Observed examples:
 - `OM_LSM6DSO_GYRO_RANGE_DPS`
 - `OM_LSM6DSO_AXIS_CONFIG`
 - `OM_LSM6DSO_FRAME_ID`
+- `OM_XBOT_POSITIONING_MAX_GYRO_CALIBRATION_ABS_OFFSET`
+- `OM_XBOT_POSITIONING_MAX_GYRO_CALIBRATION_STDDEV`
+- `OM_XBOT_POSITIONING_MAX_GYRO_CALIBRATION_RANGE`
 
-These settings are for the current Raspberry Pi I2C SparkFun LSM6DSO replacement path. For `Mowrator`, the IMU publisher is default-on and publishes under `/hw/imu/data_raw`.
+These settings are for the current Raspberry Pi I2C SparkFun LSM6DSO replacement path. For `Mowrator`, the IMU publisher is default-on and publishes under `/hw/imu/data_raw`. The `OM_XBOT_POSITIONING_MAX_GYRO_CALIBRATION_*` values guard operational `map -> base_link` gyro recalibration so a transient raw-gyro burst cannot replace a good zero-rate offset.
 
 ### LIDAR settings
 
@@ -179,11 +191,16 @@ Observed examples:
 - `OM_SLAM_ALIGNMENT_MAX_BOUNDARY_SAMPLES`
 - `OM_SLAM_ALIGNMENT_MAX_STATUS_BOUNDARY_PAIRS`
 - `OM_SLAM_ALIGNMENT_POSE_SYNC_MAX_LAG`
+- `OM_SLAM_ODOM_GYRO_CALIBRATION_MAX_ABS_OFFSET`
+- `OM_SLAM_ODOM_GYRO_CALIBRATION_MAX_STDDEV`
+- `OM_SLAM_ODOM_GYRO_CALIBRATION_MAX_RANGE`
 - `OM_ENABLE_SLAM_RECORDING`
 
-These settings start the passive SLAM manager, a SLAM-only local odometry helper, and the passive alignment helper used by the combined `/next/` map. Mapping starts stopped by default so the operator can choose the first map origin from the WebUI. When mapping is started, the manager resets the SLAM-only odometry origin and starts `slam_toolbox`; the alignment helper clears old samples and learns a visualization-only `map -> slam_map` transform. The passive odom helper estimates gyro yaw-rate offset during its startup calibration window and exposes `/passive_slam_odom/calibrate_gyro` for manual recalibration from the `/next/` Sensors tab; stationary gyro warnings are diagnostic only. It prefers saved mowing-boundary samples from `/area_recorder/boundary_samples`, then falls back to synchronized RTK-fixed `map -> base_link` and `slam_map -> slam_base_link` motion samples if no usable boundary path exists. Boundary samples default to a larger retention window than generic motion samples so long yard recordings are not truncated, and the status topic sends a decimated calibration trace for the WebUI. Live GPS and SLAM robot status poses are time-synchronized when their TF stamps are close enough, reducing motion-only marker separation caused by GPS/fusion latency. The default passive tree while mapping is `map -> slam_map -> slam_odom -> slam_base_link -> slam_lidar`; the raw C1 scan from `/hw/lidar` is republished as `/slam_toolbox/scan` in `slam_lidar`. The mower's existing `map -> base_link -> lidar` localization remains separate and authoritative for normal mower behavior, so passive SLAM does not feed costmaps, planning, or control.
+These settings start the passive SLAM manager, a SLAM-only local odometry helper, and the passive alignment helper used by the combined `/next/` map. Mapping starts stopped by default so the operator can choose the first map origin from the WebUI. When mapping is started, the manager resets the SLAM-only odometry origin and starts `slam_toolbox`; the alignment helper clears old samples and learns a visualization-only `map -> slam_map` transform. The passive odom helper estimates gyro yaw-rate offset during its startup calibration window and exposes `/passive_slam_odom/calibrate_gyro`; operational `map -> base_link` heading is still owned by `xbot_positioning`, which exposes `/xbot_positioning/recalibrate_gyro`. The `/next/` Sensors tab calls both services for manual gyro recalibration while the mower is still; calibration windows are rejected if the raw gyro mean, standard deviation, or range is implausible. Stationary gyro warnings are diagnostic only. It prefers saved mowing-boundary samples from `/area_recorder/boundary_samples`, then falls back to synchronized RTK-fixed `map -> base_link` and `slam_map -> slam_base_link` motion samples if no usable boundary path exists. Boundary samples default to a larger retention window than generic motion samples so long yard recordings are not truncated, and the status topic sends a decimated calibration trace for the WebUI. Live GPS and SLAM robot status poses are time-synchronized when their TF stamps are close enough, reducing motion-only marker separation caused by GPS/fusion latency. The default passive tree while mapping is `map -> slam_map -> slam_odom -> slam_base_link -> slam_lidar`; the raw C1 scan from `/hw/lidar` is republished as `/slam_toolbox/scan` in `slam_lidar`. The mower's existing `map -> base_link -> lidar` localization remains separate and authoritative for normal mower behavior, so passive SLAM does not feed costmaps, planning, or control.
 
-Area recording now saves mowing and obstacle geometry from the full costmap footprint swept along RTK-fixed mower poses. Mowing outlines use the largest exterior boundary of that swept union. Obstacles require a closed loop and use the largest interior hole boundary of the swept union. Navigation areas remain the existing `base_link` breadcrumb polygon. Polygon recording skips new trusted geometry unless the raw GPS pose is RTK fixed and within `/xbot_positioning/max_gps_accuracy`; GPS dropouts start a new swept segment so the final saved polygon does not bridge through bad data. Existing maps should be cleared and rerecorded after deploying this behavior. See [AREA_RECORDING_SWEEP.md](AREA_RECORDING_SWEEP.md) before tuning the area-recording params.
+Area recording now saves mowing and obstacle geometry from the full costmap footprint swept along the selected recording pose. The default selected pose is `/localization_fusion/pose`; `/next/` exposes a runtime toggle back to the legacy `/xbot_positioning/xb_pose` GPS path while no polygon is actively recording. Mowing outlines use the largest exterior boundary of that swept union. Obstacles require a closed loop and use the largest interior hole boundary of the swept union. Navigation areas remain the existing `base_link` breadcrumb polygon. Polygon recording skips new trusted geometry when the selected pose is stale or outside its configured quality limits; those gaps start a new swept segment so the final saved polygon does not bridge through bad data. Boundary samples for GPS/LIDAR alignment remain RTK-fixed GPS truth only and are not generated from LIDAR-derived fused pose. Existing maps should be cleared and rerecorded after deploying this behavior. See [AREA_RECORDING_SWEEP.md](AREA_RECORDING_SWEEP.md) before tuning the area-recording params.
+
+The map selector keeps one selected active map for display, recording, and mowing. Create or select the intended map while `mower_logic` is idle, then start area recording; recorded mowing, navigation, obstacle, and docking data are saved into that selected map. Map create/select/rename/delete controls are intentionally guarded by `mower_logic`, and Start Mowing is blocked when the current fused pose is farther than `/mower_logic/map_selector/max_start_distance_m` from the selected map bounds.
 
 ### Localization confidence settings
 
@@ -214,7 +231,7 @@ Observed examples:
 - `OM_LOCALIZATION_FUSION_TF_MAX_AGE_SEC`
 - `OM_LOCALIZATION_FUSION_PUBLISH_TF`
 
-These settings start a read-only shadow publisher for the unified localization marker in `/next/`. It publishes `/localization_fusion/pose`, `/localization_fusion/odom`, `/localization_fusion/status`, and `map -> fused_base_link`. It uses the operational fused GPS/base pose from `/xbot_positioning/xb_pose` for the GPS position, uses raw GPS only as an RTK-fixed quality gate, and uses the globally aligned passive LIDAR pose with the confidence monitor's sigma/confidence values. RTK float is rejected as a GPS fusion source, so the shadow pose becomes LIDAR-only when the aligned LIDAR pose is available. It does not replace `map -> base_link` and does not feed navigation, planning, costmaps, or control.
+These settings start a shadow publisher for the unified localization marker in `/next/` and the default area-recording geometry source. It publishes `/localization_fusion/pose`, `/localization_fusion/odom`, `/localization_fusion/status`, and `map -> fused_base_link`. It uses the operational fused GPS/base pose from `/xbot_positioning/xb_pose` for the GPS position, uses raw GPS only as an RTK-fixed quality gate, and uses the globally aligned passive LIDAR pose with the confidence monitor's sigma/confidence values. RTK float is rejected as a GPS fusion source, so the shadow pose becomes LIDAR-only when the aligned LIDAR pose is available. It does not replace `map -> base_link` and does not feed navigation, planning, costmaps, or control.
 
 ### Mower logic settings
 
@@ -229,8 +246,9 @@ Observed examples:
 - battery voltage CSV logging controls: `OM_NO_BATTERY_VOLTAGE_LOG`, `OM_BATTERY_VOLTAGE_LOG_PATH`, `OM_BATTERY_VOLTAGE_LOG_PERIOD_SEC`, `OM_BATTERY_VOLTAGE_LOG_FSYNC`, `OM_BATTERY_VOLTAGE_LOG_MAX_BYTES`, and `OM_BATTERY_VOLTAGE_LOG_MAX_FILES`
 - mower motor temperature thresholds
 - GPS wait and timeout settings
+- multi-lawn map-selector start-distance guard: `OM_MAP_SELECTOR_MAX_START_DISTANCE_M`
 - automatic mode
-- swept area recording controls: `OM_AREA_RECORDING_POSE_STEP_M`, `OM_AREA_RECORDING_YAW_STEP_RAD`, `OM_AREA_RECORDING_SIMPLIFY_EPSILON_M`, and `OM_AREA_RECORDING_MIN_POLYGON_AREA_M2`
+- swept area recording controls: `OM_AREA_RECORDING_USE_LOCALIZATION_FUSION`, `OM_AREA_RECORDING_FUSED_POSE_TOPIC`, `OM_AREA_RECORDING_LEGACY_POSE_TOPIC`, `OM_AREA_RECORDING_MAX_POSE_AGE_SEC`, `OM_AREA_RECORDING_MAX_FUSED_POSITION_ACCURACY_M`, `OM_AREA_RECORDING_MAX_FUSED_YAW_ACCURACY_RAD`, `OM_AREA_RECORDING_POSE_STEP_M`, `OM_AREA_RECORDING_YAW_STEP_RAD`, `OM_AREA_RECORDING_SIMPLIFY_EPSILON_M`, and `OM_AREA_RECORDING_MIN_POLYGON_AREA_M2`
 - legacy rain settings, ignored by the supported Mowrator runtime
 - recording and snapshot settings
 

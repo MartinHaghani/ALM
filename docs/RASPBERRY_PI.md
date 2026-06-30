@@ -151,7 +151,7 @@ export OM_USE_PASSIVE_SLAM=True
 
 Mapping itself starts stopped unless `OM_SLAM_START_ENABLED=True`. The `/next/` SLAM tab can start mapping, stop mapping, and clear the current passive map. Starting mapping resets the SLAM-only local odometry origin, then starts `slam_toolbox`; clearing the map stops `slam_toolbox` and resets that local odometry again so the next start begins fresh.
 
-Defaults are raw scan topic `/hw/lidar`, SLAM scan topic `/slam_toolbox/scan`, SLAM map topic `/slam_toolbox/map`, SLAM map frame `slam_map`, odom input frame `slam_odom`, base frame `slam_base_link`, and lidar frame `slam_lidar`. The passive odom helper integrates `/hw/diff_drive/measured_twist` with `/hw/imu/data_raw` yaw rate and publishes `slam_odom -> slam_base_link`; the raw C1 scan is republished in `slam_lidar`. The helper estimates gyro yaw-rate offset during its startup calibration window, and the `/next/` Sensors tab can call `/passive_slam_odom/calibrate_gyro` to repeat that calibration while the mower is still. On the current Mowrator runtime, `xbot_positioning` remains responsible for operational `map -> base_link`, so RTK heading corrections do not rotate the passive SLAM odometry chain.
+Defaults are raw scan topic `/hw/lidar`, SLAM scan topic `/slam_toolbox/scan`, SLAM map topic `/slam_toolbox/map`, SLAM map frame `slam_map`, odom input frame `slam_odom`, base frame `slam_base_link`, and lidar frame `slam_lidar`. The passive odom helper integrates `/hw/diff_drive/measured_twist` with `/hw/imu/data_raw` yaw rate and publishes `slam_odom -> slam_base_link`; the raw C1 scan is republished in `slam_lidar`. The helper estimates gyro yaw-rate offset during its startup calibration window. On the current Mowrator runtime, `xbot_positioning` remains responsible for operational `map -> base_link`, so the `/next/` Sensors tab calls both `/xbot_positioning/recalibrate_gyro` and `/passive_slam_odom/calibrate_gyro` while the mower is still. Both calibration paths reject implausible raw-gyro windows instead of replacing a good offset with a transient burst.
 
 The read-only localization confidence monitor starts by default and publishes `/localization_confidence/status` for the `/next/` confidence panel. It uses GPS receiver-quality telemetry, receiver-only GPS motion self-consistency, passive SLAM scan-to-map fit, scan pose-correction estimates, scan motion-distortion estimates, and passive alignment quality. It does not change localization, planning, costmaps, or control.
 
@@ -170,6 +170,7 @@ rostopic echo -n 1 /slam_toolbox/map
 rostopic echo -n 1 /slam_toolbox/local_odom
 rostopic echo -n 1 /slam_toolbox/scan
 rostopic echo -n 1 /passive_slam_odom/status
+rosservice call /xbot_positioning/recalibrate_gyro "{}"
 rosservice call /passive_slam_odom/calibrate_gyro "{}"
 rostopic echo -n 1 /hw/position/gps/quality
 rostopic echo -n 1 /localization_confidence/status
@@ -264,10 +265,23 @@ Expected service endpoints after startup:
 - `mqtt://mowrator.local:1883` for MQTT
 - `ws://mowrator.local:9001/` for MQTT-over-WebSockets
 
+Bluetooth controller host preflight:
+
+```bash
+sudo systemctl enable --now bluetooth.service
+systemctl is-active bluetooth.service
+bluetoothctl show
+```
+
+The runtime container needs the host BlueZ system bus socket at `/run/dbus/system_bus_socket` and `/dev/input/js*` access. The local Pi startup helper mounts the D-Bus socket when present and bind-mounts `/dev`; if `bluetoothctl show` fails on the host, fix the host Bluetooth service before using the `/next/` Bluetooth panel.
+
 Current `Mowrator` web/gamepad mapping:
 
 - the editable source of the existing root Flutter UI lives in the separate `OpenMowerApp` repository; do not hand-edit the compiled root `web/` bundle for feature work
 - the editable source of the new `/next/` React UI lives in this repo under `webui/`, and generated output lands in `web/next/`
+- the `/next/` Map tab exposes area-recording controls through rosbridge using `xbot_monitoring/actions_json`, `xbot/action`, `/web_joy_vel`, `/mower_input/status`, and `xbot_monitoring/map_overlay`; the router is the only main-launch publisher to `/joy_vel`
+- the `/next/` header Bluetooth button uses `/bluetooth_gamepad/status`, `/bluetooth_gamepad/set_powered`, `/bluetooth_gamepad/set_scan_enabled`, `/bluetooth_gamepad/pair`, `/bluetooth_gamepad/connect`, `/bluetooth_gamepad/disconnect`, `/bluetooth_gamepad/forget`, and `/mower_input/set_source`
+- direct Bluetooth controller input flows controller -> mower BlueZ -> `/dev/input/js*` -> `/direct_joy` -> `/direct_joy_vel`; Wi-Fi is only needed for pairing and source selection, not for direct controller motion after selection
 - in `AREA_RECORDING`, the left stick drives without a gamepad deadman
 - the remote-control screen exposes a press-and-hold blade button
 - holding `L1 + R1` also runs the blade while held
