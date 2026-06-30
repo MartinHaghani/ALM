@@ -77,5 +77,7 @@ src/cmake-build-debug-ros
 /tools/coverage_lab/data/maps/**/*.bag
 /tools/coverage_lab/data/maps/**/*.kml
 !/tools/coverage_lab/data/maps/**/.gitkeep
+/tools/coverage_lab/data/path_recordings/**
+!/tools/coverage_lab/data/path_recordings/**/.gitkeep
 /tools/coverage_lab/runs/**
 !/tools/coverage_lab/runs/.gitkeep

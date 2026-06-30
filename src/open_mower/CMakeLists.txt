@@ -163,6 +163,7 @@ catkin_install_python(PROGRAMS
   scripts/direct_gamepad_mapper.py
   scripts/localization_confidence.py
   scripts/localization_fusion.py
+  scripts/manual_path_recorder.py
   scripts/lsm6dso_imu_node.py
   scripts/mower_input_router.py
   scripts/passive_slam_alignment.py

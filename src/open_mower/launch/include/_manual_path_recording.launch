@@ -1,0 +1,15 @@
+<launch>
+    <arg name="recordings_path" default="$(optenv OM_MANUAL_PATH_RECORDINGS_PATH ~/.ros/path_recordings)"/>
+
+    <node pkg="open_mower" type="manual_path_recorder.py" name="manual_path_recorder" output="screen" respawn="true" respawn_delay="5">
+        <param name="recordings_path" value="$(arg recordings_path)"/>
+        <param name="sync_rate_hz" value="$(optenv OM_MANUAL_PATH_RECORDER_SYNC_RATE_HZ 10.0)" type="double"/>
+        <param name="max_pose_age_s" value="$(optenv OM_MANUAL_PATH_RECORDER_MAX_POSE_AGE_S 0.75)" type="double"/>
+        <param name="max_gap_s" value="$(optenv OM_MANUAL_PATH_RECORDER_MAX_GAP_S 1.0)" type="double"/>
+        <param name="max_pose_jump_m" value="$(optenv OM_MANUAL_PATH_RECORDER_MAX_POSE_JUMP_M 0.75)" type="double"/>
+        <param name="max_yaw_jump_rad" value="$(optenv OM_MANUAL_PATH_RECORDER_MAX_YAW_JUMP_RAD 1.134464)" type="double"/>
+        <param name="max_source_separation_m" value="$(optenv OM_MANUAL_PATH_RECORDER_MAX_SOURCE_SEPARATION_M 0.45)" type="double"/>
+        <param name="min_pose_step_m" value="$(optenv OM_MANUAL_PATH_RECORDER_MIN_POSE_STEP_M 0.10)" type="double"/>
+        <param name="min_yaw_step_rad" value="$(optenv OM_MANUAL_PATH_RECORDER_MIN_YAW_STEP_RAD 0.087266)" type="double"/>
+    </node>
+</launch>

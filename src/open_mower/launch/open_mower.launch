@@ -12,6 +12,7 @@
     <include if="$(eval optenv('OM_NO_RECORDING', 'False').lower() != 'true')" file="$(find open_mower)/launch/include/_record.launch">
         <arg name="prefix" value="mow_area"/>
     </include>
+    <include if="$(eval optenv('OM_ENABLE_MANUAL_PATH_RECORDER', 'False').lower() == 'true')" file="$(find open_mower)/launch/include/_manual_path_recording.launch"/>
 
     <node pkg="open_mower" type="mower_input_router.py" name="mower_input_router" output="screen" respawn="true" respawn_delay="5">
         <param name="default_source" value="$(optenv OM_MANUAL_INPUT_DEFAULT_SOURCE web_gamepad)"/>
