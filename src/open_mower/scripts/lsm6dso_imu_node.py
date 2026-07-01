@@ -6,7 +6,7 @@ import re
 import struct
 
 import rospy
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, Temperature
 
 
 I2C_SLAVE = 0x0703
@@ -15,6 +15,7 @@ WHO_AM_I = 0x0F
 CTRL1_XL = 0x10
 CTRL2_G = 0x11
 CTRL3_C = 0x12
+OUT_TEMP_L = 0x20
 OUTX_L_G = 0x22
 
 EXPECTED_WHO_AM_I = 0x6C
@@ -76,11 +77,12 @@ class LSM6DSO:
         self.write_register(CTRL1_XL, 0x40 | self.accel_control)
         self.write_register(CTRL2_G, 0x40 | self.gyro_control)
 
-    def read_imu(self):
-        raw = struct.unpack("<hhhhhh", self.read_registers(OUTX_L_G, 12))
-        gyro = tuple(value * self.gyro_scale for value in raw[0:3])
-        accel = tuple(value * self.accel_scale for value in raw[3:6])
-        return accel, gyro
+    def read_sample(self):
+        raw = struct.unpack("<hhhhhhh", self.read_registers(OUT_TEMP_L, 14))
+        temperature_c = 25.0 + raw[0] / 256.0
+        gyro = tuple(value * self.gyro_scale for value in raw[1:4])
+        accel = tuple(value * self.accel_scale for value in raw[4:7])
+        return accel, gyro, temperature_c
 
 
 def parse_address(value):
@@ -131,6 +133,7 @@ class LSM6DSOImuNode:
         self.imu.configure()
 
         self.publisher = rospy.Publisher("imu", Imu, queue_size=10)
+        self.temperature_publisher = rospy.Publisher("temperature", Temperature, queue_size=10)
         rospy.loginfo(
             "LSM6DSO IMU active on /dev/i2c-%s address 0x%02x, accel +/- %sg, gyro +/- %s dps",
             bus,
@@ -142,12 +145,13 @@ class LSM6DSOImuNode:
     def run(self):
         rate = rospy.Rate(self.rate_hz)
         while not rospy.is_shutdown():
-            accel, gyro = self.imu.read_imu()
+            accel, gyro, temperature_c = self.imu.read_sample()
             accel = remap(accel, self.axis_mapping)
             gyro = remap(gyro, self.axis_mapping)
 
+            stamp = rospy.Time.now()
             msg = Imu()
-            msg.header.stamp = rospy.Time.now()
+            msg.header.stamp = stamp
             msg.header.frame_id = self.frame_id
             msg.orientation_covariance[0] = -1.0
             msg.linear_acceleration.x = accel[0]
@@ -157,6 +161,13 @@ class LSM6DSOImuNode:
             msg.angular_velocity.y = gyro[1]
             msg.angular_velocity.z = gyro[2]
             self.publisher.publish(msg)
+
+            temperature_msg = Temperature()
+            temperature_msg.header.stamp = stamp
+            temperature_msg.header.frame_id = self.frame_id
+            temperature_msg.temperature = temperature_c
+            temperature_msg.variance = 0.0
+            self.temperature_publisher.publish(temperature_msg)
 
             rate.sleep()
 

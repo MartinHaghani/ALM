@@ -17,8 +17,10 @@
 #include <mower_msgs/ESCStatus.h>
 #include <mower_msgs/HwPower.h>
 #include <mower_msgs/HwStatus.h>
+#include <sensor_msgs/Temperature.h>
 #include <xbot_msgs/SensorDataString.h>
 
+#include <cmath>
 #include <functional>
 #include <map>
 #include <string>
@@ -79,6 +81,9 @@ std::map<std::string, SensorConfig> sensor_configs{
   {"om_right_esc_temp", {"Right ESC Temp", "deg.C", xbot_msgs::SensorInfo::VALUE_DESCRIPTION_TEMPERATURE, xbot_msgs::SensorInfo::TYPE_DOUBLE, nullptr, &set_limits_esc_temp, "right_xesc"}},
   {"om_mow_esc_temp", {"Mow ESC Temp", "deg.C", xbot_msgs::SensorInfo::VALUE_DESCRIPTION_TEMPERATURE, xbot_msgs::SensorInfo::TYPE_DOUBLE, [](StatusPtr msg) { return msg->mower_esc_temperature; }, &set_limits_esc_temp, "mower_xesc"}},
   {"om_mow_motor_temp", {"Mow Motor Temp", "deg.C", xbot_msgs::SensorInfo::VALUE_DESCRIPTION_TEMPERATURE, xbot_msgs::SensorInfo::TYPE_DOUBLE, [](StatusPtr msg) { return msg->mower_motor_temperature; }, &set_limits_mow_motor_temp, "mower_xesc", [](){ return paramNh->param("mower_xesc/has_motor_temp", true); }}},
+  {"om_pi_cpu_temp", {"Pi CPU Temp", "deg.C", xbot_msgs::SensorInfo::VALUE_DESCRIPTION_TEMPERATURE, xbot_msgs::SensorInfo::TYPE_DOUBLE}},
+  {"om_imu_temp", {"IMU Temp", "deg.C", xbot_msgs::SensorInfo::VALUE_DESCRIPTION_TEMPERATURE, xbot_msgs::SensorInfo::TYPE_DOUBLE}},
+  {"om_gnss_temp", {"GNSS Temp", "deg.C", xbot_msgs::SensorInfo::VALUE_DESCRIPTION_TEMPERATURE, xbot_msgs::SensorInfo::TYPE_DOUBLE}},
   {"om_mow_motor_current", {"Mow Motor Current", "A", xbot_msgs::SensorInfo::VALUE_DESCRIPTION_CURRENT, xbot_msgs::SensorInfo::TYPE_DOUBLE, [](StatusPtr msg) { return msg->mower_esc_current; }, &set_limits_mow_motor_current, "mower_xesc"}},
   {"om_mow_motor_rpm", {"Mow Motor Revolutions", "rpm", xbot_msgs::SensorInfo::VALUE_DESCRIPTION_RPM, xbot_msgs::SensorInfo::TYPE_DOUBLE, [](StatusPtr msg) { return msg->mower_motor_rpm; }, &set_limits_mow_motor_rpm, "mower_xesc"}},
   {"om_gps_accuracy", {"GPS Accuracy", "m", xbot_msgs::SensorInfo::VALUE_DESCRIPTION_DISTANCE, xbot_msgs::SensorInfo::TYPE_DOUBLE}},
@@ -189,6 +194,38 @@ void right_esc_status_received(const mower_msgs::ESCStatus::ConstPtr& msg) {
   }
 }
 
+void temperature_received(const std::string& sensor_id, const sensor_msgs::Temperature::ConstPtr& msg) {
+  if (!std::isfinite(msg->temperature)) return;
+
+  // Rate limit to 2Hz. Some sources, such as the IMU, can publish much faster.
+  static std::map<std::string, ros::Time> last_update_by_sensor;
+  const auto now = ros::Time::now();
+  auto& last_update = last_update_by_sensor[sensor_id];
+  if (!last_update.isZero() && (now - last_update).toSec() < 0.5) return;
+  last_update = now;
+
+  auto sc_it = sensor_configs.find(sensor_id);
+  if (sc_it == std::end(sensor_configs)) return;
+  if (sc_it->second.existCB && !sc_it->second.existCB()) return;
+
+  xbot_msgs::SensorDataDouble sensor_data;
+  sensor_data.stamp = msg->header.stamp.isZero() ? now : msg->header.stamp;
+  sensor_data.data = msg->temperature;
+  sc_it->second.data_pub.publish(sensor_data);
+}
+
+void pi_temperature_received(const sensor_msgs::Temperature::ConstPtr& msg) {
+  temperature_received("om_pi_cpu_temp", msg);
+}
+
+void imu_temperature_received(const sensor_msgs::Temperature::ConstPtr& msg) {
+  temperature_received("om_imu_temp", msg);
+}
+
+void gnss_temperature_received(const sensor_msgs::Temperature::ConstPtr& msg) {
+  temperature_received("om_gnss_temp", msg);
+}
+
 void set_limits_battery_v(SensorConfig& sensor_config) {
   sensor_config.si.lower_critical_value = power_config.battery_critical_voltage;
   sensor_config.si.min_value = power_config.battery_empty_voltage;
@@ -294,6 +331,9 @@ int main(int argc, char** argv) {
       n->subscribe("/hw/diff_drive/left_esc_status", 10, left_esc_status_received);
   ros::Subscriber right_esc_status_state_subscriber =
       n->subscribe("/hw/diff_drive/right_esc_status", 10, right_esc_status_received);
+  ros::Subscriber pi_temperature_subscriber = n->subscribe("/hw/pi/temperature", 10, pi_temperature_received);
+  ros::Subscriber imu_temperature_subscriber = n->subscribe("/hw/imu/temperature", 10, imu_temperature_received);
+  ros::Subscriber gnss_temperature_subscriber = n->subscribe("/hw/position/gps/temperature", 10, gnss_temperature_received);
   ros::Subscriber pose_state_subscriber = n->subscribe("/xbot_positioning/xb_pose", 10, pose_received);
 
   state_pub = n->advertise<xbot_msgs::RobotState>("xbot_monitoring/robot_state", 10);

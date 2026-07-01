@@ -133,6 +133,27 @@ export interface BoolMessage {
   data: boolean;
 }
 
+export interface SensorDataDouble {
+  stamp: RosTime;
+  data: number;
+}
+
+export interface HwPower {
+  stamp: RosTime;
+  v_battery: number;
+  battery_voltage_valid: boolean;
+  battery_percentage: number;
+  battery_source: string;
+  left_drive_voltage: number;
+  left_drive_voltage_valid: boolean;
+  right_drive_voltage: number;
+  right_drive_voltage_valid: boolean;
+  mower_esc_voltage: number;
+  mower_esc_voltage_valid: boolean;
+  drive_voltage_mismatch: boolean;
+  warning: string;
+}
+
 export interface MowerActionInfo {
   action_id: string;
   action_name: string;

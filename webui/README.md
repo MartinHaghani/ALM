@@ -6,8 +6,10 @@ It defaults to an OpenLayers combined map that can overlay optional satellite im
 `/slam_toolbox/scan`, separate GPS/fused and LIDAR/SLAM robot markers, the shadow unified localization marker from
 `/localization_fusion/pose` when that node is running, live area-recording overlays from
 `/xbot_monitoring/map_overlay`, coverage route snapshots from `/mower_logic/route_plan_json`, MBF planner/controller
-paths, and the sampled actual mowing track. The C1 LIDAR/IMU sensor viewer remains
-behind the Sensors tab. Passive SLAM controls are visualization-only and do not change mower localization, planning,
+paths, and the sampled actual mowing track. The Sensors tab shows C1 LIDAR/IMU diagnostics, thermal health cards
+for the Flipsky ESCs, Pi CPU, IMU, and GNSS receiver through `xbot_monitoring/sensors/*/data`, and the left drive,
+right drive, and blade ESC battery-input voltages from `/hw/power`.
+Passive SLAM controls are visualization-only and do not change mower localization, planning,
 costmaps, or control.
 
 The Map tab also exposes the existing mower area-recording workflow through rosbridge: it subscribes to the live
@@ -37,7 +39,9 @@ The default basemap is York Region's 2023 10 cm orthophoto ArcGIS REST service. 
 `slamOriginFrame`, `slamBaseFrame`, `slamAlignmentStatusTopic`, `slamManagerStatusTopic`, `slamSetMappingService`,
 `slamClearMapService`, `passiveSlamOdomStatusTopic`, `passiveSlamGyroCalibrateService`, `localizationConfidenceTopic`,
 `localizationFusionPoseTopic`, `localizationFusionStatusTopic`, `localizationFusionBaseFrame`, `actionTopic`,
-`actionsTopic`, `webJoyTopic`, `joyTopic`, `bluetoothStatusTopic`, `manualInputStatusTopic`, `mapOverlayTopic`, `mapCatalogTopic`, `mapCreateService`, `mapSelectService`,
+`actionsTopic`, `webJoyTopic`, `joyTopic`, `bluetoothStatusTopic`, `manualInputStatusTopic`, `hwPowerTopic`,
+`batteryFullVoltage`, `batteryEmptyVoltage`, `batteryCriticalVoltage`, `driveVoltageMismatchWarnV`,
+`mapOverlayTopic`, `mapCatalogTopic`, `mapCreateService`, `mapSelectService`,
 `mapRenameService`, `mapDeleteService`, `mapEditService`, `recordingEditService`, `mbfGlobalPlanTopic`,
 `mbfControllerPlanTopic`, `routePlanPreviewService`, `routePlanTopic`, `robotStateTopic`, `tfTopic`,
 `tfStaticTopic`, `mowerFootprint`,

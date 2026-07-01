@@ -169,6 +169,7 @@ catkin_install_python(PROGRAMS
   scripts/passive_slam_alignment.py
   scripts/passive_slam_manager.py
   scripts/passive_slam_odom.py
+  scripts/pi_temperature_node.py
   scripts/rtcm_tcp_bridge.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

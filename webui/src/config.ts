@@ -11,6 +11,11 @@ export interface NextWebUiConfig {
   bluetoothPowerService: string;
   bluetoothScanService: string;
   bluetoothStatusTopic: string;
+  batteryCriticalVoltage: number;
+  batteryEmptyVoltage: number;
+  batteryFullVoltage: number;
+  driveVoltageMismatchWarnV: number;
+  hwPowerTopic: string;
   satelliteArcGisFormat: string;
   satelliteArcGisLayers: string;
   satelliteArcGisRestUrl: string;
@@ -90,6 +95,11 @@ const defaultConfig: NextWebUiConfig = {
   bluetoothPowerService: "/bluetooth_gamepad/set_powered",
   bluetoothScanService: "/bluetooth_gamepad/set_scan_enabled",
   bluetoothStatusTopic: "/bluetooth_gamepad/status",
+  batteryCriticalVoltage: 43.0,
+  batteryEmptyVoltage: 45.0,
+  batteryFullVoltage: 58.4,
+  driveVoltageMismatchWarnV: 1.0,
+  hwPowerTopic: "/hw/power",
   satelliteArcGisFormat: "jpg",
   satelliteArcGisLayers: "show:4",
   satelliteArcGisRestUrl:

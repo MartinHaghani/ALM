@@ -20,7 +20,7 @@ This summary is grounded in:
 ### Launch includes
 
 - `_params.launch`: loads parameters from YAML and or environment variables, depending on legacy mode and hardware platform.
-- `_comms.launch`: starts `mower_hardware` for the supported `Mowrator` direct-Pi hardware path, starts the separate Mowrator battery-voltage CSV logger unless disabled, keeps `mower_comms_v1` available only for legacy non-Mowrator `HARDWARE_PLATFORM=1` presets, or starts `mower_comms_v2` for `HARDWARE_PLATFORM=2`. It also starts the Raspberry Pi I2C LSM6DSO IMU publisher and chooses either the built-in NTRIP client or the raw TCP RTCM bridge for correction input.
+- `_comms.launch`: starts `mower_hardware` for the supported `Mowrator` direct-Pi hardware path, starts the separate Mowrator battery-voltage CSV logger and Pi CPU temperature publisher, keeps `mower_comms_v1` available only for legacy non-Mowrator `HARDWARE_PLATFORM=1` presets, or starts `mower_comms_v2` for `HARDWARE_PLATFORM=2`. It also starts the Raspberry Pi I2C LSM6DSO IMU publisher, including IMU die temperature output, and chooses either the built-in NTRIP client or the raw TCP RTCM bridge for correction input.
 - `_c1_lidar.launch`: optionally starts the vendored Slamtec C1 driver and publishes a static `base_link` to LIDAR transform when `OM_USE_C1_LIDAR=True`.
 - `_passive_slam.launch`: optionally starts the passive SLAM manager, SLAM-only odometry helper, and passive alignment helper when `OM_USE_PASSIVE_SLAM=True`. The manager starts mapping disabled by default, resets the local `slam_odom -> slam_base_link` odometry origin when mapping is started, then runs `slam_toolbox` under `/slam_toolbox`. The alignment helper estimates a visualization-only `map -> slam_map` transform, preferring saved mowing-boundary GPS/LIDAR corner pairs before falling back to synchronized RTK-fixed motion pose pairs, without changing mower localization or navigation authority.
 - `_localization_confidence.launch`: starts the read-only confidence monitor when `OM_USE_LOCALIZATION_CONFIDENCE=True`. It publishes GPS and LIDAR trust diagnostics for `/next/` and future fusion work, but does not feed localization, planning, costmaps, or control.
@@ -45,7 +45,7 @@ This summary is grounded in:
 ## High-level data and control flow
 
 1. Parameters are assembled first from launch-time YAML and environment inputs.
-2. The supported Mowrator hardware layer exposes direct hardware state and control topics under `/hw/...`, including `/hw/power` battery voltage telemetry from the left drive, right drive, and mower/blade ESCs.
+2. The supported Mowrator hardware layer exposes direct hardware state and control topics under `/hw/...`, including `/hw/power` battery voltage telemetry from the left drive, right drive, and mower/blade ESCs, plus Pi CPU, IMU die, and GNSS receiver temperature topics for diagnostics.
 3. `xbot_positioning` consumes GPS, IMU, and measured twist data to produce the mower pose.
 4. `mower_map_service` provides saved-map catalog storage, selected active-map publication, selected-map edit geometry, docking and mowing-area services, and an RPC method named `map.replace`.
 5. `mower_logic` coordinates mower behaviors such as idle, mowing, parking at the recorded docking point, and area recording, using `mower_map`, `slic3r_coverage_planner`, MBF actions, and `/hw` services. Area recording saves mowing and obstacle polygons by unioning the full costmap footprint swept along the selected recording-pose segments, defaulting to `/localization_fusion/pose` with a `/next/` runtime fallback to legacy GPS positioning. Navigation-area recording remains a `base_link` breadcrumb polygon. UI map edits are gated here and do not rewrite GPS-truth boundary samples used for GPS/LIDAR alignment.
@@ -55,7 +55,7 @@ This summary is grounded in:
 
 ## Package role split
 
-- `open_mower`: orchestration package. It provides launch, params, RViz assets, a small Python RTCM bridge script for raw TCP correction sources, a small Python LSM6DSO IMU publisher for the current Pi-I2C bench hardware path, the separate battery-voltage CSV logger, manual input routing, mower-side Bluetooth controller management, direct gamepad mapping, optional C1 LIDAR launch wiring, and the optional passive manual path recorder.
+- `open_mower`: orchestration package. It provides launch, params, RViz assets, a small Python RTCM bridge script for raw TCP correction sources, a small Python LSM6DSO IMU and IMU-temperature publisher for the current Pi-I2C bench hardware path, the separate battery-voltage CSV logger, a Pi CPU temperature publisher, manual input routing, mower-side Bluetooth controller management, direct gamepad mapping, optional C1 LIDAR launch wiring, and the optional passive manual path recorder.
 - `mower_hardware`: supported Mowrator direct hardware bridge. It drives left/right/blade ESCs through the xESC driver and publishes `/hw/status`, `/hw/power`, `/hw/emergency`, measured drive telemetry, and per-ESC battery voltage without the OpenMower low-level-board protocol.
 - `mower_logic`: high-level decision-making and mower state transitions.
 - `mower_map`: map storage and retrieval plus occupancy-grid and marker publication.

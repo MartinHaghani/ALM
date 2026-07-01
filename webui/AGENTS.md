@@ -17,13 +17,14 @@ Purpose: guidance for editing the Vite + React + TypeScript source for the `/nex
 - Do not expose `mower_logic:area_recording/record_dock` in `/next/`; docking remains intentionally omitted during the transition.
 - The Sensors view is diagnostic through rosbridge, with operational positioning and passive SLAM gyro recalibration available through configured trigger services.
 - It defaults to an OpenLayers GPS map using `sensor_msgs/NavSatFix` from `/hw/position/gps/fix` plus RTK/status flags from `/hw/position/gps`.
-- It also visualizes Slamtec C1 `sensor_msgs/LaserScan` data and raw `sensor_msgs/Imu` output behind the Sensors view.
+- It also visualizes Slamtec C1 `sensor_msgs/LaserScan` data, raw `sensor_msgs/Imu` output, mower thermal sensor values from `xbot_monitoring/sensors/*/data`, and VESC input voltages from `/hw/power` behind the Sensors view.
 - It has a SLAM view for passive `slam_toolbox` output from `/slam_toolbox/map` with `/slam_toolbox/scan` scan overlay and shadow-mapper start/stop/clear controls.
 - The default rosbridge URL is `ws://<current-host>:9090`.
 - The default GPS fix topic is `/hw/position/gps/fix`.
 - The default GPS status topic is `/hw/position/gps`.
 - The default scan topic is `/hw/lidar`.
 - The default IMU topic is `/hw/imu/data_raw`.
+- The default hardware power topic is `/hw/power`.
 - The default action topic is `/xbot/action`.
 - The default action availability topic is `/xbot_monitoring/actions_json`.
 - The default robot-state topic is `/xbot_monitoring/robot_state`.

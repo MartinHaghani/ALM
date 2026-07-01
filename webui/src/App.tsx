@@ -1,20 +1,72 @@
-import { Activity, AlertTriangle, Bluetooth, Gamepad2, Link2, Map as MapIcon, Pause, Play, Power, Radar, RefreshCw, RotateCcw, Route, Search, Trash2, Unlink, Wifi, WifiOff, X } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  Battery,
+  Bluetooth,
+  Gamepad2,
+  Link2,
+  Map as MapIcon,
+  Pause,
+  Play,
+  Power,
+  Radar,
+  RefreshCw,
+  RotateCcw,
+  Route,
+  Search,
+  Thermometer,
+  Trash2,
+  Unlink,
+  Wifi,
+  WifiOff,
+  X,
+} from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import type { Ros } from "roslib";
 
+import {
+  BatteryVoltagePanel,
+  batteryStateLabel,
+  formatBatteryPercent,
+  getBatteryPercent,
+  getBatteryState,
+  isHwPowerFresh,
+  type BatteryVoltageLimits,
+} from "./BatteryVoltagePanel";
 import { CombinedMapView } from "./CombinedMapView";
 import { ImuPanel } from "./ImuPanel";
 import { ScanCanvas } from "./ScanCanvas";
+import {
+  TEMPERATURE_SENSORS,
+  TemperaturePanel,
+  formatTemperature,
+  getOverallState,
+  getTemperatureState,
+  isReadingFresh,
+  temperatureStateLabel,
+} from "./TemperaturePanel";
 import { getNextWebUiConfig, type NextWebUiConfig } from "./config";
 import { isImuSampleValid } from "./imuMath";
 import { callBluetoothDeviceCommandService, callSetBoolService, callSetManualInputSourceService, callTriggerService } from "./rosServices";
-import type { BluetoothDevice, BluetoothGamepadStatus, Imu, ImuStats, LaserScan, ManualInputSource, MowerInputStatus } from "./types";
+import type {
+  BluetoothDevice,
+  BluetoothGamepadStatus,
+  HwPower,
+  Imu,
+  ImuStats,
+  LaserScan,
+  ManualInputSource,
+  MowerInputStatus,
+  SensorStats,
+} from "./types";
 import { useBluetoothGamepadStatus } from "./useBluetoothGamepadStatus";
+import { useHwPower } from "./useHwPower";
 import { useImu } from "./useImu";
 import { useLaserScan } from "./useLaserScan";
 import { useMowerInputStatus } from "./useMowerInputStatus";
 import { usePassiveSlamOdomStatus } from "./usePassiveSlamOdomStatus";
 import { useRosBridge } from "./useRosBridge";
+import { useTemperatureSensors, type TemperatureReadings } from "./useTemperatureSensors";
 
 const DEFAULT_IMU_TOPIC = "/hw/imu/data_raw";
 const IMU_STALE_MS = 1500;
@@ -35,11 +87,15 @@ const CONTROLLER_PROFILE_LABELS: Record<string, string> = {
 };
 
 interface SensorViewerProps {
+  batteryLimits: BatteryVoltageLimits;
   config: NextWebUiConfig;
   connected: boolean;
   error: string | null;
   now: number;
+  power: HwPower | null;
+  powerStats: SensorStats;
   ros: Ros | null;
+  temperatureReadings: TemperatureReadings;
   url: string;
 }
 
@@ -91,6 +147,80 @@ function formatRssi(value: number | null): string {
   return `${Math.round(value)} dBm`;
 }
 
+function hottestTemperature(readings: TemperatureReadings, connected: boolean, now: number): number | null {
+  return TEMPERATURE_SENSORS.reduce<number | null>((hottest, spec) => {
+    const reading = readings[spec.id];
+    if (!isReadingFresh(connected, reading, now)) {
+      return hottest;
+    }
+
+    const value = reading?.data?.data;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return hottest;
+    }
+    return hottest === null || value > hottest ? value : hottest;
+  }, null);
+}
+
+function HeaderTemperatureStatus({
+  connected,
+  now,
+  readings,
+}: {
+  connected: boolean;
+  now: number;
+  readings: TemperatureReadings;
+}) {
+  const states = TEMPERATURE_SENSORS.map((spec) => getTemperatureState(spec, readings[spec.id], connected, now));
+  const state = getOverallState(states, connected);
+  const label = temperatureStateLabel(state, connected);
+  const hottest = hottestTemperature(readings, connected, now);
+  const text = hottest === null ? label : `${label} ${formatTemperature(hottest)}°`;
+
+  return (
+    <div
+      className={`header-status-pill is-${state}`}
+      title={`Thermal health: ${text}`}
+      aria-label={`Thermal health ${text}`}
+    >
+      <Thermometer size={18} aria-hidden="true" />
+      <span>{text}</span>
+    </div>
+  );
+}
+
+function HeaderBatteryStatus({
+  connected,
+  limits,
+  now,
+  power,
+  stats,
+}: {
+  connected: boolean;
+  limits: BatteryVoltageLimits;
+  now: number;
+  power: HwPower | null;
+  stats: SensorStats;
+}) {
+  const fresh = isHwPowerFresh(connected, power, stats, now);
+  const state = getBatteryState(connected, limits, now, power, stats);
+  const percent = getBatteryPercent(power, fresh);
+  const percentText = formatBatteryPercent(percent);
+  const label = batteryStateLabel(state, connected);
+  const voltageText = fresh && power?.battery_voltage_valid ? `${formatNumber(power.v_battery, 1)} V` : label;
+
+  return (
+    <div
+      className={`header-status-pill is-${state}`}
+      title={`Battery: ${percentText}, ${voltageText}`}
+      aria-label={`Battery ${percentText}, ${voltageText}`}
+    >
+      <Battery size={18} aria-hidden="true" />
+      <span>{percentText}</span>
+    </div>
+  );
+}
+
 function deviceName(device: BluetoothDevice): string {
   return device.alias || device.name || "Controller";
 }
@@ -125,7 +255,18 @@ function imuStatusLabel(status: ImuStatus): string {
   return "IMU waiting";
 }
 
-function SensorViewer({ config, connected, error, now, ros, url }: SensorViewerProps) {
+function SensorViewer({
+  batteryLimits,
+  config,
+  connected,
+  error,
+  now,
+  power,
+  powerStats,
+  ros,
+  temperatureReadings,
+  url,
+}: SensorViewerProps) {
   const [scanTopic, setScanTopic] = useState(config.scanTopic);
   const [draftTopic, setDraftTopic] = useState(config.scanTopic);
   const [imuTopic, setImuTopic] = useState(DEFAULT_IMU_TOPIC);
@@ -389,6 +530,16 @@ function SensorViewer({ config, connected, error, now, ros, url }: SensorViewerP
       </aside>
 
       <main className="sensor-stage">
+        <TemperaturePanel connected={connected} now={now} readings={temperatureReadings} />
+
+        <BatteryVoltagePanel
+          connected={connected}
+          limits={batteryLimits}
+          now={now}
+          power={power}
+          stats={powerStats}
+        />
+
         <ImuPanel imu={imu} now={now} stats={imuStats} />
 
         <section className="scan-stage">
@@ -649,6 +800,28 @@ export default function App() {
     ros,
     topicName: config.manualInputStatusTopic,
   });
+  const temperatureReadings = useTemperatureSensors({
+    ros,
+    sensors: TEMPERATURE_SENSORS,
+  });
+  const { power, stats: powerStats } = useHwPower({
+    ros,
+    topicName: config.hwPowerTopic,
+  });
+  const batteryLimits = useMemo<BatteryVoltageLimits>(
+    () => ({
+      critical: config.batteryCriticalVoltage,
+      empty: config.batteryEmptyVoltage,
+      full: config.batteryFullVoltage,
+      mismatchWarn: config.driveVoltageMismatchWarnV,
+    }),
+    [
+      config.batteryCriticalVoltage,
+      config.batteryEmptyVoltage,
+      config.batteryFullVoltage,
+      config.driveVoltageMismatchWarnV,
+    ],
+  );
   const bluetoothInputLive = Boolean(mowerInputStatus?.direct_connected);
   const bluetoothReady = Boolean(bluetoothStatus?.available && bluetoothStatus?.adapter?.powered);
 
@@ -713,6 +886,14 @@ export default function App() {
               />
             )}
           </div>
+          <HeaderTemperatureStatus connected={connected} now={now} readings={temperatureReadings} />
+          <HeaderBatteryStatus
+            connected={connected}
+            limits={batteryLimits}
+            now={now}
+            power={power}
+            stats={powerStats}
+          />
           <div className={`connection-pill ${connected ? "is-connected" : "is-offline"}`}>
             {connected ? <Wifi size={18} aria-hidden="true" /> : <WifiOff size={18} aria-hidden="true" />}
             <span>{connected ? "ROS connected" : "ROS offline"}</span>
@@ -744,7 +925,18 @@ export default function App() {
         />
       )}
       {viewMode === "sensors" && (
-        <SensorViewer config={config} connected={connected} error={error} now={now} ros={ros} url={url} />
+        <SensorViewer
+          batteryLimits={batteryLimits}
+          config={config}
+          connected={connected}
+          error={error}
+          now={now}
+          power={power}
+          powerStats={powerStats}
+          ros={ros}
+          temperatureReadings={temperatureReadings}
+          url={url}
+        />
       )}
     </div>
   );

@@ -210,6 +210,51 @@ button {
   background: var(--green);
 }
 
+.header-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.header-status-pill svg {
+  flex: 0 0 auto;
+}
+
+.header-status-pill.is-good {
+  color: var(--green);
+  border-color: rgba(20, 120, 77, 0.28);
+  background: #eef8f2;
+}
+
+.header-status-pill.is-watch,
+.header-status-pill.is-low,
+.header-status-pill.is-mismatch {
+  color: var(--amber);
+  border-color: rgba(160, 92, 0, 0.28);
+  background: #fff7e8;
+}
+
+.header-status-pill.is-hot,
+.header-status-pill.is-critical {
+  color: var(--red);
+  border-color: rgba(180, 35, 24, 0.28);
+  background: #fff2f0;
+}
+
+.header-status-pill.is-offline {
+  color: var(--muted);
+  background: var(--panel-soft);
+}
+
 .bluetooth-popover {
   position: absolute;
   top: calc(100% + 10px);
@@ -1759,6 +1804,8 @@ button:focus-visible {
   min-width: 0;
 }
 
+.temperature-panel,
+.battery-panel,
 .imu-panel,
 .scan-stage {
   display: flex;
@@ -1802,6 +1849,489 @@ button:focus-visible {
   color: var(--amber);
   border-color: rgba(160, 92, 0, 0.28);
   background: #fff7e8;
+}
+
+.temperature-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--panel-soft);
+  white-space: nowrap;
+}
+
+.temperature-summary strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.temperature-summary.is-good {
+  color: var(--green);
+  border-color: rgba(20, 120, 77, 0.28);
+  background: #eef8f2;
+}
+
+.temperature-summary.is-watch {
+  color: var(--amber);
+  border-color: rgba(160, 92, 0, 0.28);
+  background: #fff7e8;
+}
+
+.temperature-summary.is-hot,
+.temperature-summary.is-critical {
+  color: var(--red);
+  border-color: rgba(180, 35, 24, 0.28);
+  background: #fff2f0;
+}
+
+.temperature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.temperature-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  min-height: 164px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.temperature-card.is-good {
+  border-top-color: var(--green);
+}
+
+.temperature-card.is-watch {
+  border-top-color: var(--amber);
+}
+
+.temperature-card.is-hot,
+.temperature-card.is-critical {
+  border-top-color: var(--red);
+}
+
+.temperature-card.is-offline {
+  opacity: 0.72;
+}
+
+.temperature-card-top,
+.temperature-card-foot,
+.temperature-card-value {
+  display: flex;
+  align-items: center;
+}
+
+.temperature-card-top {
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.temperature-card-top div {
+  min-width: 0;
+}
+
+.temperature-card-top span,
+.temperature-card-foot span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.temperature-card-top strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.temperature-badge {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.temperature-badge.is-good {
+  color: var(--green);
+  border-color: rgba(20, 120, 77, 0.28);
+  background: #eef8f2;
+}
+
+.temperature-badge.is-watch {
+  color: var(--amber);
+  border-color: rgba(160, 92, 0, 0.28);
+  background: #fff7e8;
+}
+
+.temperature-badge.is-hot,
+.temperature-badge.is-critical {
+  color: var(--red);
+  border-color: rgba(180, 35, 24, 0.28);
+  background: #fff2f0;
+}
+
+.temperature-card-value {
+  align-items: baseline;
+  gap: 7px;
+}
+
+.temperature-card-value strong {
+  color: var(--ink);
+  font-size: 34px;
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+}
+
+.temperature-card-value span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.temperature-track {
+  position: relative;
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8eef3;
+}
+
+.temperature-track span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--temperature-fill);
+  border-radius: inherit;
+  background: var(--green);
+}
+
+.temperature-card.is-watch .temperature-track span {
+  background: var(--amber);
+}
+
+.temperature-card.is-hot .temperature-track span,
+.temperature-card.is-critical .temperature-track span {
+  background: var(--red);
+}
+
+.temperature-card.is-offline .temperature-track span {
+  background: #9aa7b4;
+}
+
+.temperature-track i {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: var(--temperature-marker);
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(23, 32, 42, 0.45);
+}
+
+.temperature-card-foot {
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.temperature-card-foot span:last-child {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.temperature-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(160, 92, 0, 0.28);
+  border-radius: 8px;
+  color: var(--amber);
+  background: #fff7e8;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.temperature-alert.is-hot,
+.temperature-alert.is-critical {
+  color: var(--red);
+  border-color: rgba(180, 35, 24, 0.28);
+  background: #fff2f0;
+}
+
+.battery-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--panel-soft);
+  white-space: nowrap;
+}
+
+.battery-summary strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.battery-summary.is-good {
+  color: var(--green);
+  border-color: rgba(20, 120, 77, 0.28);
+  background: #eef8f2;
+}
+
+.battery-summary.is-low,
+.battery-summary.is-mismatch {
+  color: var(--amber);
+  border-color: rgba(160, 92, 0, 0.28);
+  background: #fff7e8;
+}
+
+.battery-summary.is-critical {
+  color: var(--red);
+  border-color: rgba(180, 35, 24, 0.28);
+  background: #fff2f0;
+}
+
+.battery-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.battery-card {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  min-height: 158px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+
+.battery-card.is-good {
+  border-top-color: var(--green);
+}
+
+.battery-card.is-low,
+.battery-card.is-mismatch {
+  border-top-color: var(--amber);
+}
+
+.battery-card.is-critical {
+  border-top-color: var(--red);
+}
+
+.battery-card.is-offline {
+  opacity: 0.72;
+}
+
+.battery-card-top,
+.battery-card-foot,
+.battery-card-value {
+  display: flex;
+  align-items: center;
+}
+
+.battery-card-top {
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.battery-card-top div {
+  min-width: 0;
+}
+
+.battery-card-top span,
+.battery-card-foot span,
+.battery-meta-row span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.battery-card-top strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.battery-badge {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.battery-badge.is-good {
+  color: var(--green);
+  border-color: rgba(20, 120, 77, 0.28);
+  background: #eef8f2;
+}
+
+.battery-badge.is-low,
+.battery-badge.is-mismatch {
+  color: var(--amber);
+  border-color: rgba(160, 92, 0, 0.28);
+  background: #fff7e8;
+}
+
+.battery-badge.is-critical {
+  color: var(--red);
+  border-color: rgba(180, 35, 24, 0.28);
+  background: #fff2f0;
+}
+
+.battery-card-value {
+  align-items: baseline;
+  gap: 7px;
+}
+
+.battery-card-value strong {
+  color: var(--ink);
+  font-size: 34px;
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+}
+
+.battery-card-value span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.battery-track {
+  position: relative;
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8eef3;
+}
+
+.battery-track span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--battery-fill);
+  border-radius: inherit;
+  background: var(--green);
+}
+
+.battery-card.is-low .battery-track span,
+.battery-card.is-mismatch .battery-track span {
+  background: var(--amber);
+}
+
+.battery-card.is-critical .battery-track span {
+  background: var(--red);
+}
+
+.battery-card.is-offline .battery-track span {
+  background: #9aa7b4;
+}
+
+.battery-track i {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: var(--battery-empty-marker);
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(23, 32, 42, 0.45);
+}
+
+.battery-card-foot {
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.battery-card-foot span:last-child {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.battery-meta-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.battery-meta-row div {
+  min-width: 0;
+  min-height: 58px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.battery-meta-row strong {
+  display: block;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  text-transform: capitalize;
+}
+
+.battery-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(160, 92, 0, 0.28);
+  border-radius: 8px;
+  color: var(--amber);
+  background: #fff7e8;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.battery-alert.is-critical {
+  color: var(--red);
+  border-color: rgba(180, 35, 24, 0.28);
+  background: #fff2f0;
 }
 
 .slam-map-canvas {
@@ -2375,6 +2905,15 @@ button:focus-visible {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .temperature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .battery-grid,
+  .battery-meta-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .scan-stage {
     min-height: 520px;
   }
@@ -2420,6 +2959,7 @@ button:focus-visible {
   }
 
   .connection-pill,
+  .header-status-pill,
   .sensor-pill {
     justify-content: center;
   }
@@ -2436,6 +2976,9 @@ button:focus-visible {
   .control-panel,
   .combined-map-panel,
   .gps-map-panel,
+  .temperature-panel,
+  .battery-panel,
+  .imu-panel,
   .scan-stage {
     padding: 14px;
   }
@@ -2497,6 +3040,15 @@ button:focus-visible {
   }
 
   .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .temperature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .battery-grid,
+  .battery-meta-row {
     grid-template-columns: 1fr;
   }
 

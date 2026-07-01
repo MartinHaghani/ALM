@@ -17,6 +17,10 @@
             <param name="max_bytes" value="$(optenv OM_BATTERY_VOLTAGE_LOG_MAX_BYTES 10485760)" type="int"/>
             <param name="max_files" value="$(optenv OM_BATTERY_VOLTAGE_LOG_MAX_FILES 5)" type="int"/>
         </node>
+        <node pkg="open_mower" type="pi_temperature_node.py" name="pi_temperature"
+                output="screen" respawn="true" respawn_delay="5">
+            <remap from="temperature" to="/hw/pi/temperature"/>
+        </node>
         <node pkg="xbot_driver_gps" type="driver_gps_node" name="gps"
                 ns="hw/services"
                 output="screen"
@@ -75,6 +79,7 @@
         <param name="axis_config" value="$(optenv OM_LSM6DSO_AXIS_CONFIG +X+Y+Z)"/>
         <param name="frame_id" value="$(optenv OM_LSM6DSO_FRAME_ID base_link)"/>
         <remap from="imu" to="/hw/imu/data_raw"/>
+        <remap from="temperature" to="/hw/imu/temperature"/>
     </node>
 
     <group unless="$(optenv OM_NO_GPS False)">
