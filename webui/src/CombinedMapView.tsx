@@ -12,6 +12,7 @@ import BaseLayer from "ol/layer/Base.js";
 import TileLayer from "ol/layer/Tile.js";
 import VectorLayer from "ol/layer/Vector.js";
 import OlMap from "ol/Map.js";
+import DragPan from "ol/interaction/DragPan.js";
 import { fromLonLat, toLonLat } from "ol/proj.js";
 import ImageArcGISRest from "ol/source/ImageArcGISRest.js";
 import ImageCanvasSource from "ol/source/ImageCanvas.js";
@@ -24,7 +25,7 @@ import Stroke from "ol/style/Stroke.js";
 import Style from "ol/style/Style.js";
 import Text from "ol/style/Text.js";
 import View from "ol/View.js";
-import { Activity, AlertTriangle, ChevronLeft, ChevronRight, CircleDot, Crosshair, Edit3, Flag, Gamepad2, Hand, Layers, LogOut, Map as MapIcon, Pause, Play, Plus, Route, Save, Square, Trash2, Upload, X } from "lucide-react";
+import { Activity, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, CircleDot, Crosshair, Edit3, Flag, Gamepad2, Hand, Layers, LogOut, Map as MapIcon, Pause, Play, Plus, Route, Save, Square, Trash2, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Topic, type Ros } from "roslib";
 
@@ -1193,6 +1194,8 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
   const [mapCommandMessage, setMapCommandMessage] = useState<string | null>(null);
   const [mapCommandPending, setMapCommandPending] = useState(false);
   const [newMapName, setNewMapName] = useState("");
+  const [mapNameDialog, setMapNameDialog] = useState<"create" | "rename" | null>(null);
+  const [mapSelectorOpen, setMapSelectorOpen] = useState(false);
   const [renameMapName, setRenameMapName] = useState("");
   const [editorMode, setEditorMode] = useState<EditorMode>("view");
   const [paintTool, setPaintTool] = useState<PaintTool>("pen");
@@ -1207,8 +1210,13 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
   const actionTopicRef = useRef<Topic<StringMessage> | null>(null);
   const mapElementRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<OlMap | null>(null);
+  const mapSelectorRef = useRef<HTMLDivElement | null>(null);
+  const newMapNameInputRef = useRef<HTMLInputElement | null>(null);
+  const renameMapNameInputRef = useRef<HTMLInputElement | null>(null);
   const editorDrawingRef = useRef(false);
   const editorDragVertexRef = useRef<number | null>(null);
+  const editorActivePointerIdRef = useRef<number | null>(null);
+  const editorDisabledDragPanRef = useRef<Array<{ interaction: DragPan; wasActive: boolean }>>([]);
   const draftPolygonRef = useRef<MapPoint[] | null>(null);
   const hasCenteredOnFirstFixRef = useRef(false);
   const actualTrackPointsRef = useRef<MapPoint[]>([]);
@@ -1373,6 +1381,37 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
   useEffect(() => {
     setRenameMapName(selectedMap?.name ?? "");
   }, [selectedMap?.id, selectedMap?.name]);
+
+  useEffect(() => {
+    if (!mapSelectorOpen) {
+      return undefined;
+    }
+
+    function closeFromOutside(event: PointerEvent): void {
+      if (mapNameDialog) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof Node && mapSelectorRef.current?.contains(target)) {
+        return;
+      }
+      setMapSelectorOpen(false);
+    }
+
+    function closeFromEscape(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setMapSelectorOpen(false);
+        setMapNameDialog(null);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeFromOutside);
+    document.addEventListener("keydown", closeFromEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeFromOutside);
+      document.removeEventListener("keydown", closeFromEscape);
+    };
+  }, [mapNameDialog, mapSelectorOpen]);
 
   const publishMowerAction = useCallback(
     (action: string, source = "ui") => {
@@ -1681,6 +1720,13 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
       view.setZoom(followZoom);
     }
   }, [followZoom, gpsPose, lonLat, projectionAnchor, unifiedMapPose]);
+
+  const restoreEditorDragPanInteractions = useCallback(() => {
+    for (const { interaction, wasActive } of editorDisabledDragPanRef.current) {
+      interaction.setActive(wasActive);
+    }
+    editorDisabledDragPanRef.current = [];
+  }, []);
 
   useEffect(() => {
     const rawPoseTransform = poseFromAbsolutePose(rawPose);
@@ -2248,6 +2294,28 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
   }, [brushDiameter, draftPolygon, editorMode, paintTool, pendingStroke, projectionAnchor, routeMode]);
 
   useEffect(() => {
+    restoreEditorDragPanInteractions();
+    const map = mapRef.current;
+    if (!map || routeMode || editorMode === "view") {
+      return undefined;
+    }
+
+    const disabledDragPanInteractions: Array<{ interaction: DragPan; wasActive: boolean }> = [];
+    map.getInteractions().forEach((interaction) => {
+      if (interaction instanceof DragPan) {
+        disabledDragPanInteractions.push({
+          interaction,
+          wasActive: interaction.getActive(),
+        });
+        interaction.setActive(false);
+      }
+    });
+    editorDisabledDragPanRef.current = disabledDragPanInteractions;
+
+    return restoreEditorDragPanInteractions;
+  }, [editorMode, restoreEditorDragPanInteractions, routeMode]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map || routeMode || !projectionAnchor || editorMode === "view") {
       return undefined;
@@ -2261,18 +2329,38 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
 
     const stopMapEvent = (event: PointerEvent): void => {
       event.preventDefault();
+      event.stopImmediatePropagation();
       event.stopPropagation();
     };
 
+    const captureEditorPointer = (event: PointerEvent): void => {
+      editorActivePointerIdRef.current = event.pointerId;
+      if (!viewport.hasPointerCapture(event.pointerId)) {
+        viewport.setPointerCapture(event.pointerId);
+      }
+    };
+
+    const releaseEditorPointer = (event: PointerEvent): void => {
+      if (viewport.hasPointerCapture(event.pointerId)) {
+        viewport.releasePointerCapture(event.pointerId);
+      }
+      editorActivePointerIdRef.current = null;
+    };
+
     const handlePointerDown = (event: PointerEvent): void => {
+      if (!event.isPrimary || event.button !== 0) {
+        stopMapEvent(event);
+        return;
+      }
+      stopMapEvent(event);
       const local = localFromEvent(event);
       if (!local) {
         return;
       }
       if (editorMode === "paint") {
         editorDrawingRef.current = true;
+        captureEditorPointer(event);
         setPendingStroke([local]);
-        stopMapEvent(event);
         return;
       }
 
@@ -2284,7 +2372,7 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
         const vertexIndex = nearestVertexIndex(currentDraft, local);
         if (vertexIndex >= 0) {
           editorDragVertexRef.current = vertexIndex;
-          stopMapEvent(event);
+          captureEditorPointer(event);
         }
       } else if (polygonTool === "add") {
         const insertIndex = nearestSegmentInsertIndex(currentDraft, local);
@@ -2297,18 +2385,21 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
             next.splice(insertIndex, 0, local);
             return next;
           });
-          stopMapEvent(event);
         }
       } else if (polygonTool === "delete") {
         const vertexIndex = nearestVertexIndex(currentDraft, local);
         if (vertexIndex >= 0 && currentDraft.length > 3) {
           setDraftPolygon((current) => current?.filter((_, index) => index !== vertexIndex) ?? current);
-          stopMapEvent(event);
         }
       }
     };
 
     const handlePointerMove = (event: PointerEvent): void => {
+      const activePointerId = editorActivePointerIdRef.current;
+      if (activePointerId !== null && activePointerId !== event.pointerId) {
+        stopMapEvent(event);
+        return;
+      }
       const local = localFromEvent(event);
       if (!local) {
         return;
@@ -2340,24 +2431,31 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
     };
 
     const handlePointerUp = (event: PointerEvent): void => {
+      if (editorActivePointerIdRef.current !== null && editorActivePointerIdRef.current !== event.pointerId) {
+        stopMapEvent(event);
+        return;
+      }
       if (editorDrawingRef.current || editorDragVertexRef.current !== null) {
         stopMapEvent(event);
       }
+      releaseEditorPointer(event);
       editorDrawingRef.current = false;
       editorDragVertexRef.current = null;
     };
 
-    viewport.addEventListener("pointerdown", handlePointerDown);
-    viewport.addEventListener("pointermove", handlePointerMove);
-    viewport.addEventListener("pointerup", handlePointerUp);
-    viewport.addEventListener("pointercancel", handlePointerUp);
+    const editorPointerOptions: AddEventListenerOptions = { capture: true };
+    viewport.addEventListener("pointerdown", handlePointerDown, editorPointerOptions);
+    viewport.addEventListener("pointermove", handlePointerMove, editorPointerOptions);
+    viewport.addEventListener("pointerup", handlePointerUp, editorPointerOptions);
+    viewport.addEventListener("pointercancel", handlePointerUp, editorPointerOptions);
     return () => {
-      viewport.removeEventListener("pointerdown", handlePointerDown);
-      viewport.removeEventListener("pointermove", handlePointerMove);
-      viewport.removeEventListener("pointerup", handlePointerUp);
-      viewport.removeEventListener("pointercancel", handlePointerUp);
+      viewport.removeEventListener("pointerdown", handlePointerDown, editorPointerOptions);
+      viewport.removeEventListener("pointermove", handlePointerMove, editorPointerOptions);
+      viewport.removeEventListener("pointerup", handlePointerUp, editorPointerOptions);
+      viewport.removeEventListener("pointercancel", handlePointerUp, editorPointerOptions);
       editorDrawingRef.current = false;
       editorDragVertexRef.current = null;
+      editorActivePointerIdRef.current = null;
     };
   }, [editorMode, polygonTool, projectionAnchor, routeMode]);
 
@@ -2593,6 +2691,18 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
     } finally {
       setMapCommandPending(false);
     }
+  }
+
+  function openCreateMapDialog(): void {
+    setMapSelectorOpen(true);
+    setMapNameDialog("create");
+    window.requestAnimationFrame(() => newMapNameInputRef.current?.focus());
+  }
+
+  function openRenameMapDialog(): void {
+    setMapSelectorOpen(true);
+    setMapNameDialog("rename");
+    window.requestAnimationFrame(() => renameMapNameInputRef.current?.focus());
   }
 
   function createMap(event: FormEvent<HTMLFormElement>): void {
@@ -2932,105 +3042,6 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
           <Crosshair size={18} aria-hidden="true" />
           <span>{gpsStateLabel(gpsState)}</span>
         </div>
-
-        <section className="panel-section map-selector-section">
-          <div className="layer-heading">
-            <MapIcon size={18} aria-hidden="true" />
-            <span>Maps</span>
-          </div>
-          <div className="selected-map-card">
-            <div>
-              <span>Selected</span>
-              <strong>{selectedMap?.name ?? "No map"}</strong>
-            </div>
-            <div className="map-count-pill">{mapCatalog?.maps.length ?? 0}</div>
-          </div>
-          {selectedMapFar && (
-            <div className="warning-banner">
-              <AlertTriangle size={16} aria-hidden="true" />
-              <span>{formatMeters(selectedMapDistance, 0)} from current pose</span>
-            </div>
-          )}
-          <label htmlFor="saved-map-select">Saved maps</label>
-          <select
-            className="map-select"
-            disabled={!mapMutationAllowed || mapCommandPending || !mapCatalog?.maps.length}
-            id="saved-map-select"
-            value={selectedMap?.id ?? ""}
-            onChange={(event) => selectMap(event.target.value)}
-          >
-            {!mapCatalog?.maps.length && <option value="">No maps</option>}
-            {mapCatalog?.maps.map((summary) => (
-              <option key={summary.id} value={summary.id}>
-                {summary.name}
-              </option>
-            ))}
-          </select>
-          <form className="map-command-form" onSubmit={createMap}>
-            <input
-              aria-label="New map name"
-              disabled={!mapMutationAllowed || mapCommandPending}
-              placeholder="New map name"
-              type="text"
-              value={newMapName}
-              onChange={(event) => setNewMapName(event.target.value)}
-            />
-            <button
-              aria-label="Create map"
-              className="icon-button"
-              disabled={!mapMutationAllowed || mapCommandPending || !newMapName.trim()}
-              title="Create map"
-              type="submit"
-            >
-              <Plus size={18} aria-hidden="true" />
-            </button>
-          </form>
-          <form className="map-command-form map-rename-form" onSubmit={renameSelectedMap}>
-            <input
-              aria-label="Selected map name"
-              disabled={!mapMutationAllowed || mapCommandPending || !selectedMap}
-              placeholder="Selected map name"
-              type="text"
-              value={renameMapName}
-              onChange={(event) => setRenameMapName(event.target.value)}
-            />
-            <button
-              aria-label="Rename selected map"
-              className="icon-button"
-              disabled={!mapMutationAllowed || mapCommandPending || !selectedMap || !renameMapName.trim()}
-              title="Rename selected map"
-              type="submit"
-            >
-              <Edit3 size={18} aria-hidden="true" />
-            </button>
-            <button
-              aria-label="Delete selected map"
-              className="icon-button is-danger"
-              disabled={!mapMutationAllowed || mapCommandPending || !selectedMap}
-              title="Delete selected map"
-              type="button"
-              onClick={deleteSelectedMap}
-            >
-              <Trash2 size={18} aria-hidden="true" />
-            </button>
-          </form>
-          <div className="map-selector-details">
-            <div>
-              <span>Mow</span>
-              <strong>{selectedMap?.mowing_area_count ?? 0}</strong>
-            </div>
-            <div>
-              <span>Dock</span>
-              <strong>{selectedMap?.has_docking_station ? "Yes" : "No"}</strong>
-            </div>
-            <div>
-              <span>Updated</span>
-              <strong>{formatMapTimestamp(selectedMap?.updated_at)}</strong>
-            </div>
-          </div>
-          {!mapMutationAllowed && <div className="status-banner">Map edits require IDLE state</div>}
-          {mapCommandMessage && <div className="status-banner">{mapCommandMessage}</div>}
-        </section>
 
         <section className="panel-section map-editor-section">
           <div className="layer-heading">
@@ -3604,9 +3615,106 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
       </aside>
       )}
 
-      <section className="combined-map-stage">
+      <section className={`combined-map-stage ${!routeMode ? "has-map-selector" : ""}`}>
+        {!routeMode && (
+          <div className="map-selector-bar" ref={mapSelectorRef}>
+            <div className="map-selector-bar-inner">
+              <div className="map-selector-closed">
+                <button
+                  aria-controls="map-selector-popover"
+                  aria-expanded={mapSelectorOpen}
+                  className="map-selector-pill"
+                  type="button"
+                  onClick={() => setMapSelectorOpen((current) => !current)}
+                >
+                  <MapIcon size={17} aria-hidden="true" />
+                  <span className="map-selector-pill-text">{selectedMap?.name ?? "No map"}</span>
+                  {selectedMapFar && (
+                    <span className="map-selector-warning-chip" title={`${formatMeters(selectedMapDistance, 0)} from current pose`}>
+                      <AlertTriangle size={14} aria-hidden="true" />
+                    </span>
+                  )}
+                  <ChevronDown size={16} aria-hidden="true" />
+                </button>
+              </div>
+
+              {mapSelectorOpen && (
+                <div className="map-selector-popover" id="map-selector-popover" role="dialog" aria-label="Saved maps">
+                  <select
+                    aria-label="Saved maps"
+                    className="map-select map-selector-select"
+                    disabled={!mapMutationAllowed || mapCommandPending || !mapCatalog?.maps.length}
+                    value={selectedMap?.id ?? ""}
+                    onChange={(event) => selectMap(event.target.value)}
+                  >
+                    {!mapCatalog?.maps.length && <option value="">No maps</option>}
+                    {mapCatalog?.maps.map((summary) => (
+                      <option key={summary.id} value={summary.id}>
+                        {summary.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="map-selector-action-row">
+                    <button
+                      className="command-button"
+                      disabled={!mapMutationAllowed || mapCommandPending}
+                      type="button"
+                      onClick={openCreateMapDialog}
+                    >
+                      <Plus size={18} aria-hidden="true" />
+                      <span>Create</span>
+                    </button>
+                    <button
+                      className="command-button is-secondary"
+                      disabled={!mapMutationAllowed || mapCommandPending || !selectedMap}
+                      type="button"
+                      onClick={openRenameMapDialog}
+                    >
+                      <Edit3 size={18} aria-hidden="true" />
+                      <span>Rename</span>
+                    </button>
+                    <button
+                      className="command-button is-danger"
+                      disabled={!mapMutationAllowed || mapCommandPending || !selectedMap}
+                      type="button"
+                      onClick={deleteSelectedMap}
+                    >
+                      <Trash2 size={18} aria-hidden="true" />
+                      <span>Delete</span>
+                    </button>
+                  </div>
+
+                  {selectedMapFar && (
+                    <div className="warning-banner map-selector-inline-banner">
+                      <AlertTriangle size={16} aria-hidden="true" />
+                      <span>{formatMeters(selectedMapDistance, 0)} from current pose</span>
+                    </div>
+                  )}
+                  {!mapMutationAllowed && <div className="status-banner map-selector-inline-banner">Map edits require IDLE state</div>}
+                  {mapCommandMessage && <div className="status-banner map-selector-inline-banner">{mapCommandMessage}</div>}
+
+                  <div className="map-selector-details">
+                    <div>
+                      <span>Mow</span>
+                      <strong>{selectedMap?.mowing_area_count ?? 0}</strong>
+                    </div>
+                    <div>
+                      <span>Dock</span>
+                      <strong>{selectedMap?.has_docking_station ? "Yes" : "No"}</strong>
+                    </div>
+                    <div>
+                      <span>Updated</span>
+                      <strong>{formatMapTimestamp(selectedMap?.updated_at)}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         <div className="combined-map-shell">
-          <div className="gps-map" ref={mapElementRef} />
+          <div className={`gps-map ${!routeMode && editorMode !== "view" ? "is-editor-active" : ""}`} ref={mapElementRef} />
           {!lonLat && !projectionAnchor && (
             <div className="gps-empty-state">
               <strong>No GPS projection anchor</strong>
@@ -3996,6 +4104,88 @@ export function CombinedMapView({ config, connected, error, mowerInputStatus, no
           </div>
         </div>
       </section>
+
+      {mapNameDialog === "create" && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="create-map-title">
+          <form className="warning-modal map-name-modal" onSubmit={createMap}>
+            <div className="warning-modal-header">
+              <Plus size={22} aria-hidden="true" />
+              <h2 id="create-map-title">Create Map</h2>
+              <button aria-label="Cancel create map" className="icon-button" type="button" onClick={() => setMapNameDialog(null)}>
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            <label className="map-name-field" htmlFor="dialog-new-map-name">
+              <span>Map name</span>
+              <input
+                aria-label="New map name"
+                disabled={!mapMutationAllowed || mapCommandPending}
+                id="dialog-new-map-name"
+                placeholder="New map name"
+                ref={newMapNameInputRef}
+                type="text"
+                value={newMapName}
+                onChange={(event) => setNewMapName(event.target.value)}
+              />
+            </label>
+            {!mapMutationAllowed && <div className="status-banner">Map edits require IDLE state</div>}
+            {mapCommandMessage && <div className="status-banner">{mapCommandMessage}</div>}
+            <div className="modal-actions">
+              <button className="command-button is-secondary" type="button" onClick={() => setMapNameDialog(null)}>
+                <span>Cancel</span>
+              </button>
+              <button
+                className="command-button"
+                disabled={!mapMutationAllowed || mapCommandPending || !newMapName.trim()}
+                type="submit"
+              >
+                <span>{mapCommandPending ? "Creating" : "Create"}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {mapNameDialog === "rename" && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="rename-map-title">
+          <form className="warning-modal map-name-modal" onSubmit={renameSelectedMap}>
+            <div className="warning-modal-header">
+              <Edit3 size={22} aria-hidden="true" />
+              <h2 id="rename-map-title">Rename Map</h2>
+              <button aria-label="Cancel rename map" className="icon-button" type="button" onClick={() => setMapNameDialog(null)}>
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            <label className="map-name-field" htmlFor="dialog-rename-map-name">
+              <span>Map name</span>
+              <input
+                aria-label="Selected map name"
+                disabled={!mapMutationAllowed || mapCommandPending || !selectedMap}
+                id="dialog-rename-map-name"
+                placeholder="Selected map name"
+                ref={renameMapNameInputRef}
+                type="text"
+                value={renameMapName}
+                onChange={(event) => setRenameMapName(event.target.value)}
+              />
+            </label>
+            {!mapMutationAllowed && <div className="status-banner">Map edits require IDLE state</div>}
+            {mapCommandMessage && <div className="status-banner">{mapCommandMessage}</div>}
+            <div className="modal-actions">
+              <button className="command-button is-secondary" type="button" onClick={() => setMapNameDialog(null)}>
+                <span>Cancel</span>
+              </button>
+              <button
+                className="command-button"
+                disabled={!mapMutationAllowed || mapCommandPending || !selectedMap || !renameMapName.trim()}
+                type="submit"
+              >
+                <span>{mapCommandPending ? "Renaming" : "Rename"}</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {finishAreaDialogOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="finish-area-title">
