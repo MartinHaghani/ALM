@@ -1,0 +1,57 @@
+name: Defect report
+description: Record reproducible incorrect behavior with enough evidence for an agent to investigate autonomously.
+title: "fix: "
+body:
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: State what happened, where, and how often.
+      placeholder: The system currently...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: State the correct behavior and its source when known.
+      placeholder: The system should...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction and evidence
+      description: Include minimal steps, configuration, commit SHA, logs or run IDs, and whether hardware is involved.
+      placeholder: |
+        1. At commit...
+        2. With configuration...
+        3. Run...
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact and safety
+      description: Explain operational impact, affected users or hardware, urgency, and any safe-state procedure.
+      placeholder: Impact, safety classification, and containment...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Fix acceptance criteria
+      description: Describe the regression check and exact evidence that will establish the fix.
+      placeholder: |
+        - [ ] Reproduction fails before and passes after the fix
+        - [ ] Relevant regression checks pass
+        - [ ] Safety and documentation impacts are addressed
+    validations:
+      required: true
+  - type: textarea
+    id: related
+    attributes:
+      label: Related work
+      description: Link related issues, plans, ADRs, or PRs. Write "None" if there are none.
+    validations:
+      required: true

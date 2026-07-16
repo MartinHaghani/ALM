@@ -1,0 +1,6 @@
+interface:
+  display_name: "Project Operations"
+  short_description: "Keep code, plans, docs, and Git synchronized"
+  default_prompt: "Use $project-operations to implement this change with complete planning, validation, documentation, and Git hygiene."
+policy:
+  allow_implicit_invocation: true

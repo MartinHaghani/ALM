@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "purpose": "Deterministic structural precursor to the stochastic fresh-agent trials tracked by issue #11.",
+  "model_runs": false,
+  "cases": [
+    {
+      "id": "startup-routing",
+      "assertions": [
+        {
+          "path": "AGENTS.md",
+          "kind": "contains",
+          "values": [
+            "docs/PROJECT_STATE.md",
+            "PLANS.md",
+            ".agents/skills/project-operations/"
+          ]
+        },
+        {
+          "path": "docs/PROJECT_STATE.md",
+          "kind": "headings",
+          "values": [
+            "Current Baseline",
+            "Active Workstreams",
+            "Next Actions",
+            "Routing",
+            "Refresh Contract"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resumable-handoff",
+      "assertions": [
+        {
+          "path": "docs/PROJECT_STATE.md",
+          "kind": "contains",
+          "values": [
+            "exec-plans/active/"
+          ]
+        },
+        {
+          "path": "docs/exec-plans/active/*.md",
+          "kind": "regex",
+          "values": [
+            "(?m)^Exact next action:\\s*\\S"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "authority-and-safety",
+      "assertions": [
+        {
+          "path": "AGENTS.md",
+          "kind": "contains",
+          "values": [
+            "GitHub Issues",
+            "docs/decisions/",
+            "mower_hardware",
+            "Safety-critical"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "delegation-and-closeout",
+      "assertions": [
+        {
+          "path": ".agents/skills/project-operations/SKILL.md",
+          "kind": "contains",
+          "values": [
+            "Proactively delegate",
+            "one writer",
+            "check_project_hygiene.py",
+            "Never merge"
+          ]
+        },
+        {
+          "path": ".codex/hooks.json",
+          "kind": "contains",
+          "values": [
+            "SessionStart",
+            "SubagentStart",
+            "Stop",
+            "codex_hook.py"
+          ]
+        }
+      ]
+    }
+  ]
+}

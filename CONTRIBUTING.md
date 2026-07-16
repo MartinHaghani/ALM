@@ -8,6 +8,9 @@ Purpose: practical contributor guidance for this fork of `open_mower_ros`.
 - Read [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md) before attempting to build or launch.
 - Read [docs/CONFIGURATION.md](docs/CONFIGURATION.md) before changing config, params, or environment handling.
 - Read [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md) before mixing fork-only changes with upstream sync work.
+- Read [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md) and
+  [docs/AGENT_OPERATIONS.md](docs/AGENT_OPERATIONS.md) before starting or resuming a
+  tracked workstream.
 
 ## Environment setup
 
@@ -56,6 +59,7 @@ Be especially careful when changing:
 - `src/mower_logic`
 - `src/mower_comms_v1`
 - `src/mower_comms_v2`
+- `src/mower_hardware`
 - `src/open_mower/launch`
 - `src/open_mower/params/hardware_specific`
 - `docker/openmower_entrypoint.sh`
@@ -78,6 +82,14 @@ Expected behavior in those areas is part of the runtime safety envelope. If a ch
 - Use relative links in Markdown docs.
 - Keep docs high-signal and avoid repeating the same long explanation across files.
 - If a path is generated, deprecated, external, or not yet verified, label it that way.
+- Use a topic branch and linked GitHub issue for substantive work. Complex or
+  multi-session changes also require an active ExecPlan under
+  `docs/exec-plans/active/`.
+- Use Conventional Commit subjects; substantive commits include rationale,
+  validation, and `Refs: #<issue>` in the body.
+- Open a draft PR with the repository template. Do not merge, force-push, deploy,
+  change live VESC settings, or perform a physical mower test without the required
+  human approval.
 
 ## What not to edit casually
 

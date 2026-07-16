@@ -42,12 +42,63 @@ concurrency:
   group: ci-buildtrain-${{ github.ref }}-1
   cancel-in-progress: true
 
-# permissions are needed if pushing to ghcr.io
+# Unspecified permissions are denied. Package write is scoped to the jobs that
+# publish images; contents read is required for checkout.
 permissions:
-  packages: write
+  contents: read
 
 jobs:
+  validate-pr-build:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04-arm
+            docker_build_arch: arm64
+            variant: legacy
+            dockerfile: ./docker/Dockerfile.Legacy
+          - os: ubuntu-24.04
+            docker_build_arch: amd64
+            variant: legacy
+            dockerfile: ./docker/Dockerfile.Legacy
+          - os: ubuntu-24.04-arm
+            docker_build_arch: arm64
+            variant: default
+            dockerfile: ./docker/Dockerfile
+          - os: ubuntu-24.04
+            docker_build_arch: amd64
+            variant: default
+            dockerfile: ./docker/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+          submodules: 'recursive'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Validate image build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.docker_build_arch }}
+          push: false
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=${{ matrix.os }}-${{ matrix.variant }}
+          cache-to: type=gha,scope=${{ matrix.os }}-${{ matrix.variant }},mode=max
+
   build:
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -80,22 +131,15 @@ jobs:
 
       # Get the repository's code
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          persist-credentials: false
           submodules: 'recursive'
-
-      # Setup Python 3
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3'
-
-      - uses: pre-commit/action@v3.0.1
 
       - name: Docker meta
         if: matrix.variant == 'default'
         id: meta_default
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: |
             ghcr.io/${{ env.REPOSITORY_LC }}
@@ -105,7 +149,7 @@ jobs:
       - name: Docker meta (Legacy)
         if: matrix.variant == 'legacy'
         id: meta_legacy
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: |
             ghcr.io/${{ env.REPOSITORY_LC }}
@@ -126,11 +170,11 @@ jobs:
       - name: Set up Docker Buildx
         if: github.event_name != 'workflow_dispatch' || ((inputs.variant == 'all' || inputs.variant == matrix.variant) && (inputs.arch == 'all' || inputs.arch == matrix.docker_build_arch))
         id: buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Login to GHCR
         if: (github.event_name != 'pull_request') && (github.event_name != 'workflow_dispatch' || ((inputs.variant == 'all' || inputs.variant == matrix.variant) && (inputs.arch == 'all' || inputs.arch == matrix.docker_build_arch)))
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
@@ -139,7 +183,7 @@ jobs:
       - name: Build and push
         if: github.event_name != 'workflow_dispatch' || ((inputs.variant == 'all' || inputs.variant == matrix.variant) && (inputs.arch == 'all' || inputs.arch == matrix.docker_build_arch))
         id: build-and-push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -147,6 +191,8 @@ jobs:
           no-cache: ${{ inputs.clean_build == true || false }}
           labels: ${{ env.META_LABELS }}
           outputs: type=image,name=ghcr.io/${{ env.REPOSITORY_LC }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          provenance: ${{ github.event_name != 'pull_request' && 'mode=max' || 'false' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
           cache-from: type=gha,scope=${{ matrix.os }}-${{ matrix.variant }}
           cache-to: type=gha,scope=${{ matrix.os }}-${{ matrix.variant }},mode=max
 
@@ -159,7 +205,7 @@ jobs:
 
       - name: Upload digest
         if: github.event_name != 'workflow_dispatch' || ((inputs.variant == 'all' || inputs.variant == matrix.variant) && (inputs.arch == 'all' || inputs.arch == matrix.docker_build_arch))
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: digests-${{ env.BUILD_ARCH }}-${{ matrix.variant }}
           path: /tmp/digests/*
@@ -171,6 +217,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs:
       - build
+    permissions:
+      contents: read
+      packages: write
     strategy:
       matrix:
         include:
@@ -185,18 +234,18 @@ jobs:
 
       - name: Download digests
         if: github.event_name != 'workflow_dispatch' || inputs.variant == 'all' || inputs.variant == matrix.variant
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: /tmp/digests
           pattern: digests-*-${{ matrix.variant }}
           merge-multiple: true
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Docker meta (Default)
         if: (matrix.variant == 'default') && (github.event_name != 'workflow_dispatch' || inputs.variant == 'all' || inputs.variant == matrix.variant)
         id: meta_default
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           tags: |
             type=edge,branch=main
@@ -215,7 +264,7 @@ jobs:
       - name: Docker meta (Legacy)
         if: (matrix.variant == 'legacy') && (github.event_name != 'workflow_dispatch' || inputs.variant == 'all' || inputs.variant == matrix.variant)
         id: meta_legacy
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           tags: |
             type=edge,branch=main,prefix=releases-
@@ -232,7 +281,7 @@ jobs:
 
       - name: Login to GHCR
         if: github.event_name != 'workflow_dispatch' || inputs.variant == 'all' || inputs.variant == matrix.variant
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}

@@ -1,5 +1,23 @@
 # Coverage Planner V2 Algorithm Plan
 
+## Current implementation status
+
+Verified from commit `a0b5896` and the current `tools/coverage_lab/` sources on
+2026-07-15:
+
+- M0 research and the initial algorithm/design documents are present.
+- M1 task-evidence reporting is implemented in the lab.
+- Substantial M2.x task-classification, local task-path, annotation-QA, portal,
+  turnaround, and axis-scoring prototypes are implemented, but the M2 acceptance
+  criteria have not been formally closed as a single reviewed milestone.
+- M3 and later globally scored candidate generation, route optimization, and live
+  maneuver-aware execution remain outstanding.
+
+[Issue #8](https://github.com/MartinHaghani/open_mower_ros/issues/8) is the
+authoritative current work item for reconciling M2 and advancing candidate routing.
+The milestone descriptions below remain the durable design plan, not a live status
+tracker.
+
 Purpose: concrete implementation plan for the fresh V2 coverage planner. This plan turns the current zoning frustration into a planner architecture that can produce a safe, efficient, good-looking mower path from irregular recorded lawns.
 
 This document is intentionally more specific than [COVERAGE_PLANNER_V2_DESIGN.md](COVERAGE_PLANNER_V2_DESIGN.md). The design document describes the broad architecture and live mower contract. This document describes the actual algorithm we should build and the evidence each step must produce.
@@ -900,7 +918,7 @@ Implement:
 Acceptance:
 
 - no change can silently reduce coverage or add unsafe samples;
-- every known natural-lawn edge case has a fixture or a TODO with reason.
+- every known natural-lawn edge case has a fixture or a deferred-case marker with a reason.
 
 ### M7: Live Mower Contract
 
@@ -939,21 +957,11 @@ Each case should eventually have a fixture map and expected planner behavior.
 | Low-value unreachable patch | Show missed area and reason; optional task only if operator opts in. |
 | Live reverse disabled | Lab may plan reverse; live export rejects or substitutes supported maneuver. |
 
-## Immediate Next Step
+## Immediate next step
 
-The next implementation should not keep tuning local-width zone colors. Build M1: a task-evidence report.
-
-Concrete first patch:
-
-1. Add a skeleton graph layer from the current V2 width samples.
-2. Convert skeleton branches into branch records with length, width, endpoints, and portal candidates.
-3. Add task proposals:
-   - body candidate from high-clearance core;
-   - corridor candidates from long branches;
-   - dead-end corridor candidates from long one-portal branches;
-   - notch candidates from short one-portal branches;
-   - artifact candidates from tiny branches.
-4. Render these proposals visually before rendering final zones.
-5. Keep the current preliminary zones only as a comparison layer.
-
-This gives the operator something useful to inspect: not "is this zone color right?", but "does this branch behave like a corridor, notch, body, or artifact, and what would the mower do there?"
+Resume from [issue #8](https://github.com/MartinHaghani/open_mower_ros/issues/8),
+not the original M1 bootstrap list. First reconcile the implemented M2.x behavior
+against the M2 acceptance criteria; then generate multiple behavior-specific M3
+coverage candidates with explicit safety, missed-area, and unsupported-maneuver
+reasons. Do not promote the lossy compatibility export to live execution while it
+cannot preserve reverse, pivot, or blade-state semantics.

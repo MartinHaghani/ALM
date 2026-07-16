@@ -1,5 +1,11 @@
 # Coverage Planner V2 Prototype Plan
 
+Status: historical implementation plan. The initial prototype and later M1/M2.x
+diagnostics are present from `a0b5896` onward. Current advancement and acceptance
+work is tracked in [issue #8](https://github.com/MartinHaghani/open_mower_ros/issues/8)
+and the status block in
+[COVERAGE_PLANNER_V2_ALGORITHM_PLAN.md](COVERAGE_PLANNER_V2_ALGORITHM_PLAN.md).
+
 Purpose: implementation plan for the first lab-only V2 prototype: read an OpenMower `map.json`, condition it at mower scale, classify macro-zones/corridors/pockets/unreachable features, and write an inspectable geometry report. This prototype intentionally does **not** replace the existing planner or produce live mower-ready paths.
 
 Related context:

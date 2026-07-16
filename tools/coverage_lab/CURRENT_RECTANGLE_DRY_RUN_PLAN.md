@@ -1,6 +1,10 @@
 # Current Rectangle Dry-Run Plan
 
-Temporary working note for the next coverage-planner test loop.
+Status: preparation implemented; the physical validation is still outstanding.
+The continuous exporter now exists as `v2_continuous_dry_run.py`, and the static
+PlanPath bridge and trace tooling are documented in this directory. The
+authoritative remaining work item is
+[issue #9](https://github.com/MartinHaghani/open_mower_ros/issues/9).
 
 ## Goal
 
@@ -44,8 +48,11 @@ The next test should prove whether FTC can follow a single continuous V2 route b
 
 ## Next Milestones
 
-1. Build a continuous dry-run compatibility exporter.
-2. Generate an inner-safe rectangle route.
-3. Serve it through the temporary static PlanPath service.
-4. Test from a physically safe starting pose.
-5. Use the result to decide whether to improve connectors, staging, or the live planner contract next.
+1. Completed: build the continuous dry-run compatibility exporter.
+2. Reproduce and review the exact inner-safe rectangle route and configuration for
+   the next test.
+3. Verify the temporary static PlanPath service and trace recorder without motion.
+4. With explicit user approval, test blade-disabled from a physically safe starting
+   pose under the controls in issue #9.
+5. Attach the trace and decision to issue #9, then select connector, staging, FTC,
+   or maneuver-contract follow-up work from evidence.

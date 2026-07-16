@@ -1,6 +1,6 @@
 # Coverage Planner Roadmap
 
-Purpose: track the prioritized work needed to turn the laptop-only Fields2Cover lab into a mower-quality coverage planner. This is the index. Per-priority implementation plans live in separate docs and are linked below.
+Purpose: preserve the prioritization, design rationale, and implementation evidence needed to turn the laptop-only Fields2Cover lab into a mower-quality coverage planner. GitHub Issues are authoritative for current ownership and work status; this roadmap owns domain sequencing and historical outcomes.
 
 This roadmap is shared between agents and humans. **Update the status table when work lands, do not rewrite the priorities silently.** When a priority is finished, leave the entry, mark it done, and link the merge commit so future agents can see what was implemented and why.
 
@@ -16,38 +16,44 @@ Related context:
 
 The mower currently ships the `slic3r_coverage_planner` from `src/lib/`. It covers the field but produces cutting paths that do not match the visual stripe quality expected from a lawnmower. The lab in `tools/coverage_lab/` was built to evaluate Fields2Cover (F2C) as a replacement. F2C is an agricultural CPP library; it is not a lawnmower planner. The lab wraps F2C with mower-specific logic (wheel-anchored stripe turns, footprint safety checks, KML conversion) and surfaces unsafe output instead of hiding it.
 
-The most recent lab runs (`tools/coverage_lab/runs/`) show:
+Historical pre-P0/P1 lab runs showed:
 
 - Synthetic example coverage: 71–81%. Below lawnmower expectations.
 - The synthetic `obstacle_map` example produces ~21 stripe-to-stripe turn failures because the swaths on opposite sides of the obstacle are 10+ m apart and the wheel-anchor planner cannot bridge them.
 - Real Google Earth backyard maps (Whitburn Cres) reach ~95% coverage but with **30–49% of footprint samples flagged unsafe**, every one of them in the headland section. The headland centerline is generated as a constant inset of the boundary, so the rear-center-mounted footprint sweeps outside the lawn at every concave corner.
 
-These tests motivate the priorities below.
+These tests motivated the priorities below. The later
+[safety-clean baseline](#p1--obstacle-aware-swath-bridging) supersedes these values;
+do not present this historical snapshot as current results.
 
 ## Status table
 
 Listed in **execution order** (top = do next). IDs are stable per the "do not renumber" rule, so the ID column may jump around when an entry is reordered.
 
-| Exec | ID | Topic | Status | Plan doc | Landed in |
-|---|---|---|---|---|---|
-| – | P0 | Footprint-aware headland | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
-| – | P1 | Obstacle-aware swath bridging | landed | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
-| – | P11 | BCD critical-vertex decomposition (split at concave outer-boundary vertices, not just hole x-extents) | landed | – | 91c4f92 |
-| – | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot; skip-stripe ordering remains) | landed except skip-stripe follow-up | – | 315cf02 |
-| – | P12 | Robust dominant-direction stripe angle (replace F2C's `best_swath_length` with a weighted edge-angle histogram so noisy real-world outlines pick the visually-dominant axis, not the longest single segment) | landed | – | 9ca521f |
-| – | P13 | Per-cell stripe angle for tight cells (cells whose short axis < ~2× tool_width along the global angle should rotate stripes to align with the cell's long axis, eliminating impossible U-turns in narrow slivers like obstacle_off_center paths 10–17) | landed | – | 9ca521f |
-| – | P10 | Always-connected base-link path (eliminate teleports between paths) | landed | – | 310f63e |
-| 1 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | not started — next | – | – |
-| 2 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | not started | – | – |
-| 3 | P4 | FTC-aware execution contract | not started | – | – |
-| 4 | P9 | Path smoothing and FTC-truthful preview | not started | – | – |
-| 5 | P8 | Stripe-quality regression suite | not started | – | – |
-| – | P6 | Multi-lawn navigation and dock integration | **dropped** (multi-lawn maps are now planned as separate maps; docking is being removed from runtime) | – | – |
-| – | P7 | Slope and soft-zone awareness | **deferred** (re-evaluate after the coverage planner is stable; slope adds a variable that is not yet worth tracking) | – | – |
+| Exec | ID | Topic | Roadmap record | Issue | Plan doc | Landed in |
+|---|---|---|---|---|---|---|
+| – | P0 | Footprint-aware headland | landed | – | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
+| – | P1 | Obstacle-aware swath bridging | landed | – | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
+| – | P11 | BCD critical-vertex decomposition (split at concave outer-boundary vertices, not just hole x-extents) | landed | – | – | 91c4f92 |
+| – | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot; skip-stripe ordering remains) | landed except skip-stripe follow-up | [tracking](https://github.com/MartinHaghani/open_mower_ros/issues/4) | – | 315cf02 |
+| – | P12 | Robust dominant-direction stripe angle (replace F2C's `best_swath_length` with a weighted edge-angle histogram so noisy real-world outlines pick the visually-dominant axis, not the longest single segment) | landed | – | – | 9ca521f |
+| – | P13 | Per-cell stripe angle for tight cells (cells whose short axis < ~2× tool_width along the global angle should rotate stripes to align with the cell's long axis, eliminating impossible U-turns in narrow slivers like obstacle_off_center paths 10–17) | landed | – | – | 9ca521f |
+| – | P10 | Always-connected base-link path (eliminate teleports between paths) | landed | – | – | 310f63e |
+| 1 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | issue-owned | [#3](https://github.com/MartinHaghani/open_mower_ros/issues/3) | – | – |
+| 2 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | issue-owned | [#4](https://github.com/MartinHaghani/open_mower_ros/issues/4) | – | – |
+| 3 | P4 | FTC-aware execution contract | issue-owned | [#6](https://github.com/MartinHaghani/open_mower_ros/issues/6) | – | – |
+| 4 | P9 | Path smoothing and FTC-truthful preview | issue-owned | [#7](https://github.com/MartinHaghani/open_mower_ros/issues/7) | – | – |
+| 5 | P8 | Stripe-quality regression suite | issue-owned | [#5](https://github.com/MartinHaghani/open_mower_ros/issues/5) | – | – |
+| – | P6 | Multi-lawn navigation and dock integration | **dropped** (multi-lawn maps are now planned as separate maps; docking is being removed from runtime) | – | – | – |
+| – | P7 | Slope and soft-zone awareness | **deferred** (re-evaluate after the coverage planner is stable; slope adds a variable that is not yet worth tracking) | – | – | – |
 
-Statuses: `not started`, `in progress`, `blocked`, `landed`, `dropped`, `deferred`. When marking `landed`, include the commit SHA or PR link in the last column.
+Roadmap states describe implementation history and sequencing. Current assignment,
+priority, and completion state belong in the linked issue. When marking `landed`,
+include the commit SHA or PR link in the last column and close the issue through the
+merged PR.
 
-When a priority is in progress, the assigned agent must update its row with a one-line note: "in progress — <agent or branch>".
+Do not copy live assignment or in-progress state into this table; update the linked
+issue and the applicable active ExecPlan.
 
 ### Items dropped or deferred
 

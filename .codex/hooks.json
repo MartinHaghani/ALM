@@ -1,0 +1,41 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent/codex_hook.py\" context",
+            "timeout": 15,
+            "statusMessage": "Loading repository operating context"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent/codex_hook.py\" context",
+            "timeout": 15,
+            "statusMessage": "Loading subagent boundaries"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent/codex_hook.py\" stop",
+            "timeout": 30,
+            "statusMessage": "Checking project handoff hygiene"
+          }
+        ]
+      }
+    ]
+  }
+}

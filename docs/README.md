@@ -7,17 +7,24 @@ Purpose: index of the documentation layer for agents and human contributors.
 For a fast orientation pass, read in this order:
 
 1. [../AGENTS.md](../AGENTS.md) if you are an agent or want the shortest operational summary.
-2. [../CLAUDE.md](../CLAUDE.md) if you are using Claude Code.
-3. [../CONTRIBUTING.md](../CONTRIBUTING.md) for contributor workflow and safety expectations.
-4. [BUILD_AND_RUN.md](BUILD_AND_RUN.md) for setup, build, launch, and container usage.
-5. [RASPBERRY_PI.md](RASPBERRY_PI.md) if you want a plain Raspberry Pi bring-up and fast local-repo workflow.
-6. [MOWRATOR_BENCH_BRINGUP.md](MOWRATOR_BENCH_BRINGUP.md) before touching the current custom mower bench hardware.
-7. [CONFIGURATION.md](CONFIGURATION.md) before touching config, params, or environment handling.
-8. [PACKAGES.md](PACKAGES.md) and [ARCHITECTURE.md](ARCHITECTURE.md) for codebase structure.
+2. [PROJECT_STATE.md](PROJECT_STATE.md) for the current baseline, active workstreams, and authoritative handoffs.
+3. [../CLAUDE.md](../CLAUDE.md) if you are using Claude Code.
+4. [../CONTRIBUTING.md](../CONTRIBUTING.md) for contributor workflow and safety expectations.
+5. [BUILD_AND_RUN.md](BUILD_AND_RUN.md) for setup, build, launch, and container usage.
+6. [RASPBERRY_PI.md](RASPBERRY_PI.md) if you want a plain Raspberry Pi bring-up and fast local-repo workflow.
+7. [MOWRATOR_BENCH_BRINGUP.md](MOWRATOR_BENCH_BRINGUP.md) before touching the current custom mower bench hardware.
+8. [CONFIGURATION.md](CONFIGURATION.md) before touching config, params, or environment handling.
+9. [PACKAGES.md](PACKAGES.md) and [ARCHITECTURE.md](ARCHITECTURE.md) for codebase structure.
 
 ## Agent-facing entrypoints
 
 - [../AGENTS.md](../AGENTS.md): Codex-first repo operating guide.
+- [PROJECT_STATE.md](PROJECT_STATE.md): concise current-state router; not the backlog.
+- [../PLANS.md](../PLANS.md): policy for self-contained, living execution plans.
+- [exec-plans/](exec-plans/): active implementation handoffs and completed plan archive.
+- [decisions/](decisions/): durable architecture and operating decisions.
+- [AGENT_OPERATIONS.md](AGENT_OPERATIONS.md): maintainer runbook for skills, hooks, subagents, validation, GitHub governance, scheduling, and evaluations.
+- [agent-evals/README.md](agent-evals/README.md): fresh-agent orientation and handoff evaluation suite.
 - [../CLAUDE.md](../CLAUDE.md): concise Claude Code startup memory.
 - [../src/AGENTS.md](../src/AGENTS.md): package-boundary guidance for `src/`.
 - [../config/AGENTS.md](../config/AGENTS.md): config source-of-truth and sync rules.
@@ -30,7 +37,33 @@ For a fast orientation pass, read in this order:
 - [../.claude/rules/docker-runtime.md](../.claude/rules/docker-runtime.md): Docker/runtime rule.
 - [../.claude/rules/docs-style.md](../.claude/rules/docs-style.md): Markdown style rule.
 
-## Human-facing reference docs
+## Documentation types
+
+The repository is migrating incrementally toward the Diátaxis distinction without
+moving established paths in one disruptive change:
+
+- **How-to and runbooks:** [BUILD_AND_RUN.md](BUILD_AND_RUN.md),
+  [RASPBERRY_PI.md](RASPBERRY_PI.md),
+  [MOWRATOR_BENCH_BRINGUP.md](MOWRATOR_BENCH_BRINGUP.md),
+  [VESC_MAINTENANCE.md](VESC_MAINTENANCE.md), and [DOCKER.md](DOCKER.md).
+- **Reference:** [REPO_MAP.md](REPO_MAP.md), [PACKAGES.md](PACKAGES.md),
+  [CONFIGURATION.md](CONFIGURATION.md), [SIMULATION.md](SIMULATION.md), and
+  [FTC_EXECUTOR_LIMITATIONS.md](FTC_EXECUTOR_LIMITATIONS.md).
+- **Explanation and design:** [ARCHITECTURE.md](ARCHITECTURE.md), hardware and
+  recording architecture documents, coverage-planner research/design documents,
+  and [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md).
+- **Learning tutorials:** add these only when a newcomer needs a guided learning
+  experience distinct from an operational runbook. Do not relabel safety procedures
+  as tutorials.
+- **Plans and governance:** `PROJECT_STATE`, ExecPlans, roadmaps, ADRs, and review
+  policy are operational project records and remain separate from those four
+  reader-documentation categories.
+
+Classify new durable documentation before creating it. Improve existing documents
+in place, preserve links, and move a file only when the benefit exceeds the link and
+history disruption.
+
+## Documentation catalogue
 
 - [REPO_MAP.md](REPO_MAP.md): top-level tree and ownership boundaries.
 - [ARCHITECTURE.md](ARCHITECTURE.md): launch-composed runtime and package roles.
@@ -55,5 +88,17 @@ For a fast orientation pass, read in this order:
 - [FTC_EXECUTOR_LIMITATIONS.md](FTC_EXECUTOR_LIMITATIONS.md): current `PlanPath`/FTC executor limitations that teach-path recording must preserve rather than hide.
 - [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md): fork maintenance guidance.
 - [CODE_REVIEW.md](CODE_REVIEW.md): reusable review checklist.
-- [TODO.md](TODO.md): deferred fork-specific implementation ideas.
+- [TODO.md](TODO.md): legacy pointer to the authoritative GitHub Issues backlog; do not add tasks there.
+- [legacy-todos.json](legacy-todos.json): machine-validated issue ownership for
+  pre-policy first-party TODO/FIXME markers; not a backlog for new work.
 - [DOCS_MAINTENANCE.md](DOCS_MAINTENANCE.md): how to keep this doc layer aligned.
+
+## Project governance
+
+- [PROJECT_STATE.md](PROJECT_STATE.md): short current snapshot and active-work router.
+- [../PLANS.md](../PLANS.md): when and how to maintain an ExecPlan.
+- [exec-plans/](exec-plans/): living implementation records and their archive.
+- [decisions/](decisions/): ADR index and accepted decisions.
+- [templates/exec-plan.md](templates/exec-plan.md) and [templates/adr.md](templates/adr.md): canonical templates.
+- [GitHub Issues](https://github.com/MartinHaghani/open_mower_ros/issues): authoritative dynamic backlog.
+- GitHub Project: target status/priority/area/risk view; rollout is tracked in [issue #10](https://github.com/MartinHaghani/open_mower_ros/issues/10).

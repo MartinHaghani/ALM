@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "path": "src/mower_comms_v1/src/mower_comms.cpp",
+      "marker": "TODO: update this to rad/s values and implement xESC speed control",
+      "issue": 18
+    },
+    {
+      "path": "src/mower_comms_v2/src/MowerServiceInterface.cpp",
+      "marker": "TODO: set a flag, if the mower is actually running or not.",
+      "issue": 16
+    },
+    {
+      "path": "src/mower_logic/src/monitoring/monitoring.cpp",
+      "marker": "FIXME: \"has_min_max\" is somehow confusing/misstakeable.",
+      "issue": 19
+    },
+    {
+      "path": "src/mower_logic/src/mower_logic/behaviors/MowingBehavior.cpp",
+      "marker": "TODO: move to slic3r_coverage_planner",
+      "issue": 17
+    },
+    {
+      "path": "src/mower_logic/src/mower_logic/behaviors/MowingBehavior.cpp",
+      "marker": "TODO: we can not trust the SUCCEEDED state because the planner sometimes says suceeded with",
+      "issue": 6
+    },
+    {
+      "path": "src/mower_logic/src/mower_logic/behaviors/UndockingBehavior.cpp",
+      "marker": "TODO return mow area",
+      "issue": 14
+    },
+    {
+      "path": "src/mower_logic/src/mower_logic/mower_logic.cpp",
+      "marker": "TODO: get feedback about spinup and delay if needed",
+      "issue": 16
+    },
+    {
+      "path": "src/mower_logic/src/mower_logic/mower_logic.cpp",
+      "marker": "TODO: Spinup feedback & delay",
+      "issue": 16
+    },
+    {
+      "path": "src/mower_logic/src/mower_logic/mower_logic.cpp",
+      "marker": "TODO timeout and error",
+      "issue": 16
+    },
+    {
+      "path": "src/mower_logic/src/mower_logic/mower_logic.cpp",
+      "marker": "TODO: think about the \"recent gps flag\" since it only looks at the time.",
+      "issue": 15
+    },
+    {
+      "path": "src/mower_logic/src/mower_logic/mower_logic.cpp",
+      "marker": "TODO: Have a single point where we check for this timeout instead of twice",
+      "issue": 15
+    },
+    {
+      "path": "src/mower_logic/src/mower_logic/mower_logic.cpp",
+      "marker": "TODO check result",
+      "issue": 13
+    },
+    {
+      "path": "src/mower_simulation/src/mower_simulation.cpp",
+      "marker": "TODO: Use a better way to make sure that the docking position is loaded.",
+      "issue": 14
+    },
+    {
+      "path": "src/mower_utils/package.xml",
+      "marker": "email=\"clemens@todo.todo\"",
+      "issue": 20
+    },
+    {
+      "path": "src/mower_utils/package.xml",
+      "marker": "<license>TODO</license>",
+      "issue": 20
+    }
+  ]
+}

@@ -89,7 +89,14 @@ Observed from `.github/workflows/build-image.yaml`:
 - both amd64 and arm64 builds are configured
 - the default image uses `docker/Dockerfile`
 - the legacy image uses `docker/Dockerfile.Legacy`
-- pre-commit runs as part of the image build workflow before Docker build and push
+- pre-commit and repository-policy checks run once in the separate always-triggered
+  `Project policy` workflow rather than four times inside the Docker matrix
+- third-party workflow actions are pinned to immutable commit SHAs and maintained by
+  Dependabot
+- pushed image builds request BuildKit `mode=max` provenance and an SBOM; pull
+  request validation builds do not publish those attestations
+- package-write permission is scoped to the image build/merge jobs rather than the
+  entire workflow
 
 ## Development-only container setup
 

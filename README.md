@@ -29,6 +29,7 @@ The Docker images have a `-legacy` suffix or `releases-` prefix: (e.g. `releases
 
 For repo-specific, maintained contributor and agent docs, start with:
 
+- [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md)
 - [docs/README.md](docs/README.md)
 - [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md)
 - [docs/RASPBERRY_PI.md](docs/RASPBERRY_PI.md)
@@ -71,7 +72,7 @@ source devel/setup.bash
 #### Launch OpenMower
 
 OpenMower ROS package is distributed with [roslaunch](http://wiki.ros.org/roslaunch) launch files.
-There are few in: `src/open_mower/open_mower/launch`, however the `open_mower.launch` runs everything needed to mow.
+There are several in `src/open_mower/launch`; `open_mower.launch` composes the primary runtime.
 
 ```bash
 roslaunch open_mower open_mower.launch
@@ -80,13 +81,19 @@ roslaunch open_mower open_mower.launch
 Before you launch `open_mower` package, env vars with configuration have to be set.
 
 ```bash
-cp src/open_mower/config/mower_config.sh.example mower_config.sh
+cp config/mower_config.sh.example mower_config.sh
 source mower_config.sh # it's expected to adjust the file
 ```
 
+The shell example is deprecated and retained for legacy compatibility. Prefer the
+structured configuration workflow documented in
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md). The similarly named file under
+`src/open_mower/config/` is only a redirect stub.
+
 ### Running in a container
 
-TBD (no automated image build yet)
+See [docs/DOCKER.md](docs/DOCKER.md) for the maintained default/legacy image split,
+runtime assumptions, and development-container workflow.
 
 ## Contribution
 
@@ -114,7 +121,7 @@ Copy the settings for **Build directory** and **CMake options**. Everything else
 # Notes / ToDos
 
 - For local navigation, I have tried to use the teb_local_planner. Unfortunately, it seems that (at least for me) the noetic version is VERY broken. Therefore I added the current melodic dev version as git submodule to this repo. It seems to work fine with ROS noetic and this setup here.
-- If the map has no docking point set, planning crashes as soon as we try to approach the docking point. TODO: check, before even starting to mow.
+- If the map has no docking point set, planning crashes as soon as we try to approach the docking point. TODO(#14): check before even starting to mow.
 
 # License
 

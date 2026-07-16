@@ -1,0 +1,96 @@
+name: Project policy
+
+# This workflow intentionally has no path filter: branch protection can depend
+# on one stable gate for every pull request and push.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: project-policy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy-gate:
+    name: policy-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select policy comparison base
+        id: policy-base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$PR_BASE_SHA" ]; then
+            base_sha="$PR_BASE_SHA"
+          elif [ "$EVENT_NAME" = "push" ] && [ -n "$PUSH_BEFORE" ] && \
+               [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            base_sha="$PUSH_BEFORE"
+          else
+            base_sha="$(python3 scripts/agent/check_project_hygiene.py --root . --print-base)"
+          fi
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Test pull-request policy validator
+        run: python3 .github/scripts/test_validate_pr.py
+
+      - name: Test agent policy tools
+        run: python3 -m unittest discover -s scripts/agent/tests -p 'test_*.py'
+
+      - name: Validate pull-request title, tracking, and handoff
+        if: github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 .github/scripts/validate_pr.py
+
+      - name: Validate durable project context
+        run: |
+          python3 scripts/agent/check_project_hygiene.py \
+            --root . \
+            --scope all \
+            --check project-state \
+            --check exec-plans \
+            --check adrs \
+            --check links
+
+      - name: Evaluate fresh-agent context routes
+        run: python3 scripts/agent/evaluate_agent_context.py
+
+      - name: Validate changed documentation impact
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        env:
+          BASE_SHA: ${{ steps.policy-base.outputs.base_sha }}
+        run: |
+          python3 scripts/agent/check_project_hygiene.py \
+            --root . \
+            --scope changed \
+            --base "$BASE_SHA" \
+            --strict \
+            --check todos \
+            --check doc-impact
+
+      # Ratchet existing style debt instead of autoformatting unrelated baseline
+      # files. Issue #21 owns migration to a clean full-tree run.
+      - name: Run pre-commit on added and modified files
+        env:
+          BASE_SHA: ${{ steps.policy-base.outputs.base_sha }}
+        run: |
+          python3 -m pip install --disable-pip-version-check pre-commit==4.2.0
+          pre-commit run \
+            --from-ref "$BASE_SHA" \
+            --to-ref HEAD \
+            --show-diff-on-failure

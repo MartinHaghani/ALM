@@ -1,9 +1,12 @@
-# TODO
+# Outstanding work
 
-Purpose: track deferred fork-specific work that is intentionally not part of the current implementation pass.
+This legacy entrypoint is retained so existing links do not break. GitHub Issues
+are now the authoritative backlog for this fork:
 
-## Passive SLAM Confidence Weighting
+- [All open issues](https://github.com/MartinHaghani/open_mower_ros/issues)
+- [Passive SLAM confidence weighting](https://github.com/MartinHaghani/open_mower_ros/issues/2), migrated from the former contents of this file
 
-- Use the published read-only confidence diagnostics to weight boundary-based GPS/LIDAR alignment samples.
-- Candidate inputs: GPS confidence, LIDAR local confidence, timestamp match, geometry richness, scan-to-map fit, and SLAM pose jump detection.
-- Use confidence only to weight alignment samples and report map quality; passive SLAM must remain visualization-only.
+Do not add new tasks here. Create or update an issue with evidence, risk,
+dependencies, acceptance criteria, and verification requirements. Stable design
+documents may explain sequencing and link to issues, but must not duplicate issue
+status.

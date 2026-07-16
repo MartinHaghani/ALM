@@ -1,0 +1,24 @@
+# The fork owner is the accountable reviewer for safety-sensitive runtime code
+# and for the policy/documentation layer that governs autonomous agent work.
+
+# Safety-sensitive mower control and hardware integration.
+/src/mower_logic/ @MartinHaghani
+/src/mower_comms_v1/ @MartinHaghani
+/src/mower_comms_v2/ @MartinHaghani
+/src/mower_hardware/ @MartinHaghani
+/src/open_mower/launch/ @MartinHaghani
+/src/open_mower/params/hardware_specific/ @MartinHaghani
+/docker/*entrypoint*.sh @MartinHaghani
+/config/mower_config.schema.json @MartinHaghani
+
+# Agent policy, repository governance, and durable project context.
+/.github/ @MartinHaghani
+/.agents/ @MartinHaghani
+/.codex/ @MartinHaghani
+/.claude/ @MartinHaghani
+/.pre-commit-config.yaml @MartinHaghani
+/CLAUDE.md @MartinHaghani
+/PLANS.md @MartinHaghani
+/docs/ @MartinHaghani
+/scripts/agent/ @MartinHaghani
+**/AGENTS.md @MartinHaghani
