@@ -65,6 +65,10 @@ class ValidatePullRequestTests(unittest.TestCase):
         body = VALID_BODY.replace("Closes #123", "Refs: #123")
         self.assertEqual(validate_pr.validate("ci(policy): add stable governance gate", body), [])
 
+    def test_single_digit_issue_reference_passes(self) -> None:
+        body = VALID_BODY.replace("Closes #123", "Refs #1")
+        self.assertEqual(validate_pr.validate("ci(policy): add stable governance gate", body), [])
+
     def test_unexplained_na_fails(self) -> None:
         body = VALID_BODY.replace(
             "`docs/exec-plans/active/agent-operations.md`", "N/A"

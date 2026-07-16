@@ -62,7 +62,7 @@ def has_meaningful_content(value: str) -> bool:
     return len(" ".join(useful_lines)) >= 8
 
 
-def label_value(section: str, label: str) -> str | None:
+def label_value(section: str, label: str, min_length: int = 8) -> str | None:
     clean = without_comments(section)
     match = re.search(
         rf"(?im)^\s*[-*+]\s*\*\*{re.escape(label)}:\*\*\s*(.+?)\s*$", clean
@@ -70,7 +70,7 @@ def label_value(section: str, label: str) -> str | None:
     if not match:
         return None
     value = match.group(1).strip()
-    return value if len(value) >= 8 else None
+    return value if len(value) >= min_length else None
 
 
 def validate(title: str, body: str) -> list[str]:
@@ -95,7 +95,8 @@ def validate(title: str, body: str) -> list[str]:
             "Tracking must link an issue, for example 'Closes #123' or 'Refs #123'."
         )
 
-    if label_value(tracking, "Issue") is None:
+    issue_value = label_value(tracking, "Issue", min_length=1)
+    if issue_value is None or not ISSUE_PATTERN.search(issue_value):
         errors.append("Tracking must provide the linked issue on the Issue line.")
     if label_value(tracking, "ExecPlan") is None:
         errors.append("Tracking must give an ExecPlan path/link or an N/A explanation.")
