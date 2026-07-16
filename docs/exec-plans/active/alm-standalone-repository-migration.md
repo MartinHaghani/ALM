@@ -63,9 +63,12 @@ or licensing terms.
   fail-closed remote validation while preserving their schedules and safety gates.
 - [x] (2026-07-15) Recorded successful ALM push and pull-request policy runs
   `29464674958` and `29464692054` at `9d8aa7e`.
-- [ ] Confirm the four default/legacy, amd64/arm64 container validation builds on
-  the current draft-PR head after importing the narrowly scoped `input`-group fix
-  from historical comparison commit `c7d1b715`.
+- [x] (2026-07-15) Imported the narrowly scoped `input`-group fix from historical
+  comparison commit `c7d1b715`; ALM Build run `29465378523` passed all four
+  default/legacy, amd64/arm64 jobs at `dde57b3`.
+- [ ] Confirm policy and container checks again on the immutable head selected for
+  maintainer review; exact run evidence belongs in PR #22 and issue #23 rather than
+  a self-invalidating status-only commit.
 - [ ] Normalize license/package metadata and add machine-readable third-party and
   license validation without removing inherited notices.
 - [ ] Complete build/governance/rollback acceptance and the confidence period;
@@ -165,8 +168,9 @@ with every nested submodule and passed `git fsck`. No active worktree was rewrit
 the former fork remains available for rollback, and PR #22 remains unmerged.
 
 ALM policy-check evidence now exists. The initial ALM container matrix exposed a
-missing base-image group in the default image; current-head matrix confirmation,
-license/package normalization, and the confidence-period closeout remain.
+missing base-image group in the default image, and the focused fix passed all four
+jobs at `dde57b3`. Any later reviewed head must retain green policy and container
+evidence; license/package normalization and the confidence-period closeout remain.
 Archiving the former fork remains explicitly human-gated.
 
 Validation evidence recorded on 2026-07-15:
@@ -177,8 +181,9 @@ Validation evidence recorded on 2026-07-15:
 - `git fsck --full` in the acceptance clone — passed with no diagnostics.
 - `python3 scripts/agent/check_project_hygiene.py --root . --scope all --strict`
   and changed scope against `329726f` — both passed with zero errors and warnings.
-- Agent-policy unit tests — 16 passed; PR-policy unit tests — 9 passed; fresh-agent
-  context evaluation — 8/8 assertions passed.
+- Agent-policy unit tests — 29 passed, including commit-range/exception/bot bypass
+  cases; PR-policy unit tests — 9 passed; fresh-agent context evaluation — 8/8
+  assertions passed.
 - Pinned pre-commit hooks on the changed files and `git diff --check` — passed after
   the `clang-format` file-type correction; a before/after diff digest confirmed the
   final hook run made no changes.
@@ -190,7 +195,8 @@ Validation evidence recorded on 2026-07-15:
   `adduser openmower input` referenced a missing group; the remaining three matrix
   jobs were canceled by fail-fast. All four jobs for the exact fix in historical
   comparison commit `c7d1b715` passed in run `24735999486`; ALM current-head
-  confirmation remains required.
+  confirmation followed in Build run `29465378523`, where all four jobs passed at
+  `dde57b3`.
 - `npm ci`, `npm run typecheck`, and `npm run build` under local Node `24.13.1` —
   passed; the ignored `web/next/` output contains the ALM title/brand. Vite retained
   its existing bundle-size warning and `config.js` warning.

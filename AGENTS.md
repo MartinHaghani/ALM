@@ -61,6 +61,12 @@ For an authorized change/build task, agents may act without another prompt to cr
 
 - Use Conventional Commit subjects such as `fix(localization): ...` or `docs(agent-ops): ...`.
 - Substantive commits require a body covering why, important constraints, and validation, plus `Refs: #<issue>`.
+- For topic-branch pushes and pull requests, CI validates every non-merge commit in
+  the event range; only recognized Dependabot-generated subjects receive the bot's
+  subject-only handling, while other commits in the same range keep normal evidence
+  requirements. Published bootstrap exceptions are explicit in
+  `scripts/agent/commit-message-exceptions.json`; once this policy is on `main`,
+  pull requests cannot add their own effective exception.
 - Stage intentional paths only; never use broad staging to absorb unrelated changes.
 - Push an early recoverable checkpoint for multi-session work, then keep the draft PR and issue current.
 - Put `Closes #<issue>` in the PR body only when merge into the target branch should close the issue.

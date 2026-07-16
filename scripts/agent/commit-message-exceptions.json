@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "exceptions": [
+    {
+      "sha": "474a8a17088bbcd12a6266e02602e18aad0c3a13",
+      "reason": "Published before commit-range CI; the body records constraints, validation, and issue linkage but predates the exact labeled rationale field.",
+      "issue": "#23"
+    },
+    {
+      "sha": "dde57b3302687a18109c76ff2952ba684e9cfac2",
+      "reason": "Published while the commit-msg policy was local-only; this commit exposed the missing CI enforcement and history will not be rewritten.",
+      "issue": "#23"
+    }
+  ]
+}

@@ -44,6 +44,10 @@ hardware operations.
 - [x] (2026-07-15) Completed validators and their self-tests, then executed the
   changed-file pre-commit/CI path for links, state, ExecPlans, ADRs, documentation
   impact, and commit/PR policy. Full-tree debt is tracked in issue #21.
+- [x] (2026-07-15) Closed the discovered local-hook gap by making CI validate each
+  non-merge commit in the event range. Two already-published migration commits have
+  explicit, issue-linked body-label exceptions; after bootstrap, CI reads that
+  registry from the immutable comparison base.
 - [x] (2026-07-15) Added issue/PR templates, CODEOWNERS, pinned workflow actions,
   least-privilege workflow permissions, and policy CI without weakening the Docker
   build or Release Drafter.
@@ -64,10 +68,9 @@ hardware operations.
 - [ ] Run and record the required manual fresh-agent candidate cohort under issue
   #11 before merge.
 - [x] (2026-07-15) Published the original draft PR #22 branch against the exact
-  `329726f` feature baseline. Both branch-push and pull-request policy gates passed
-  in the former repository at `474a8a1` after the single-digit issue-reference
-  regression fix. [ALM draft PR #22](https://github.com/MartinHaghani/ALM/pull/22)
-  requires its own policy rerun after migration.
+  `329726f` feature baseline, recreated it in ALM, and recorded representative
+  branch-push and pull-request policy passes in both repositories. Every immutable
+  merge candidate still requires its own green policy and container checks.
 - [ ] Review and merge draft PR #22 only with maintainer approval, complete the
   Projects v2/required-check rollout in issue #10 after landing, then move this
   plan to `completed/`.
@@ -108,6 +111,12 @@ reviewed head of draft PR #22 under issue #11.
 - The first PR policy run rejected valid `Refs #1` tracking because a generic prose
   label helper required eight characters. Commit `9da5278` validates the Issue line
   by issue-reference syntax and adds the missing single-digit regression case.
+- The commit-message validator was installed only as a local `commit-msg` hook;
+  policy CI unit-tested it without applying it to real PR commits. Published commit
+  `dde57b3` proved the gap by carrying useful prose but missing the required labeled
+  fields and issue trailer. Rewriting shared history would violate ADR 0002, so the
+  range validator preserves two transparent bootstrap exceptions and rejects new
+  head-defined exceptions once the base contains the registry.
 
 ## Decision Log
 
@@ -122,6 +131,10 @@ reviewed head of draft PR #22 under issue #11.
 - 2026-07-15 — Use deterministic hooks and CI to validate structure and required
   evidence. Automation may flag missing semantic documentation but must not invent
   decisions or rewrite prose automatically.
+- 2026-07-15 — Validate substantive commit evidence across each non-merge event
+  range in CI. Preserve already-published policy misses through an explicit
+  issue-linked registry rather than rewriting history; read that registry from the
+  comparison base after the one-time bootstrap.
 - 2026-07-15 — Parallelize bounded read-heavy exploration, testing, and review;
   assign one write owner per file/workstream and use isolated worktrees for
   concurrent implementation.
@@ -131,8 +144,9 @@ reviewed head of draft PR #22 under issue #11.
 The local operating system is complete and internally consistent in this worktree:
 layered documentation, the behavioral skill, bounded custom agents, hooks,
 validators, policy CI, GitHub templates, evaluation cases, and Git conventions all
-have deterministic coverage. The migration also exposed and assigned every legacy
-first-party source TODO instead of silently carrying it forward.
+have deterministic coverage, including actual event-range commit messages rather
+than only the validator's unit tests. The migration also exposed and assigned every
+legacy first-party source TODO instead of silently carrying it forward.
 
 Verification passed for the agent-policy and PR-policy suites, eight fresh-agent
 assertions, full and strict changed-scope hygiene, action workflow parsing,

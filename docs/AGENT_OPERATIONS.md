@@ -57,6 +57,21 @@ The hooks are intentionally bounded:
 
 CI is authoritative because local hooks can be skipped or untrusted.
 
+The policy workflow validates every non-merge commit in normal topic-branch pushes
+and pull requests, including Conventional Commit syntax and the labeled rationale,
+validation, and issue evidence required for substantive changes. Protected `main`
+receives reviewed squash commits. Dependabot commits receive subject-only validation
+only when they use GitHub's canonical `Bump ...` form or the repository's configured
+`ci(deps): ...` prefix because their generator does not emit the repository's human
+evidence body. Other commits added to the same PR keep normal evidence requirements,
+and the PR still runs the remaining policy and build checks. The two published
+bootstrap exceptions are recorded with reasons in
+`scripts/agent/commit-message-exceptions.json`. After the policy lands on `main`,
+CI reads that registry from the immutable comparison base, so a pull request cannot
+make its own new exception effective. The one-time head-registry fallback is pinned
+to exactly those two SHAs. Issue #10 still owns an independent trust boundary that
+prevents a PR from weakening the workflow itself.
+
 ## Run the policy checks
 
 From the repository root, use the commands documented by the project-operations
@@ -67,6 +82,9 @@ python3 scripts/agent/check_project_hygiene.py --root . --scope all
 python3 -m unittest discover -s scripts/agent/tests -p 'test_*.py'
 python3 scripts/agent/evaluate_agent_context.py
 python3 .github/scripts/test_validate_pr.py
+python3 scripts/agent/validate_commit_message.py \
+  --range <base-commit>..HEAD \
+  --exceptions scripts/agent/commit-message-exceptions.json
 pre-commit run
 git diff --check
 ```
