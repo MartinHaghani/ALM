@@ -1,13 +1,12 @@
-## I am available for hire
-Hello! With a background in software engineering, embedded programming, hardware design, and robotics, I'm on the lookout for new challenges.
-If you're in search of someone with my skills, let's team up and create something amazing! https://x-tech.online/
+# ALM
 
-# ROS Workspace
+[![Build](https://github.com/MartinHaghani/ALM/actions/workflows/build-image.yaml/badge.svg)](https://github.com/MartinHaghani/ALM/actions/workflows/build-image.yaml)
 
-[![Build](https://github.com/ClemensElflein/open_mower_ros/actions/workflows/build-image.yaml/badge.svg)](https://github.com/ClemensElflein/open_mower_ros/actions/workflows/build-image.yaml)
-
-This folder is the ROS workspace, which should be used to build the OpenMower ROS software.
-This repository contains the ROS package for controlling the OpenMower.
+ALM is a standalone autonomous-lawn-mower project and ROS Noetic workspace. It
+historically descends from OpenMower and retains OpenMower-compatible ROS package,
+launch, configuration, and deployment identifiers where changing them would break
+existing systems. ALM's canonical repository is
+[MartinHaghani/ALM](https://github.com/MartinHaghani/ALM).
 
 There are references to other repositories (libraries) needed to build the software. This way, we can track the exact version of the packages used in each release to ensure package compatibility.
 Currently, the following repositories are included:
@@ -19,7 +18,7 @@ Currently, the following repositories are included:
 ## Container images: Default vs Legacy
 
 If your robot runs the latest OpenMower OS (v2): use the images without prefix or suffix (e.g. `latest`, `v1.2.3`).
-These images only contain the OpenMower ROS stack and expect the OS to provide web and MQTT services (for example via your system’s compose setup).
+These images only contain the ALM ROS stack and expect the OS to provide web and MQTT services (for example via your system’s compose setup).
 
 If your robot runs an old version of OpenMower OS v1 (Legacy): use the legacy image.
 The OS doesn't provide web and MQTT services, so the image contains nginx and mosquitto to provide these services inside the container.
@@ -29,6 +28,7 @@ The Docker images have a `-legacy` suffix or `releases-` prefix: (e.g. `releases
 
 For repo-specific, maintained contributor and agent docs, start with:
 
+- [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md)
 - [docs/README.md](docs/README.md)
 - [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md)
 - [docs/RASPBERRY_PI.md](docs/RASPBERRY_PI.md)
@@ -39,7 +39,7 @@ For repo-specific, maintained contributor and agent docs, start with:
 
 ### Running on your machine
 
-OpenMower requires ROS Noetic. ([installation instruction](http://wiki.ros.org/noetic/Installation)) There is no distributed release package yet, for development and test purpose it's best to build the workspace on your own.
+ALM targets ROS Noetic. ([installation instructions](http://wiki.ros.org/noetic/Installation)) There is no distributed release package yet; for development and testing, build the workspace locally.
 
 #### Fetch Dependencies
 
@@ -68,10 +68,11 @@ Once it's done, another step is to source workspace env vars:
 source devel/setup.bash
 ```
 
-#### Launch OpenMower
+#### Launch ALM
 
-OpenMower ROS package is distributed with [roslaunch](http://wiki.ros.org/roslaunch) launch files.
-There are few in: `src/open_mower/open_mower/launch`, however the `open_mower.launch` runs everything needed to mow.
+ALM retains the OpenMower-compatible ROS package and launch names. The workspace
+contains several [roslaunch](http://wiki.ros.org/roslaunch) files in
+`src/open_mower/launch`; `open_mower.launch` composes the primary runtime.
 
 ```bash
 roslaunch open_mower open_mower.launch
@@ -80,13 +81,19 @@ roslaunch open_mower open_mower.launch
 Before you launch `open_mower` package, env vars with configuration have to be set.
 
 ```bash
-cp src/open_mower/config/mower_config.sh.example mower_config.sh
+cp config/mower_config.sh.example mower_config.sh
 source mower_config.sh # it's expected to adjust the file
 ```
 
+The shell example is deprecated and retained for legacy compatibility. Prefer the
+structured configuration workflow documented in
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md). The similarly named file under
+`src/open_mower/config/` is only a redirect stub.
+
 ### Running in a container
 
-TBD (no automated image build yet)
+See [docs/DOCKER.md](docs/DOCKER.md) for the maintained default/legacy image split,
+runtime assumptions, and development-container workflow.
 
 ## Contribution
 
@@ -114,7 +121,7 @@ Copy the settings for **Build directory** and **CMake options**. Everything else
 # Notes / ToDos
 
 - For local navigation, I have tried to use the teb_local_planner. Unfortunately, it seems that (at least for me) the noetic version is VERY broken. Therefore I added the current melodic dev version as git submodule to this repo. It seems to work fine with ROS noetic and this setup here.
-- If the map has no docking point set, planning crashes as soon as we try to approach the docking point. TODO: check, before even starting to mow.
+- If the map has no docking point set, planning crashes as soon as we try to approach the docking point. TODO(#14): check before even starting to mow.
 
 # License
 

@@ -20,7 +20,8 @@ For the current custom `Mowrator` bench hardware sequence, use [MOWRATOR_BENCH_B
 
 ## Recommended layout on the Pi
 
-- repo checkout: `~/open_mower_ros`
+- repo checkout: `~/open_mower_ros` (legacy-compatible local path used by the
+  existing startup scripts; the canonical repository is ALM)
 - config file: `~/mower_config.sh`
 - ROS logs: `~/.ros`
 - Mowrator battery voltage CSV log: `~/.ros/battery_voltage_log.csv`
@@ -49,10 +50,16 @@ These are host-side setup steps, not repo-provided commands.
 4. SSH into the Pi and clone this repo:
 
 ```bash
-git clone https://github.com/MartinHaghani/open_mower_ros.git ~/open_mower_ros
+git clone https://github.com/MartinHaghani/ALM.git ~/open_mower_ros
 cd ~/open_mower_ros
-git remote add upstream https://github.com/ClemensElflein/open_mower_ros.git
 git submodule update --init --recursive
+```
+
+ALM has no governing upstream. If you need the historical OpenMower repository for
+an explicit comparison or import, add it under an unambiguous name:
+
+```bash
+git remote add historical-openmower https://github.com/ClemensElflein/open_mower_ros.git
 ```
 
 Optional hardening for the manual-update workflow:

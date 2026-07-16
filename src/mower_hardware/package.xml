@@ -4,7 +4,7 @@
   <version>0.0.0</version>
   <description>Direct Mowrator hardware bridge without the OpenMower low-level board.</description>
 
-  <maintainer email="martin@example.invalid">OpenMower fork maintainers</maintainer>
+  <maintainer email="martin@example.invalid">ALM maintainers</maintainer>
   <license>CC BY-NC-SA 4.0</license>
 
   <buildtool_depend>catkin</buildtool_depend>

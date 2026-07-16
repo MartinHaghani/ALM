@@ -52,13 +52,15 @@ For `MOWER=Mowrator`, the launch flow also starts the battery-voltage CSV logger
 
 ## Configuration note before launching
 
-The current README still points at `src/open_mower/config/mower_config.sh.example`, but that file is now only a redirect stub. The real deprecated shell example lives at:
+The root README and maintained workflows use the real deprecated shell example:
 
 ```bash
 config/mower_config.sh.example
 ```
 
-See [CONFIGURATION.md](CONFIGURATION.md) before relying on legacy shell configuration or OSv2 YAML and env loading.
+The similarly named file under `src/open_mower/config/` is only a compatibility
+redirect. See [CONFIGURATION.md](CONFIGURATION.md) before relying on legacy shell
+configuration or OSv2 YAML and env loading.
 
 ## Development container workflows
 
@@ -93,6 +95,8 @@ Observed from `docker/Dockerfile` and `.github/workflows/build-image.yaml`:
 
 - The default image uses `docker/Dockerfile`.
 - It builds the ROS stack and expects OSv2 or external system services to provide web and MQTT.
+- Its non-root `openmower` user belongs to `dialout` and to an explicitly created
+  `input` group at GID `996`, matching the current OSv2 device-access assumption.
 - The default container entrypoint is `docker/openmower_entrypoint.sh`.
 - The default container command runs:
 

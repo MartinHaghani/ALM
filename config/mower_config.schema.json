@@ -31,7 +31,7 @@
             "CUSTOM"
           ],
           "default": "Mowrator",
-          "description": "The type of mower you're using. Mowrator is the supported direct-Pi hardware profile in this fork; YardForce/OpenMower low-level-board profiles are legacy.",
+          "description": "The type of mower you're using. Mowrator is ALM's supported direct-Pi hardware profile; YardForce/OpenMower low-level-board profiles are legacy.",
           "x-environment-variable": "OM_MOWER"
         },
         "ESC_TYPE": {
@@ -1369,7 +1369,7 @@
     },
     "external_mqtt_broker": {
       "title": "External MQTT Broker",
-      "description": "You can configure Open Mower to publish status and sensor data to your MQTT broker.",
+      "description": "You can configure ALM to publish status and sensor data to your MQTT broker.",
       "type": "object",
       "properties": {
         "OM_MQTT_ENABLE": {

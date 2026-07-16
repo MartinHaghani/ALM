@@ -83,6 +83,7 @@ ARG USERNAME=openmower
 ARG USER_UID=1000
 ARG USER_GID=1000
 RUN groupadd --gid ${USER_GID} ${USERNAME} \
+    && groupadd --gid 996 input \
     && useradd --uid ${USER_UID} --gid ${USER_GID} --create-home --shell /bin/bash ${USERNAME} \
     && adduser ${USERNAME} dialout \
     && adduser ${USERNAME} input \

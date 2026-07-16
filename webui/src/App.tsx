@@ -835,7 +835,7 @@ export default function App() {
       <header className="topbar">
         <div className="brand-mark">
           <Radar size={24} aria-hidden="true" />
-          <span>Open Mower Next</span>
+          <span>ALM</span>
         </div>
         <div className="topbar-actions">
           <div className="view-switch" aria-label="View selector">

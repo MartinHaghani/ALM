@@ -1,5 +1,11 @@
 # Coverage Planner P0 + P1 Implementation Plan
 
+Status: completed historical plan. P0 and P1 landed in `5602b8e` with subsequent
+corrections recorded in
+[COVERAGE_PLANNER_ROADMAP.md](COVERAGE_PLANNER_ROADMAP.md). Unchecked boxes below
+are preserved from the original implementation checklist and are not active work;
+current outstanding planner work belongs in the linked GitHub issues.
+
 Purpose: detailed plan for the two highest-priority coverage planner changes called out in [COVERAGE_PLANNER_ROADMAP.md](COVERAGE_PLANNER_ROADMAP.md): footprint-aware headland (P0) and obstacle-aware swath bridging (P1). Both are localized to the lab in `tools/coverage_lab/coverage_lab.py` and do not touch mower runtime code.
 
 Read [COVERAGE_PLANNER_LAB.md](COVERAGE_PLANNER_LAB.md) first for current lab semantics, defaults, and FTC runtime constraints.

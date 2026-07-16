@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # The plain-Pi dev workflow bind-mounts a local checkout into runtime images that
-# may lag behind the workspace dependencies in this fork. Install small missing
+# may lag behind ALM's workspace dependencies. Install small missing
 # runtime libs in-container before delegating to the legacy entrypoint.
 
 restore_disabled_sources() {

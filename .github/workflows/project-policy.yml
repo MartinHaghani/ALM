@@ -1,0 +1,138 @@
+name: Project policy
+
+# This workflow intentionally has no path filter: branch protection can depend
+# on one stable gate for every pull request and push.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: project-policy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy-gate:
+    name: policy-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select policy comparison base
+        id: policy-base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ] && [ -n "$PR_BASE_SHA" ]; then
+            base_sha="$PR_BASE_SHA"
+          elif [ "$EVENT_NAME" = "push" ] && [ -n "$PUSH_BEFORE" ] && \
+               [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            base_sha="$PUSH_BEFORE"
+          else
+            base_sha="$(python3 scripts/agent/check_project_hygiene.py --root . --print-base)"
+          fi
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Test pull-request policy validator
+        run: python3 .github/scripts/test_validate_pr.py
+
+      - name: Test agent policy tools
+        run: python3 -m unittest discover -s scripts/agent/tests -p 'test_*.py'
+
+      - name: Validate commit messages in event range
+        if: >-
+          github.event_name == 'pull_request' ||
+          (github.event_name == 'push' && github.ref != 'refs/heads/main')
+        env:
+          ACTOR: ${{ github.actor }}
+          BASE_SHA: ${{ steps.policy-base.outputs.base_sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          exception_file="scripts/agent/commit-message-exceptions.json"
+          trusted_exception_file="$RUNNER_TEMP/commit-message-exceptions.json"
+          bootstrap_args=()
+          bot_args=()
+
+          if [ "$ACTOR" = "dependabot[bot]" ] || [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
+            bot_args=(--allow-dependabot-subjects)
+          fi
+
+          # Once the policy lands, read exceptions from the immutable comparison
+          # base so a PR cannot exempt its own commits. The one-time head copy is
+          # pinned below to the exact bootstrap SHAs.
+          if git cat-file -e "${BASE_SHA}:${exception_file}" 2>/dev/null; then
+            git show "${BASE_SHA}:${exception_file}" > "$trusted_exception_file"
+            exception_file="$trusted_exception_file"
+          elif [ ! -f "$exception_file" ]; then
+            echo "Commit-message exception registry is missing" >&2
+            exit 1
+          else
+            bootstrap_args=(
+              --expected-exception-sha 474a8a17088bbcd12a6266e02602e18aad0c3a13
+              --expected-exception-sha dde57b3302687a18109c76ff2952ba684e9cfac2
+            )
+          fi
+
+          python3 scripts/agent/validate_commit_message.py \
+            --root . \
+            --range "${BASE_SHA}..HEAD" \
+            --exceptions "$exception_file" \
+            --body-policy auto \
+            "${bot_args[@]}" \
+            "${bootstrap_args[@]}"
+
+      - name: Validate pull-request title, tracking, and handoff
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'dependabot[bot]'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 .github/scripts/validate_pr.py
+
+      - name: Validate durable project context
+        run: |
+          python3 scripts/agent/check_project_hygiene.py \
+            --root . \
+            --scope all \
+            --check project-state \
+            --check exec-plans \
+            --check adrs \
+            --check links
+
+      - name: Evaluate fresh-agent context routes
+        run: python3 scripts/agent/evaluate_agent_context.py
+
+      - name: Validate changed documentation impact
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        env:
+          BASE_SHA: ${{ steps.policy-base.outputs.base_sha }}
+        run: |
+          python3 scripts/agent/check_project_hygiene.py \
+            --root . \
+            --scope changed \
+            --base "$BASE_SHA" \
+            --strict \
+            --check todos \
+            --check doc-impact
+
+      # Ratchet existing style debt instead of autoformatting unrelated baseline
+      # files. Issue #21 owns migration to a clean full-tree run.
+      - name: Run pre-commit on added and modified files
+        env:
+          BASE_SHA: ${{ steps.policy-base.outputs.base_sha }}
+        run: |
+          python3 -m pip install --disable-pip-version-check pre-commit==4.2.0
+          pre-commit run \
+            --from-ref "$BASE_SHA" \
+            --to-ref HEAD \
+            --show-diff-on-failure

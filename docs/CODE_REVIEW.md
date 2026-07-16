@@ -39,7 +39,7 @@ Purpose: reusable review checklist for human reviewers and agents working in thi
 
 - Will a new contributor understand the updated workflow?
 - Did the change invalidate any verified commands or paths in the docs layer?
-- Were fork-specific divergences documented instead of hidden?
+- Were ALM-specific, lineage, or compatibility divergences documented instead of hidden?
 
 ## Validation checklist
 
@@ -52,6 +52,6 @@ Purpose: reusable review checklist for human reviewers and agents working in thi
 
 - The change alters safety-sensitive logic without clear validation.
 - Config artifacts drift further apart instead of being reconciled or documented.
-- A diff mixes upstream sync, first-party feature work, and submodule or generated edits.
+- A diff mixes historical-source imports, ALM feature work, and submodule or generated edits.
 - A reviewer cannot tell whether `web/` or `src/lib/` edits are intentional.
 - The runtime effect of a Docker or launch-file change is unclear.

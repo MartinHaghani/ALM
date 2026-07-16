@@ -1,13 +1,16 @@
 # Contributing
 
-Purpose: practical contributor guidance for this fork of `open_mower_ros`.
+Purpose: practical contributor guidance for ALM.
 
 ## Start here
 
 - Read [docs/README.md](docs/README.md) for the documentation map.
 - Read [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md) before attempting to build or launch.
 - Read [docs/CONFIGURATION.md](docs/CONFIGURATION.md) before changing config, params, or environment handling.
-- Read [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md) before mixing fork-only changes with upstream sync work.
+- Read [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md) before importing changes from historical OpenMower sources.
+- Read [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md) and
+  [docs/AGENT_OPERATIONS.md](docs/AGENT_OPERATIONS.md) before starting or resuming a
+  tracked workstream.
 
 ## Environment setup
 
@@ -56,6 +59,7 @@ Be especially careful when changing:
 - `src/mower_logic`
 - `src/mower_comms_v1`
 - `src/mower_comms_v2`
+- `src/mower_hardware`
 - `src/open_mower/launch`
 - `src/open_mower/params/hardware_specific`
 - `docker/openmower_entrypoint.sh`
@@ -78,6 +82,14 @@ Expected behavior in those areas is part of the runtime safety envelope. If a ch
 - Use relative links in Markdown docs.
 - Keep docs high-signal and avoid repeating the same long explanation across files.
 - If a path is generated, deprecated, external, or not yet verified, label it that way.
+- Use a topic branch and linked GitHub issue for substantive work. Complex or
+  multi-session changes also require an active ExecPlan under
+  `docs/exec-plans/active/`.
+- Use Conventional Commit subjects; substantive commits include rationale,
+  validation, and `Refs: #<issue>` in the body.
+- Open a draft PR with the repository template. Do not merge, force-push, deploy,
+  change live VESC settings, or perform a physical mower test without the required
+  human approval.
 
 ## What not to edit casually
 
@@ -95,13 +107,17 @@ Update the docs layer when you change:
 - configuration structure or environment variables
 - package inventory or ownership boundaries
 - container behavior
-- fork-specific divergences that future contributors need to know
+- ALM-specific or compatibility divergences that future contributors need to know
 
 Use [docs/DOCS_MAINTENANCE.md](docs/DOCS_MAINTENANCE.md) to decide which file needs an update.
 
-## Fork and upstream expectations
+## Project lineage and historical imports
 
-- This checkout has both `origin` and `upstream` remotes configured.
-- Keep upstream sync work isolated from fork-local customization.
-- Preserve clean commit boundaries between sync work and local changes.
-- Record meaningful fork-specific drift in the docs instead of leaving it tribal knowledge.
+- [MartinHaghani/ALM](https://github.com/MartinHaghani/ALM) is the canonical
+  standalone repository; no external repository is ALM's governing upstream.
+- Existing migration worktrees may temporarily retain the former fork as `origin`
+  and expose ALM as an `alm` remote. Inspect remotes instead of assuming their names.
+- Keep deliberate imports from historical OpenMower sources isolated from
+  ALM-specific changes and preserve clean commit boundaries.
+- Record meaningful lineage or compatibility drift in the docs instead of leaving
+  it as tribal knowledge.

@@ -29,6 +29,13 @@ Observed from `docker/Dockerfile`:
 - Copies `docker/openmower_entrypoint.sh` as the entrypoint.
 - Runs `roslaunch open_mower open_mower.launch --screen` as the default command.
 - The mower-side Bluetooth manager uses the host BlueZ daemon over `/run/dbus/system_bus_socket`. Pi runtime helpers mount that socket when it exists, and the images install `python3-dbus` plus `python3-gi` for D-Bus and pairing-agent support.
+- Creates the non-root `openmower` runtime user and an `input` group with GID
+  `996` before adding that user to the `dialout` and `input` groups. The explicit
+  creation keeps multi-architecture builds deterministic when the minimal ROS base
+  image omits the group and preserves the intended OSv2 `/dev/input` access model.
+  Host-GID discovery and narrower device exposure remain tracked in
+  [issue #27](https://github.com/MartinHaghani/ALM/issues/27); changing that
+  deployment contract requires controlled Pi/controller validation.
 
 ### Legacy image
 
@@ -89,7 +96,14 @@ Observed from `.github/workflows/build-image.yaml`:
 - both amd64 and arm64 builds are configured
 - the default image uses `docker/Dockerfile`
 - the legacy image uses `docker/Dockerfile.Legacy`
-- pre-commit runs as part of the image build workflow before Docker build and push
+- pre-commit and repository-policy checks run once in the separate always-triggered
+  `Project policy` workflow rather than four times inside the Docker matrix
+- third-party workflow actions are pinned to immutable commit SHAs and maintained by
+  Dependabot
+- pushed image builds request BuildKit `mode=max` provenance and an SBOM; pull
+  request validation builds do not publish those attestations
+- package-write permission is scoped to the image build/merge jobs rather than the
+  entire workflow
 
 ## Development-only container setup
 

@@ -1,0 +1,84 @@
+name: Work item
+description: Track a planned change, discovered follow-up, investigation, or maintenance task.
+title: "work: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form as the authoritative record for outstanding work. Keep the outcome testable and link evidence rather than copying large logs.
+  - type: dropdown
+    id: work_type
+    attributes:
+      label: Work type
+      options:
+        - Feature or behavior change
+        - Defect fix
+        - Investigation
+        - Documentation
+        - Maintenance or technical debt
+        - Discovered follow-up
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the user-visible or operational result, not merely the implementation activity.
+      placeholder: When this is complete...
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context and evidence
+      description: Include relevant paths, logs, run IDs, links, observations, and prior decisions.
+      placeholder: Observed state and evidence...
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope and boundaries
+      description: State what is in scope, what is explicitly out of scope, and any ownership boundary.
+      placeholder: In scope... Out of scope...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Add observable, independently verifiable completion criteria.
+      placeholder: |
+        - [ ] Behavior or artifact is complete
+        - [ ] Required validation passes
+        - [ ] Documentation and tracking are reconciled
+    validations:
+      required: true
+  - type: dropdown
+    id: safety
+    attributes:
+      label: Safety impact
+      description: Choose the highest applicable level.
+      options:
+        - None identified
+        - Indirect or operational risk
+        - Safety-sensitive mower, hardware, configuration, or deployment change
+        - Unknown; safety review required
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Planned verification
+      description: List exact automated commands and manual or hardware checks, including what cannot be run locally.
+      placeholder: Commands, expected results, and required environment...
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and related work
+      description: Link parent/sub-issues, active ExecPlans, ADRs, PRs, and blocked-by relationships. Write "None" if there are none.
+      placeholder: "Blocked by #...; ExecPlan: docs/exec-plans/active/..."
+    validations:
+      required: true

@@ -1,6 +1,7 @@
 # DEPRECATION NOTICE:
 # This configuration file will be deprecated soon and will be replaced by a user interface.
 # If you decide to make changes to this file, mirror them in the mower_config.schema.json file as well.
+# ALM retains these OpenMower-compatible environment names and legacy hardware values during migration.
 
 
 ################################
