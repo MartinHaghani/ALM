@@ -134,12 +134,15 @@ validators, policy CI, GitHub templates, evaluation cases, and Git conventions a
 have deterministic coverage. The migration also exposed and assigned every legacy
 first-party source TODO instead of silently carrying it forward.
 
-Verification passed for the agent-policy and PR-policy suites, seven fresh-agent
+Verification passed for the agent-policy and PR-policy suites, eight fresh-agent
 assertions, full and strict changed-scope hygiene, action workflow parsing,
 JSON/TOML parsing, hook output parsing, changed-file pre-commit, and whitespace.
-No ROS build or live hardware validation was required because runtime behavior and
-first-party source are unchanged; legacy markers are mapped through the validated
-register rather than comment-only source edits.
+No ROS build or live-hardware operation was required. The branch now includes one
+narrow runtime-image construction fix, imported after ALM's new matrix exposed the
+minimal ARM64 base image's missing `input` group; all four non-publishing container
+variants must pass at the current head. ROS behavior and first-party runtime source
+remain unchanged, and legacy markers are mapped through the validated register
+rather than comment-only source edits.
 
 The remaining rollout is deliberately external: Projects v2 needs one-time OAuth
 scope, and the policy gate cannot safely become a required check until its workflow
@@ -151,7 +154,10 @@ moves to `completed/`.
 Draft PR #22 is mergeable. In the former repository, both its branch-push and
 pull-request invocations of `Project policy / policy-gate` passed at `474a8a1`; the
 initial failed PR run is retained as useful evidence for the validator regression
-fixed in `9da5278`. ALM's recreated draft has not yet recorded its own run.
+fixed in `9da5278`. ALM's recreated draft recorded successful push and pull-request
+policy runs at `9d8aa7e`; its first container run exposed the missing base-image
+group and canceled the remaining matrix jobs through fail-fast, so current-head
+matrix evidence remains part of the handoff.
 
 ## Context and Orientation
 

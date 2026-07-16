@@ -53,20 +53,27 @@ or licensing terms.
   merge, and least-privilege Actions settings.
 - [x] (2026-07-15) Verified an independent fresh recursive clone, `git fsck`, every
   top-level and nested submodule gitlink, and a clean `main` checkout.
-- [x] (2026-07-15) Updated product-facing canonical documentation, exported 27
+- [x] (2026-07-15) Updated product-facing canonical documentation, exported
   post-migration GitHub target records, regenerated and verified `SHA256SUMS`, and
   re-verified the complete 53-ref source bundle.
+- [x] (2026-07-15) Left the former fork active for the confidence period while
+  changing its repository description and homepage to direct visitors to ALM.
 - [x] (2026-07-15) Migrated both active Codex automations in place to ALM names,
   canonical `alm/main` reads, explicit `alm` pushes, ALM issue/PR targets, and
   fail-closed remote validation while preserving their schedules and safety gates.
-- [ ] Record ALM policy checks on the pushed canonical-documentation checkpoint.
+- [x] (2026-07-15) Recorded successful ALM push and pull-request policy runs
+  `29464674958` and `29464692054` at `9d8aa7e`.
+- [ ] Confirm the four default/legacy, amd64/arm64 container validation builds on
+  the current draft-PR head after importing the narrowly scoped `input`-group fix
+  from historical comparison commit `c7d1b715`.
 - [ ] Normalize license/package metadata and add machine-readable third-party and
   license validation without removing inherited notices.
 - [ ] Complete build/governance/rollback acceptance and the confidence period;
   archive the former fork only after explicit maintainer approval.
 
-Exact next action: push this canonical-documentation checkpoint to ALM draft PR #22,
-then wait for and record ALM's own push and pull-request policy checks.
+Exact next action: confirm the ALM policy gate and all four container validation
+builds for the current head of draft PR #22, then hand the still-draft PR to the
+maintainer for review without merging it absent explicit approval.
 
 ## Surprises & Discoveries
 
@@ -114,6 +121,15 @@ then wait for and record ALM's own push and pull-request policy checks.
   package names, `OM_*`, `OPEN_MOWER_*`, schema identifiers, MQTT defaults, D-Bus
   paths, container paths, and systemd names need deliberate aliases or versioned
   transitions rather than global replacement.
+- ALM Build run `29464676667` did not report four independent failures: the
+  arm64/default job reached `docker/Dockerfile` lines 85–89 and failed because the
+  minimal ROS base omitted the `input` group; fail-fast then canceled the other
+  three matrix jobs. Historical comparison commit `c7d1b715` adds that missing
+  group at the OSv2 GID `996`, and its original four-architecture GitHub matrix
+  completed successfully. Import only that hunk and re-run ALM's complete matrix.
+- The current SHA-pinned checkout and Docker actions emit GitHub's Node 20 runtime
+  deprecation warning. [Issue #26](https://github.com/MartinHaghani/ALM/issues/26)
+  owns supported-runtime upgrades so the container portability fix stays isolated.
 
 ## Decision Log
 
@@ -136,6 +152,9 @@ then wait for and record ALM's own push and pull-request policy checks.
 - 2026-07-15 — Retarget draft PR #22 to protected `main` after verifying its former
   base resolves to the same `329726f`; preserve the diff while avoiding an
   unprotected integration path.
+- 2026-07-15 — Import only the `input`-group creation hunk from historical
+  comparison commit `c7d1b715`, with the exact source and independent upstream
+  matrix evidence recorded. Do not merge unrelated historical changes into ALM.
 
 ## Outcomes & Retrospective
 
@@ -145,8 +164,9 @@ reachability now exist. A fresh recursive clone of ALM `main` at `329726f` compl
 with every nested submodule and passed `git fsck`. No active worktree was rewritten,
 the former fork remains available for rollback, and PR #22 remains unmerged.
 
-ALM policy-check evidence, license/package normalization, broader build acceptance,
-and the confidence-period closeout remain.
+ALM policy-check evidence now exists. The initial ALM container matrix exposed a
+missing base-image group in the default image; current-head matrix confirmation,
+license/package normalization, and the confidence-period closeout remain.
 Archiving the former fork remains explicitly human-gated.
 
 Validation evidence recorded on 2026-07-15:
@@ -164,6 +184,13 @@ Validation evidence recorded on 2026-07-15:
   final hook run made no changes.
 - Downloaded `actionlint` 1.7.12 for Darwin arm64, verified its release checksum,
   and ran it against the workflows — passed with no diagnostics.
+- ALM `Project policy` runs `29464674958` (push) and `29464692054` (pull request) —
+  passed at `9d8aa7e`.
+- ALM Build run `29464676667` — arm64/default failed after the ROS build because
+  `adduser openmower input` referenced a missing group; the remaining three matrix
+  jobs were canceled by fail-fast. All four jobs for the exact fix in historical
+  comparison commit `c7d1b715` passed in run `24735999486`; ALM current-head
+  confirmation remains required.
 - `npm ci`, `npm run typecheck`, and `npm run build` under local Node `24.13.1` —
   passed; the ignored `web/next/` output contains the ALM title/brand. Vite retained
   its existing bundle-size warning and `config.js` warning.
@@ -175,8 +202,10 @@ Validation evidence recorded on 2026-07-15:
 - `shasum -a 256 -c SHA256SUMS` — every preservation artifact passed; `git bundle
   verify` reported the 53-ref bundle complete.
 
-No ROS build, container build, Pi validation, or live-hardware operation was run in
-this documentation and repository-identity checkpoint.
+GitHub ran the non-publishing container matrix and exposed the missing ARM64
+base-image group recorded above; the current head still requires a complete green
+matrix. No local ROS build, Pi validation, deployment, image publication, or
+live-hardware operation was run in this repository-identity checkpoint.
 
 ## Context and Orientation
 
@@ -332,6 +361,10 @@ history rewrite or repository deletion is part of this plan.
   while the saved Codex project remains the shared confidence-period checkout.
 - Generated legacy-root-UI rebrand and rebuild:
   [issue #25](https://github.com/MartinHaghani/ALM/issues/25).
+- SHA-pinned action supported-runtime upgrade:
+  [issue #26](https://github.com/MartinHaghani/ALM/issues/26).
+- Host-aware, least-privilege runtime input-device mapping:
+  [issue #27](https://github.com/MartinHaghani/ALM/issues/27).
 - Compatibility interfaces not implicitly renamed: ROS packages/messages/topics,
   `OM_*`, `OPEN_MOWER_*`, schema IDs, MQTT/D-Bus names, container paths, image names,
   systemd units, and persisted configuration.
@@ -349,3 +382,6 @@ history rewrite or repository deletion is part of this plan.
   safety behavior without duplicating their schedules.
 - 2026-07-15 — Kept generated `web/` out of the branding diff and created issue #25
   for a traceable source-side Flutter rebrand and rebuild.
+- 2026-07-15 — Recorded ALM policy evidence, the precise first container-matrix
+  failure, its one-hunk historical source, and issue #26 for the separate action
+  runtime upgrade.

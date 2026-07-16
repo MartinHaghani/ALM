@@ -14,7 +14,9 @@ task start.
 - Last verified: 2026-07-15.
 - Canonical GitHub repository: [MartinHaghani/ALM](https://github.com/MartinHaghani/ALM), a public standalone repository.
 - Branch used for this migration: `codex/agent-operating-system`.
-- Inspected baseline commit: `329726f` (`webui: compact map selector controls`).
+- Baseline commit: `329726f` on ALM `main` (`webui: compact map selector controls`).
+- Draft-PR candidate: `codex/agent-operating-system`; verify its current immutable
+  head in PR #22 before reviewing or running acceptance checks.
 - Runtime baseline: the launch-composed ROS Noetic workspace described in
   [ARCHITECTURE.md](ARCHITECTURE.md); the laptop coverage lab does not replace the
   runtime `slic3r_coverage_planner`.
@@ -30,8 +32,8 @@ page cannot see uncommitted changes in another worktree.
 
 | Workstream | Status | Snapshot | Authoritative next-step source |
 |---|---|---|---|
-| Standalone ALM repository migration | active | Public standalone repo, curated refs, issues #1–#23, draft PR #22, governance, preservation, GPS publication, recursive-clone acceptance, and scheduled-automation migration are complete; canonical-doc CI and confidence-period closeout remain | [issue #23](https://github.com/MartinHaghani/ALM/issues/23), [ADR 0003](decisions/0003-standalone-alm-project-identity.md), and the [active migration ExecPlan](exec-plans/active/alm-standalone-repository-migration.md) |
-| Agent documentation, context, and Git operating system | active | Draft PR #22 passed policy gates in the former repository at `474a8a1`; the ALM rerun, full candidate cohort, and external rollout remain | [PR #22](https://github.com/MartinHaghani/ALM/pull/22), [issue #1](https://github.com/MartinHaghani/ALM/issues/1), and the [active migration ExecPlan](exec-plans/active/agent-operating-system-migration.md) |
+| Standalone ALM repository migration | active | Public standalone repo, curated refs, migrated issues #1–#21 and #23, new follow-ups #25–#27, draft PR #22, Dependabot PR #24, governance, preservation, GPS publication, recursive-clone acceptance, and scheduled-automation migration are complete; current-head build acceptance and confidence-period closeout remain | [issue #23](https://github.com/MartinHaghani/ALM/issues/23), [ADR 0003](decisions/0003-standalone-alm-project-identity.md), and the [active migration ExecPlan](exec-plans/active/alm-standalone-repository-migration.md) |
+| Agent documentation, context, and Git operating system | active | ALM push and pull-request policy gates passed at `9d8aa7e`; the full candidate cohort, current-head container matrix, and external rollout remain | [PR #22](https://github.com/MartinHaghani/ALM/pull/22), [issue #1](https://github.com/MartinHaghani/ALM/issues/1), and the [active migration ExecPlan](exec-plans/active/agent-operating-system-migration.md) |
 | Existing coverage planner lab | planned | P0, P1, P3, P10, P11, P12, and P13 are recorded as landed; P5 is the next sequence item | [roadmap](COVERAGE_PLANNER_ROADMAP.md) and [issue #3](https://github.com/MartinHaghani/ALM/issues/3) |
 | Coverage Planner V2 exploration | planned | M1 evidence and substantial M2.x local prototypes exist; M2 acceptance reconciliation and M3 candidate routing are outstanding | [algorithm status](COVERAGE_PLANNER_V2_ALGORITHM_PLAN.md#current-implementation-status) and [issue #8](https://github.com/MartinHaghani/ALM/issues/8) |
 | Passive SLAM confidence weighting | planned | No active implementation plan | [issue #2](https://github.com/MartinHaghani/ALM/issues/2) |
@@ -67,8 +69,9 @@ tracked migration work.
 
 Tracked rollout gaps are:
 
-- GitHub Issues are authoritative and issues #1–#23 plus draft PR #22 retain the
-  migrated numbering and provenance.
+- GitHub Issues are authoritative. Migrated issues #1–#21 and #23 and draft PR #22
+  retain their numbering and provenance; ALM-native follow-ups begin at #25 after
+  Dependabot PR #24.
   Every legacy first-party source TODO/FIXME marker has exact-content ownership in
   the machine-validated [legacy register](legacy-todos.json); new markers require
   inline issue references. The Projects v2 board still requires separate OAuth
@@ -84,6 +87,12 @@ Tracked rollout gaps are:
 - The React `/next/` source identifies ALM; the generated legacy Flutter root UI
   still requires a source-owned rebuild under
   [issue #25](https://github.com/MartinHaghani/ALM/issues/25).
+- Current workflow actions are SHA-pinned, but several still target the deprecated
+  Node 20 runtime. Their supported-runtime upgrades and verification are tracked by
+  [issue #26](https://github.com/MartinHaghani/ALM/issues/26).
+- The default image currently encodes OSv2 input GID `996`; host-aware group mapping
+  and narrower device exposure require the controlled deployment work in
+  [issue #27](https://github.com/MartinHaghani/ALM/issues/27).
 - Parallel slope branches require the branch-by-branch audit in issue #12.
 
 These are migration gaps, not a replacement backlog. Remove a bullet when its
@@ -91,10 +100,11 @@ linked issue is completed; do not add implementation checklists here.
 
 ## Next Actions
 
-1. Push this canonical-documentation checkpoint to
-   [draft PR #22](https://github.com/MartinHaghani/ALM/pull/22), wait for the ALM
-   policy checks, and record the result in
-   [issue #23](https://github.com/MartinHaghani/ALM/issues/23).
+1. Confirm ALM's policy gate and all four default/legacy, amd64/arm64 validation
+   builds for the current head of
+   [draft PR #22](https://github.com/MartinHaghani/ALM/pull/22), then hand the
+   still-draft PR to the maintainer for review. Never merge it without explicit
+   approval.
 2. Complete the remaining license/provenance and confidence-period acceptance items
    in issue #23; do not
    archive the former fork without explicit maintainer approval.
