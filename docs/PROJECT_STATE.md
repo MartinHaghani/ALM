@@ -81,6 +81,9 @@ Tracked rollout gaps are:
   trials are evidence, not a required per-PR CI check.
 - Full-tree pre-commit debt is ratcheted to added/modified files and tracked by
   [issue #21](https://github.com/MartinHaghani/ALM/issues/21).
+- The React `/next/` source identifies ALM; the generated legacy Flutter root UI
+  still requires a source-owned rebuild under
+  [issue #25](https://github.com/MartinHaghani/ALM/issues/25).
 - Parallel slope branches require the branch-by-branch audit in issue #12.
 
 These are migration gaps, not a replacement backlog. Remove a bullet when its

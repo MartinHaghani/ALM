@@ -106,6 +106,10 @@ then wait for and record ALM's own push and pull-request policy checks.
   unrelated JSON lines. Restoring both JSON files from the branch baseline and
   overriding the hook to compiled-language types removed the churn and made the
   changed-file ratchet deterministic for schema and WebUI metadata.
+- The root Flutter UI under `web/` is generated from a separate `OpenMowerApp`
+  source and still displays legacy branding. Direct edits would violate the
+  source/output boundary, so [issue #25](https://github.com/MartinHaghani/ALM/issues/25)
+  owns the source-side rebrand, reproducible rebuild, and browser smoke test.
 - Repository branding is much smaller than runtime compatibility migration. ROS
   package names, `OM_*`, `OPEN_MOWER_*`, schema identifiers, MQTT defaults, D-Bus
   paths, container paths, and systemd names need deliberate aliases or versioned
@@ -326,6 +330,8 @@ history rewrite or repository deletion is part of this plan.
 - Scheduled automations: `ALM project hygiene` weekly and `ALM agent context
   regression` every four weeks. Both resolve the canonical `alm` remote explicitly
   while the saved Codex project remains the shared confidence-period checkout.
+- Generated legacy-root-UI rebrand and rebuild:
+  [issue #25](https://github.com/MartinHaghani/ALM/issues/25).
 - Compatibility interfaces not implicitly renamed: ROS packages/messages/topics,
   `OM_*`, `OPEN_MOWER_*`, schema IDs, MQTT/D-Bus names, container paths, image names,
   systemd units, and persisted configuration.
@@ -341,3 +347,5 @@ history rewrite or repository deletion is part of this plan.
 - 2026-07-15 — Migrated both scheduled Codex jobs in place to ALM names, canonical
   remote handling, issue/PR destinations, current frontier model, and fail-closed
   safety behavior without duplicating their schedules.
+- 2026-07-15 — Kept generated `web/` out of the branding diff and created issue #25
+  for a traceable source-side Flutter rebrand and rebuild.

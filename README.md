@@ -18,7 +18,7 @@ Currently, the following repositories are included:
 ## Container images: Default vs Legacy
 
 If your robot runs the latest OpenMower OS (v2): use the images without prefix or suffix (e.g. `latest`, `v1.2.3`).
-These images only contain the OpenMower ROS stack and expect the OS to provide web and MQTT services (for example via your system’s compose setup).
+These images only contain the ALM ROS stack and expect the OS to provide web and MQTT services (for example via your system’s compose setup).
 
 If your robot runs an old version of OpenMower OS v1 (Legacy): use the legacy image.
 The OS doesn't provide web and MQTT services, so the image contains nginx and mosquitto to provide these services inside the container.
