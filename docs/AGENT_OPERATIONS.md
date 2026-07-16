@@ -208,6 +208,11 @@ The Codex desktop automation `OpenMower project hygiene` runs weekly on Monday i
 isolated worktree. It audits documentation, project state, active plans, ADRs,
 issues/PRs, worktrees, and deterministic policy checks.
 
+It also revisits issue #10: after the maintainer grants Projects scope, it may
+configure the documented Project; it may require the policy gate only after the
+workflow and independent-trust prerequisites are proven. Missing scope or unsafe
+review topology remains a reported blocker, never a reason to weaken protection.
+
 `OpenMower agent context regression` runs every four weeks on Wednesday in an
 isolated worktree. It samples at least three risk-balanced evaluation cases with
 three trials per case when the environment supports them, records raw measures, and
