@@ -18,9 +18,9 @@ Purpose: explain the directory tree, ownership boundaries, and which areas are s
 
 ## Important files at the root
 
-- `README.md`: upstream-facing overview and getting-started text. Contains some stale path and container notes, so use the docs layer for repo-specific guidance.
+- `README.md`: ALM overview and concise getting-started guide; use the docs layer for detailed operating guidance.
 - `.gitmodules`: verifies the repo-level submodules.
-- `.pre-commit-config.yaml`: configures pre-commit hooks and excludes `config/`, `web/`, and `src/lib/` from broad formatting/checking scope.
+- `.pre-commit-config.yaml`: configures pre-commit hooks; excludes generated/external `web/`, `src/lib/`, and `src/mower_logic/third_party/` while keeping first-party configuration in validation scope.
 - `AGENTS.md`: root Codex guidance.
 - `CLAUDE.md`: root Claude Code guidance.
 - `CONTRIBUTING.md`: human contributor guide.

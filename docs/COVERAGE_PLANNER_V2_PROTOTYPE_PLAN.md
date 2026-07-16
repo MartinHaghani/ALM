@@ -2,7 +2,7 @@
 
 Status: historical implementation plan. The initial prototype and later M1/M2.x
 diagnostics are present from `a0b5896` onward. Current advancement and acceptance
-work is tracked in [issue #8](https://github.com/MartinHaghani/open_mower_ros/issues/8)
+work is tracked in [issue #8](https://github.com/MartinHaghani/ALM/issues/8)
 and the status block in
 [COVERAGE_PLANNER_V2_ALGORITHM_PLAN.md](COVERAGE_PLANNER_V2_ALGORITHM_PLAN.md).
 

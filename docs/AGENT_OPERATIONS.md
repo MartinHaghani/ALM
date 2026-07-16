@@ -25,7 +25,7 @@ the task needs them.
 | Current cross-project snapshot | [PROJECT_STATE.md](PROJECT_STATE.md) |
 | Complex in-flight implementation | `docs/exec-plans/active/` |
 | Durable decision and rationale | `docs/decisions/` |
-| Outstanding work | [GitHub Issues](https://github.com/MartinHaghani/open_mower_ros/issues) |
+| Outstanding work | [GitHub Issues](https://github.com/MartinHaghani/ALM/issues) |
 | Current system behavior | stable docs and implementation |
 | Implementation/validation history | commits and pull requests |
 
@@ -92,7 +92,7 @@ Markdown links, issue-linked TODO/FIXME markers, and required documentation impa
 for sensitive path families. It validates structure and evidence routing; a human or
 review agent still evaluates whether the semantics are true.
 
-Pre-commit is a changed-file ratchet while [issue #21](https://github.com/MartinHaghani/open_mower_ros/issues/21)
+Pre-commit is a changed-file ratchet while [issue #21](https://github.com/MartinHaghani/ALM/issues/21)
 owns inherited full-tree debt. Stage only the intended paths, then run
 `pre-commit run`; CI compares the event base with `HEAD`. Do not use an all-files
 run to autoformat unrelated baseline code. The JSON formatter deliberately skips
@@ -140,7 +140,9 @@ history rewriting, deployment, and live mower/VESC actions remain human-gated.
 
 ## Current GitHub governance
 
-Verified and applied on 2026-07-15 to `MartinHaghani/open_mower_ros`:
+Verified and applied on 2026-07-15 to the canonical `MartinHaghani/ALM` repository.
+The former `MartinHaghani/open_mower_ros` repository remains active only as the
+confidence-period rollback and historical reference:
 
 - Issues enabled and the initial backlog plus legacy TODO ownership migrated to
   issues #1–#21;
@@ -154,7 +156,7 @@ Verified and applied on 2026-07-15 to `MartinHaghani/open_mower_ros`:
 The checked-in policy workflow exposes the stable `Project policy / policy-gate`
 check. Do not make it required until this workflow is present on the protected
 branch and has passed representative PRs. Track that rollout in
-[issue #10](https://github.com/MartinHaghani/open_mower_ros/issues/10).
+[issue #10](https://github.com/MartinHaghani/ALM/issues/10).
 
 Before requiring it, also establish an independent trust boundary for changes to
 the workflow, validators, hooks, skills, and agent instructions. A PR-controlled
@@ -204,16 +206,21 @@ show only the few active workstreams and their authoritative links.
 
 ## Scheduled gardening
 
-The Codex desktop automation `OpenMower project hygiene` runs weekly on Monday in an
+The Codex desktop automation `ALM project hygiene` runs weekly on Monday in an
 isolated worktree. It audits documentation, project state, active plans, ADRs,
 issues/PRs, worktrees, and deterministic policy checks.
+
+During the local confidence period the saved Codex project remains the shared former
+checkout, so the automation verifies the `alm` remote, uses `alm/main` as canonical,
+and pushes only explicitly to `alm`. A missing or mismatched ALM remote is a hard
+stop, not permission to fall back to the former `origin`.
 
 It also revisits issue #10: after the maintainer grants Projects scope, it may
 configure the documented Project; it may require the policy gate only after the
 workflow and independent-trust prerequisites are proven. Missing scope or unsafe
 review topology remains a reported blocker, never a reason to weaken protection.
 
-`OpenMower agent context regression` runs every four weeks on Wednesday in an
+`ALM agent context regression` runs every four weeks on Wednesday in an
 isolated worktree. It samples at least three risk-balanced evaluation cases with
 three trials per case when the environment supports them, records raw measures, and
 updates issue #11. This periodic sample does not replace the full candidate cohort

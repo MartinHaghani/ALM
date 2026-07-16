@@ -13,7 +13,7 @@ Verified from commit `a0b5896` and the current `tools/coverage_lab/` sources on
 - M3 and later globally scored candidate generation, route optimization, and live
   maneuver-aware execution remain outstanding.
 
-[Issue #8](https://github.com/MartinHaghani/open_mower_ros/issues/8) is the
+[Issue #8](https://github.com/MartinHaghani/ALM/issues/8) is the
 authoritative current work item for reconciling M2 and advancing candidate routing.
 The milestone descriptions below remain the durable design plan, not a live status
 tracker.
@@ -959,7 +959,7 @@ Each case should eventually have a fixture map and expected planner behavior.
 
 ## Immediate next step
 
-Resume from [issue #8](https://github.com/MartinHaghani/open_mower_ros/issues/8),
+Resume from [issue #8](https://github.com/MartinHaghani/ALM/issues/8),
 not the original M1 bootstrap list. First reconcile the implemented M2.x behavior
 against the M2 acceptance criteria; then generate multiple behavior-specific M3
 coverage candidates with explicit safety, missed-area, and unsupported-maneuver

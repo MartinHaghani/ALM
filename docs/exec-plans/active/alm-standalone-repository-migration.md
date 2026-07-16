@@ -4,13 +4,13 @@
 - Owner: coordinating Codex agent
 - Created: 2026-07-15
 - Last updated: 2026-07-15
-- Issue: [#23](https://github.com/MartinHaghani/open_mower_ros/issues/23)
+- Issue: [#23](https://github.com/MartinHaghani/ALM/issues/23)
 - Branch/worktree: `codex/agent-operating-system` at `/Users/martinhaghani/Code/open_mower_ros_agent_ops`
-- Baseline commit: `2256dfd`
+- Baseline commit: `329726f` (migration base)
 - Related ADRs: [ADR 0003](../../decisions/0003-standalone-alm-project-identity.md), [ADR 0002](../../decisions/0002-git-autonomy-and-safety-boundary.md)
 
 This plan follows [PLANS.md](../../../PLANS.md). It is the authoritative living
-handoff for preserving the current fork and establishing ALM without losing active
+handoff for preserving the former fork and establishing ALM without losing active
 work, history, metadata, dependencies, or operational knowledge.
 
 ## Purpose and Intended Outcome
@@ -35,25 +35,38 @@ or licensing terms.
   reachability.
 - [x] (2026-07-15) Created issue #23 as the authoritative work item and accepted
   ADR 0003 for the durable identity and provenance decision.
-- [ ] Record the repository owner and visibility. `MartinHaghani/ALM` and
-  `MME4487/ALM` appeared available during the 2026-07-15 read-only check.
-- [ ] Snapshot and reconcile every dirty worktree, then create a complete old-ref
-  bundle and reviewed migration manifest.
-- [ ] Publish or replace the two local-only `xbot_driver_gps` commits so the pinned
-  superproject gitlink is retrievable by a fresh clone.
-- [ ] Complete or preserve draft PR #22 and ensure the agent operating system is
-  present on the intended ALM default branch.
-- [ ] Create the empty non-fork ALM repository with Actions disabled during initial
-  ref import, then push the reviewed branches and deliberate tag set.
-- [ ] Migrate GitHub work tracking, settings, protections, Actions, secrets,
-  automations, and product-facing branding.
+- [x] (2026-07-15) Selected the public personal repository
+  `MartinHaghani/ALM`.
+- [x] (2026-07-15) Snapshotted every dirty worktree and created a complete old-ref
+  bundle, submodule bundles, GitHub metadata exports, and recovery artifacts under
+  `/Users/martinhaghani/Code/ALM_migration_backup_20260715T210630-0400`.
+- [x] (2026-07-15) Published the two `xbot_driver_gps` commits through
+  `codex/pi-rover-fixes`; the pinned `bd05076` gitlink is remotely retrievable.
+- [x] (2026-07-15) Preserved draft PR #22 by recreating its head/base refs and
+  draft PR in ALM, then retargeted it from the identical integration ref to protected
+  `main`. ALM `main` remains at `329726f`, so migration has not implicitly merged
+  the draft agent-operations work.
+- [x] (2026-07-15) Created the public, empty, non-fork ALM repository with Actions
+  disabled, then imported only the reviewed active branches and no historical tags.
+- [x] (2026-07-15) Recreated labels, issues #1–#21, draft PR #22, and issue #23 with
+  provenance and original numbering; reproduced repository protection, security,
+  merge, and least-privilege Actions settings.
+- [x] (2026-07-15) Verified an independent fresh recursive clone, `git fsck`, every
+  top-level and nested submodule gitlink, and a clean `main` checkout.
+- [x] (2026-07-15) Updated product-facing canonical documentation, exported 27
+  post-migration GitHub target records, regenerated and verified `SHA256SUMS`, and
+  re-verified the complete 53-ref source bundle.
+- [x] (2026-07-15) Migrated both active Codex automations in place to ALM names,
+  canonical `alm/main` reads, explicit `alm` pushes, ALM issue/PR targets, and
+  fail-closed remote validation while preserving their schedules and safety gates.
+- [ ] Record ALM policy checks on the pushed canonical-documentation checkpoint.
 - [ ] Normalize license/package metadata and add machine-readable third-party and
   license validation without removing inherited notices.
-- [ ] Verify a fresh recursive clone, builds, governance, metadata, and rollback;
-  archive the old fork only after maintainer cutover approval.
+- [ ] Complete build/governance/rollback acceptance and the confidence period;
+  archive the former fork only after explicit maintainer approval.
 
-Exact next action: record whether ALM will live under `MartinHaghani` or an
-organization and whether it will remain public.
+Exact next action: push this canonical-documentation checkpoint to ALM draft PR #22,
+then wait for and record ALM's own push and pull-request policy checks.
 
 ## Surprises & Discoveries
 
@@ -63,9 +76,9 @@ organization and whether it will remain public.
 - No local commit is unreachable from all origin refs, but origin contains 113
   commits reachable only through remote branch refs. Pushing only local branches or
   the default branch would lose historical heads.
-- Superproject HEAD pins `src/lib/xbot_driver_gps` at `bd05076`, while its local
-  `codex/pi-rover-fixes` branch is two commits ahead of GitHub. The pinned commit is
-  not remotely retrievable.
+- The superproject pins `src/lib/xbot_driver_gps` at `bd05076`. Publishing its two
+  pre-existing local commits to `codex/pi-rover-fixes` made the exact gitlink
+  retrievable; a fresh recursive clone verified it.
 - All 376 paths present at the fork point remain in the current tree. Of those, 293
   are byte-identical and 83 modified; the project is substantially extended but not
   a clean-room rewrite.
@@ -75,6 +88,24 @@ organization and whether it will remain public.
 - The initial ref import must not enable tag-triggered Actions accidentally. Existing
   version tags match the container publication workflow and could publish historical
   images under ALM.
+- The migration therefore imported no historical tags into ALM. They remain in the
+  verified preservation bundle and former repository.
+- ALM `main` intentionally remains at `329726f`; moving the agent-operations branch
+  to `main` would merge draft PR #22 without the required maintainer approval.
+- Recreated PR #22 initially retained its historical integration-branch base. That
+  branch and `main` both pointed to `329726f`, so retargeting the draft to protected
+  `main` changed neither its diff nor its merge status and restored the intended
+  review boundary.
+- Enabling normal repository automation caused Dependabot to open
+  [PR #24](https://github.com/MartinHaghani/ALM/pull/24) for Vite `8.1.4`.
+  `npm audit` identifies the pinned `8.0.14` as the one current high-severity
+  development dependency; keep that automated PR separate and review its build
+  evidence rather than silently absorbing it into the identity migration.
+- The inherited `clang-format` pre-commit hook's default file types included JSON
+  and JavaScript, so a two-line schema branding edit initially rewrote hundreds of
+  unrelated JSON lines. Restoring both JSON files from the branch baseline and
+  overriding the hook to compiled-language types removed the churn and made the
+  changed-file ratchet deterministic for schema and WebUI metadata.
 - Repository branding is much smaller than runtime compatibility migration. ROS
   package names, `OM_*`, `OPEN_MOWER_*`, schema identifiers, MQTT defaults, D-Bus
   paths, container paths, and systemd names need deliberate aliases or versioned
@@ -94,20 +125,61 @@ organization and whether it will remain public.
 - 2026-07-15 — Keep GPL-3.0-only and applicable inherited/third-party notices for
   initial migration. Any future relicensing requires documented rights or clean-room
   replacement evidence.
+- 2026-07-15 — Import only reviewed active branches, not historical tags or abandoned
+  refs. Preserve the complete old namespace in the verified bundle and former repo.
+- 2026-07-15 — Keep ALM `main` at `329726f` and recreate PR #22 as draft rather than
+  treating repository migration as approval to merge it.
+- 2026-07-15 — Retarget draft PR #22 to protected `main` after verifying its former
+  base resolves to the same `329726f`; preserve the diff while avoiding an
+  unprotected integration path.
 
 ## Outcomes & Retrospective
 
-The decision, initial evidence, blockers, and migration acceptance criteria are now
-durable and issue-backed. No ALM repository has been created, no active worktree has
-been rewritten, and no remote has been changed. Owner/visibility selection,
-worktree preservation, submodule publication, and PR #22 disposition remain before
-the external cutover can safely begin.
+The standalone public ALM repository, curated active refs, work-item numbering,
+draft PR #22, governance, security settings, preservation artifacts, and dependency
+reachability now exist. A fresh recursive clone of ALM `main` at `329726f` completed
+with every nested submodule and passed `git fsck`. No active worktree was rewritten,
+the former fork remains available for rollback, and PR #22 remains unmerged.
+
+ALM policy-check evidence, license/package normalization, broader build acceptance,
+and the confidence-period closeout remain.
+Archiving the former fork remains explicitly human-gated.
+
+Validation evidence recorded on 2026-07-15:
+
+- `git clone --recurse-submodules git@github.com:MartinHaghani/ALM.git
+  /Users/martinhaghani/Code/ALM_acceptance_20260715` — passed at `329726f`; all six
+  top-level and nested gitlinks were retrieved and the checkout was clean.
+- `git fsck --full` in the acceptance clone — passed with no diagnostics.
+- `python3 scripts/agent/check_project_hygiene.py --root . --scope all --strict`
+  and changed scope against `329726f` — both passed with zero errors and warnings.
+- Agent-policy unit tests — 16 passed; PR-policy unit tests — 9 passed; fresh-agent
+  context evaluation — 8/8 assertions passed.
+- Pinned pre-commit hooks on the changed files and `git diff --check` — passed after
+  the `clang-format` file-type correction; a before/after diff digest confirmed the
+  final hook run made no changes.
+- Downloaded `actionlint` 1.7.12 for Darwin arm64, verified its release checksum,
+  and ran it against the workflows — passed with no diagnostics.
+- `npm ci`, `npm run typecheck`, and `npm run build` under local Node `24.13.1` —
+  passed; the ignored `web/next/` output contains the ALM title/brand. Vite retained
+  its existing bundle-size warning and `config.js` warning.
+- `./utils/scripts/web/build_next_webui.sh` — not run to completion because the
+  local Docker daemon was unavailable; the supported Node 22 container build remains
+  part of final acceptance.
+- `npm audit --json` — one high-severity Vite development dependency finding at
+  `8.0.14`; Dependabot PR #24 proposes the non-major fix `8.1.4`.
+- `shasum -a 256 -c SHA256SUMS` — every preservation artifact passed; `git bundle
+  verify` reported the 53-ref bundle complete.
+
+No ROS build, container build, Pi validation, or live-hardware operation was run in
+this documentation and repository-identity checkpoint.
 
 ## Context and Orientation
 
-The source repository is `/Users/martinhaghani/Code/open_mower_ros`. Its local
-`origin` is `MartinHaghani/open_mower_ros`; `upstream` is
-`ClemensElflein/open_mower_ros`. The isolated agent-governance worktree is
+The former source worktree is `/Users/martinhaghani/Code/open_mower_ros`. During the
+staged migration its shared local `origin` remains `MartinHaghani/open_mower_ros`,
+`upstream` remains `ClemensElflein/open_mower_ros`, and `alm` points to the canonical
+`MartinHaghani/ALM`. The isolated agent-governance worktree is
 `/Users/martinhaghani/Code/open_mower_ros_agent_ops` on
 `codex/agent-operating-system`. Do not stage, clean, reset, or rewrite another
 worktree while preparing this migration.
@@ -136,16 +208,16 @@ and GitHub metadata/settings export. Create a full old-repository Git bundle bef
 changing remotes. Resolve the unpublished GPS submodule commits and document the
 disposition of draft PR #22.
 
-Next, create an empty ALM repository under the selected owner without using GitHub's
-fork action. Keep Actions disabled while importing curated refs so historical tags
-cannot trigger image publication. Compare source and destination object/ref
-manifests before selecting and protecting the ALM default branch.
+The public ALM repository was created without GitHub's fork action. Actions remained
+disabled while curated refs were imported so historical tags could not trigger image
+publication. The target ref manifest and default branch were then checked before
+protection and security settings were applied.
 
-Then migrate issue/backlog content, labels, settings, protections, workflows,
-secrets, automations, and other external state. Update repository-facing ALM
-branding, URLs, badges, clone/deployment instructions, maintainers, and generated
-asset sources. Preserve compatibility-sensitive identifiers until a separate
-migration supplies aliases and versioned readers.
+Issues, the draft PR, labels, settings, protections, workflow permissions, empty
+secret/variable inventories, and scheduled automations have been migrated. Finish
+repository-facing ALM branding, URLs, badges, and clone instructions. Preserve
+compatibility-sensitive identifiers until a separate migration supplies aliases and
+versioned readers.
 
 Finally, normalize license declarations and add machine-readable SPDX/REUSE and
 third-party checks. Verify a clean recursive clone and supported builds, test agent
@@ -178,7 +250,7 @@ Clone the destination into a new directory for validation rather than reusing an
 existing object store:
 
 ```bash
-git clone --recurse-submodules git@github.com:OWNER/ALM.git /tmp/alm-acceptance
+git clone --recurse-submodules git@github.com:MartinHaghani/ALM.git /tmp/alm-acceptance
 cd /tmp/alm-acceptance
 git fsck --full
 python3 scripts/agent/check_project_hygiene.py --root . --scope all
@@ -199,7 +271,7 @@ builds. Do not claim a Pi, GHCR, or live-hardware check unless it was actually r
   name.
 - Every ALM branch and tag SHA matches its reviewed manifest, and historical tags
   do not trigger unintended publication.
-- `gh api repos/OWNER/ALM --jq '{fork,parent,source}'` reports `fork: false` and no
+- `gh api repos/MartinHaghani/ALM --jq '{fork,parent,source}'` reports `fork: false` and no
   fork parent/source.
 - `git clone --recurse-submodules` succeeds from an empty local object cache.
 - The repository hygiene, agent policy, fresh-agent, pre-commit, link, workflow,
@@ -242,15 +314,18 @@ history rewrite or repository deletion is part of this plan.
 
 - Durable decision: `docs/decisions/0003-standalone-alm-project-identity.md`.
 - Active execution state: this file.
-- Outstanding work: [issue #23](https://github.com/MartinHaghani/open_mower_ros/issues/23).
+- Outstanding work: [issue #23](https://github.com/MartinHaghani/ALM/issues/23).
 - Source GitHub repository: `MartinHaghani/open_mower_ros`.
-- Destination repository: `OWNER/ALM`, not yet created.
+- Canonical destination repository: `MartinHaghani/ALM`.
 - Historical source remote: `ClemensElflein/open_mower_ros`.
-- Critical dependency boundary: `src/lib/xbot_driver_gps` gitlink `bd05076` and its
-  two local-only commits.
-- Preservation artifacts to create: worktree ledger, Git ref manifest, restorable
-  bundle, GitHub metadata/settings export, submodule reachability report, and
-  post-cutover verification report.
+- Critical dependency boundary: `src/lib/xbot_driver_gps` gitlink `bd05076`, now
+  published through its `codex/pi-rover-fixes` branch and verified by fresh clone.
+- Preservation artifacts: worktree ledger, Git ref manifest, restorable bundle,
+  source and target GitHub metadata/settings exports, submodule reachability report, and recovery
+  scripts under `/Users/martinhaghani/Code/ALM_migration_backup_20260715T210630-0400`.
+- Scheduled automations: `ALM project hygiene` weekly and `ALM agent context
+  regression` every four weeks. Both resolve the canonical `alm` remote explicitly
+  while the saved Codex project remains the shared confidence-period checkout.
 - Compatibility interfaces not implicitly renamed: ROS packages/messages/topics,
   `OM_*`, `OPEN_MOWER_*`, schema IDs, MQTT/D-Bus names, container paths, image names,
   systemd units, and persisted configuration.
@@ -259,3 +334,10 @@ history rewrite or repository deletion is part of this plan.
 
 - 2026-07-15 — Created the ALM standalone-repository migration plan from repository,
   GitHub, license, branding, and submodule audits.
+- 2026-07-15 — Recorded the public repository creation, curated-ref import,
+  work-tracking/governance migration, submodule publication, preservation backup,
+  and successful independent recursive-clone acceptance. Kept the former repository
+  active and PR #22 draft pending explicit approval.
+- 2026-07-15 — Migrated both scheduled Codex jobs in place to ALM names, canonical
+  remote handling, issue/PR destinations, current frontier model, and fail-closed
+  safety behavior without duplicating their schedules.

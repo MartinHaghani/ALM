@@ -6,7 +6,7 @@ These evaluations test behavior rather than assuming that more documentation
 improves performance.
 
 The evaluation backlog and trial rollout are tracked by
-[GitHub issue #11](https://github.com/MartinHaghani/open_mower_ros/issues/11).
+[GitHub issue #11](https://github.com/MartinHaghani/ALM/issues/11).
 
 ## Evaluation layers
 
@@ -17,7 +17,7 @@ Two different mechanisms are intentionally kept separate:
    structure, and documentation-impact declarations. The checked-in
    [project-policy workflow](../../.github/workflows/project-policy.yml) is the
    intended stable merge gate after the required-check rollout in
-   [issue #10](https://github.com/MartinHaghani/open_mower_ros/issues/10). Until
+   [issue #10](https://github.com/MartinHaghani/ALM/issues/10). Until
    then, it reports repeatable evidence but branch protection does not require it.
 2. **Stochastic Codex trials** measure orientation, judgment, handoff, delegation,
    and end-state correctness. They run manually or as a scheduled task in isolated
@@ -133,10 +133,10 @@ worktree to detect model, tool, and documentation drift. Scheduled trials open o
 update issue #11 with results; they do not rewrite canonical docs, merge changes, or
 hide failed cases.
 
-The Codex desktop automation `OpenMower agent context regression` runs every four
+The Codex desktop automation `ALM agent context regression` runs every four
 weeks in an isolated worktree and records a rotating three-case sample in issue
 #11. It is a drift monitor, not a substitute for the full pre-merge cohort.
 
 For the initial operating-system migration, record the candidate cohort under
-[issue #11](https://github.com/MartinHaghani/open_mower_ros/issues/11) before merge;
+[issue #11](https://github.com/MartinHaghani/ALM/issues/11) before merge;
 the draft PR may open before those stochastic trials finish.

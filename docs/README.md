@@ -86,7 +86,7 @@ history disruption.
 - [COVERAGE_PLANNER_ROADMAP.md](COVERAGE_PLANNER_ROADMAP.md): prioritized coverage planner work list (P0–P9), per-priority status, and edge case catalogue.
 - [PATH_RECORDING_ARCHITECTURE.md](PATH_RECORDING_ARCHITECTURE.md): manual-mowing path recording architecture for GPS, LIDAR, and fused teach-path/debug artifacts.
 - [FTC_EXECUTOR_LIMITATIONS.md](FTC_EXECUTOR_LIMITATIONS.md): current `PlanPath`/FTC executor limitations that teach-path recording must preserve rather than hide.
-- [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md): fork maintenance guidance.
+- [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md): ALM lineage and deliberate historical-import guidance.
 - [CODE_REVIEW.md](CODE_REVIEW.md): reusable review checklist.
 - [TODO.md](TODO.md): legacy pointer to the authoritative GitHub Issues backlog; do not add tasks there.
 - [legacy-todos.json](legacy-todos.json): machine-validated issue ownership for
@@ -100,5 +100,5 @@ history disruption.
 - [exec-plans/](exec-plans/): living implementation records and their archive.
 - [decisions/](decisions/): ADR index and accepted decisions.
 - [templates/exec-plan.md](templates/exec-plan.md) and [templates/adr.md](templates/adr.md): canonical templates.
-- [GitHub Issues](https://github.com/MartinHaghani/open_mower_ros/issues): authoritative dynamic backlog.
-- GitHub Project: target status/priority/area/risk view; rollout is tracked in [issue #10](https://github.com/MartinHaghani/open_mower_ros/issues/10).
+- [GitHub Issues](https://github.com/MartinHaghani/ALM/issues): authoritative dynamic backlog.
+- GitHub Project: target status/priority/area/risk view; rollout is tracked in [issue #10](https://github.com/MartinHaghani/ALM/issues/10).

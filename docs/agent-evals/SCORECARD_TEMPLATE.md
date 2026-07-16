@@ -82,4 +82,4 @@ Create one scorecard per case trial. The cohort baseline links these records.
 Record observable behavior and uncertainty. Do not reward verbosity or penalize a
 concise result that has complete evidence. Link actionable evaluation-suite defects
 or workflow regressions to
-[issue #11](https://github.com/MartinHaghani/open_mower_ros/issues/11).
+[issue #11](https://github.com/MartinHaghani/ALM/issues/11).

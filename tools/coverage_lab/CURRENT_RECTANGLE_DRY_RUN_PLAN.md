@@ -4,7 +4,7 @@ Status: preparation implemented; the physical validation is still outstanding.
 The continuous exporter now exists as `v2_continuous_dry_run.py`, and the static
 PlanPath bridge and trace tooling are documented in this directory. The
 authoritative remaining work item is
-[issue #9](https://github.com/MartinHaghani/open_mower_ros/issues/9).
+[issue #9](https://github.com/MartinHaghani/ALM/issues/9).
 
 ## Goal
 

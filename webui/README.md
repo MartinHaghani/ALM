@@ -1,4 +1,4 @@
-# Open Mower Next WebUI
+# ALM WebUI
 
 This is the source for the new Vite + React + TypeScript WebUI served under `/next/`.
 It defaults to an OpenLayers combined map that can overlay optional satellite imagery, stored mower map JSON from

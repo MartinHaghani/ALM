@@ -1,13 +1,12 @@
-## I am available for hire
-Hello! With a background in software engineering, embedded programming, hardware design, and robotics, I'm on the lookout for new challenges.
-If you're in search of someone with my skills, let's team up and create something amazing! https://x-tech.online/
+# ALM
 
-# ROS Workspace
+[![Build](https://github.com/MartinHaghani/ALM/actions/workflows/build-image.yaml/badge.svg)](https://github.com/MartinHaghani/ALM/actions/workflows/build-image.yaml)
 
-[![Build](https://github.com/ClemensElflein/open_mower_ros/actions/workflows/build-image.yaml/badge.svg)](https://github.com/ClemensElflein/open_mower_ros/actions/workflows/build-image.yaml)
-
-This folder is the ROS workspace, which should be used to build the OpenMower ROS software.
-This repository contains the ROS package for controlling the OpenMower.
+ALM is a standalone autonomous-lawn-mower project and ROS Noetic workspace. It
+historically descends from OpenMower and retains OpenMower-compatible ROS package,
+launch, configuration, and deployment identifiers where changing them would break
+existing systems. ALM's canonical repository is
+[MartinHaghani/ALM](https://github.com/MartinHaghani/ALM).
 
 There are references to other repositories (libraries) needed to build the software. This way, we can track the exact version of the packages used in each release to ensure package compatibility.
 Currently, the following repositories are included:
@@ -40,7 +39,7 @@ For repo-specific, maintained contributor and agent docs, start with:
 
 ### Running on your machine
 
-OpenMower requires ROS Noetic. ([installation instruction](http://wiki.ros.org/noetic/Installation)) There is no distributed release package yet, for development and test purpose it's best to build the workspace on your own.
+ALM targets ROS Noetic. ([installation instructions](http://wiki.ros.org/noetic/Installation)) There is no distributed release package yet; for development and testing, build the workspace locally.
 
 #### Fetch Dependencies
 
@@ -69,10 +68,11 @@ Once it's done, another step is to source workspace env vars:
 source devel/setup.bash
 ```
 
-#### Launch OpenMower
+#### Launch ALM
 
-OpenMower ROS package is distributed with [roslaunch](http://wiki.ros.org/roslaunch) launch files.
-There are several in `src/open_mower/launch`; `open_mower.launch` composes the primary runtime.
+ALM retains the OpenMower-compatible ROS package and launch names. The workspace
+contains several [roslaunch](http://wiki.ros.org/roslaunch) files in
+`src/open_mower/launch`; `open_mower.launch` composes the primary runtime.
 
 ```bash
 roslaunch open_mower open_mower.launch

@@ -25,7 +25,7 @@ transcripts, or complete terminal output as project documentation.
 - Change in package inventory or ownership boundaries: update [PACKAGES.md](PACKAGES.md), [REPO_MAP.md](REPO_MAP.md), and `src/AGENTS.md`.
 - Change in Dockerfiles, entrypoints, or development containers: update [DOCKER.md](DOCKER.md), [BUILD_AND_RUN.md](BUILD_AND_RUN.md), and `docker/AGENTS.md`.
 - Change in simulation launches or behavior: update [SIMULATION.md](SIMULATION.md) and any affected architecture notes.
-- Change in fork-versus-upstream behavior: update [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md) and the nearest reference doc.
+- Change in project lineage, historical-import behavior, or compatibility drift: update [UPSTREAM_SYNC.md](UPSTREAM_SYNC.md) and the nearest reference doc.
 - Change in active owner, state, blocker, or authoritative plan: update [PROJECT_STATE.md](PROJECT_STATE.md) with one evidence-linked row.
 - Substantial multi-session, cross-package, or safety-sensitive work: create or update an ExecPlan under [exec-plans/active/](exec-plans/active/) according to [PLANS.md](../PLANS.md).
 - Durable architecture or operating decision: add an ADR under [decisions/](decisions/) and link it from the active plan.

@@ -8,7 +8,7 @@ cohort. Do not edit the template with measured results.
 - Status: Planned | Running | Complete | Invalidated
 - Evaluation date:
 - Evaluator:
-- Tracking issue: [#11](https://github.com/MartinHaghani/open_mower_ros/issues/11)
+- Tracking issue: [#11](https://github.com/MartinHaghani/ALM/issues/11)
 - Baseline commit: `329726f` or another immutable SHA
 - Candidate commit:
 - Model and version:

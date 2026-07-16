@@ -1,6 +1,6 @@
 # Repository operating guide
 
-Purpose: always-on instructions for Codex and other repo-aware agents working in this `open_mower_ros` fork. Keep this file concise; route durable detail to the linked source of truth.
+Purpose: always-on instructions for Codex and other repo-aware agents working on ALM. Keep this file concise; route durable detail to the linked source of truth.
 
 ## Start every task here
 
@@ -17,7 +17,7 @@ Do not ask the user to restate facts already available in these sources. Verify 
 - `AGENTS.md`: durable operating rules only; never task status.
 - [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md): compact startup snapshot and router; not the backlog.
 - `docs/exec-plans/active/`: self-contained state, decisions, evidence, and next action for complex active work.
-- [GitHub Issues](https://github.com/MartinHaghani/open_mower_ros/issues): canonical outstanding-work backlog. Do not create unlinked Markdown TODO lists.
+- [GitHub Issues](https://github.com/MartinHaghani/ALM/issues): canonical outstanding-work backlog. Do not create unlinked Markdown TODO lists.
 - `docs/decisions/`: append-only architectural decision records. Supersede decisions; do not rewrite their history.
 - Stable reference and operating docs under `docs/`: current system truth.
 - Git commits and PRs: implementation and verification ledger.
@@ -69,7 +69,9 @@ Agents must obtain explicit user approval before merging, pushing directly to th
 
 ## Repository map and safety boundaries
 
-This is a ROS Noetic catkin workspace for OpenMower.
+ALM is a standalone ROS Noetic catkin workspace that retains OpenMower-compatible
+ROS package, launch, configuration, and deployment identifiers where required for
+compatibility.
 
 - `src/open_mower`: launch/orchestration, params, hardware presets, and RViz configuration.
 - `src/mower_logic`: high-level state machine and monitoring. Safety-critical.
@@ -91,7 +93,7 @@ Preserve these boundaries:
 - Do not broadly format or clean `src/lib/`, `services/`, or `web/`.
 - Keep `config/mower_config.sh.example` aligned while it exists, but it remains deprecated.
 - `src/open_mower/config/mower_config.sh.example` is only a redirect stub.
-- Keep upstream-sync work separate from fork-specific behavior; document intentional drift.
+- Keep imports from historical OpenMower sources separate from ALM-specific behavior; document intentional compatibility drift.
 
 ## Verified setup and run commands
 

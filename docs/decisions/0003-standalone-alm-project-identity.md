@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-07-15
 - Decision owners: Martin Haghani
-- Related issue/plan: [issue #23](https://github.com/MartinHaghani/open_mower_ros/issues/23) and the [ALM migration ExecPlan](../exec-plans/active/alm-standalone-repository-migration.md)
+- Related issue/plan: [issue #23](https://github.com/MartinHaghani/ALM/issues/23) and the [ALM migration ExecPlan](../exec-plans/active/alm-standalone-repository-migration.md)
 - Supersedes: None
 
 ## Context

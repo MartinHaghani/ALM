@@ -1,13 +1,13 @@
 # Contributing
 
-Purpose: practical contributor guidance for this fork of `open_mower_ros`.
+Purpose: practical contributor guidance for ALM.
 
 ## Start here
 
 - Read [docs/README.md](docs/README.md) for the documentation map.
 - Read [docs/BUILD_AND_RUN.md](docs/BUILD_AND_RUN.md) before attempting to build or launch.
 - Read [docs/CONFIGURATION.md](docs/CONFIGURATION.md) before changing config, params, or environment handling.
-- Read [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md) before mixing fork-only changes with upstream sync work.
+- Read [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md) before importing changes from historical OpenMower sources.
 - Read [docs/PROJECT_STATE.md](docs/PROJECT_STATE.md) and
   [docs/AGENT_OPERATIONS.md](docs/AGENT_OPERATIONS.md) before starting or resuming a
   tracked workstream.
@@ -107,13 +107,17 @@ Update the docs layer when you change:
 - configuration structure or environment variables
 - package inventory or ownership boundaries
 - container behavior
-- fork-specific divergences that future contributors need to know
+- ALM-specific or compatibility divergences that future contributors need to know
 
 Use [docs/DOCS_MAINTENANCE.md](docs/DOCS_MAINTENANCE.md) to decide which file needs an update.
 
-## Fork and upstream expectations
+## Project lineage and historical imports
 
-- This checkout has both `origin` and `upstream` remotes configured.
-- Keep upstream sync work isolated from fork-local customization.
-- Preserve clean commit boundaries between sync work and local changes.
-- Record meaningful fork-specific drift in the docs instead of leaving it tribal knowledge.
+- [MartinHaghani/ALM](https://github.com/MartinHaghani/ALM) is the canonical
+  standalone repository; no external repository is ALM's governing upstream.
+- Existing migration worktrees may temporarily retain the former fork as `origin`
+  and expose ALM as an `alm` remote. Inspect remotes instead of assuming their names.
+- Keep deliberate imports from historical OpenMower sources isolated from
+  ALM-specific changes and preserve clean commit boundaries.
+- Record meaningful lineage or compatibility drift in the docs instead of leaving
+  it as tribal knowledge.

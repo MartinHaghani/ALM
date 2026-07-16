@@ -4,7 +4,7 @@
 - Owner: coordinating Codex agent
 - Created: 2026-07-15
 - Last updated: 2026-07-15
-- Issue: [#1](https://github.com/MartinHaghani/open_mower_ros/issues/1)
+- Issue: [#1](https://github.com/MartinHaghani/ALM/issues/1)
 - Branch/worktree: `codex/agent-operating-system` at `/Users/martinhaghani/Code/open_mower_ros_agent_ops`
 - Baseline commit: `329726f`
 - Related ADRs: [ADR 0001](../../decisions/0001-agent-documentation-and-context-model.md), [ADR 0002](../../decisions/0002-git-autonomy-and-safety-boundary.md)
@@ -63,9 +63,11 @@ hardware operations.
   issues #13–#20 capture the newly discovered work.
 - [ ] Run and record the required manual fresh-agent candidate cohort under issue
   #11 before merge.
-- [x] (2026-07-15) Published [draft PR #22](https://github.com/MartinHaghani/open_mower_ros/pull/22)
-  against the exact `329726f` feature baseline. Both branch-push and pull-request
-  policy gates pass after the single-digit issue-reference regression fix.
+- [x] (2026-07-15) Published the original draft PR #22 branch against the exact
+  `329726f` feature baseline. Both branch-push and pull-request policy gates passed
+  in the former repository at `474a8a1` after the single-digit issue-reference
+  regression fix. [ALM draft PR #22](https://github.com/MartinHaghani/ALM/pull/22)
+  requires its own policy rerun after migration.
 - [ ] Review and merge draft PR #22 only with maintainer approval, complete the
   Projects v2/required-check rollout in issue #10 after landing, then move this
   plan to `completed/`.
@@ -146,9 +148,10 @@ issue #11 is also required before merge, while full-tree formatting cleanup rema
 separate in issue #21. This plan remains active through PR review and merge, then
 moves to `completed/`.
 
-Draft PR #22 is mergeable and both its branch-push and pull-request invocations of
-`Project policy / policy-gate` pass. The initial failed PR run is retained as useful
-evidence for the validator regression fixed in `9da5278`.
+Draft PR #22 is mergeable. In the former repository, both its branch-push and
+pull-request invocations of `Project policy / policy-gate` passed at `474a8a1`; the
+initial failed PR run is retained as useful evidence for the validator regression
+fixed in `9da5278`. ALM's recreated draft has not yet recorded its own run.
 
 ## Context and Orientation
 
@@ -280,7 +283,7 @@ migration as complete.
 - Deterministic checks: repository validation scripts, pre-commit, and GitHub Actions
   added by this migration.
 - Tracking/review: GitHub Issues, Project items, pull-request template, CODEOWNERS,
-  [draft PR #22](https://github.com/MartinHaghani/open_mower_ros/pull/22), and
+  [draft PR #22](https://github.com/MartinHaghani/ALM/pull/22), and
   protected-branch settings.
 
 ## Plan Change Log
@@ -293,5 +296,6 @@ migration as complete.
 - 2026-07-15 — Replaced attempted full-tree formatting with a changed-file ratchet,
   tracked inherited debt in issue #21, added the exact legacy-marker register, and
   incorporated independent correctness and documentation review findings.
-- 2026-07-15 — Published draft PR #22, fixed its observed single-digit issue-link
-  validator failure, and verified passing policy gates for both push and PR events.
+- 2026-07-15 — Published the original draft PR #22, fixed its observed single-digit
+  issue-link validator failure, and verified passing policy gates for both push and
+  PR events in the former repository at `474a8a1`.

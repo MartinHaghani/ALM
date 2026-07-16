@@ -35,15 +35,15 @@ Listed in **execution order** (top = do next). IDs are stable per the "do not re
 | – | P0 | Footprint-aware headland | landed | – | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
 | – | P1 | Obstacle-aware swath bridging | landed | – | [COVERAGE_PLANNER_P0_P1_PLAN.md](COVERAGE_PLANNER_P0_P1_PLAN.md) | 5602b8e |
 | – | P11 | BCD critical-vertex decomposition (split at concave outer-boundary vertices, not just hole x-extents) | landed | – | – | 91c4f92 |
-| – | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot; skip-stripe ordering remains) | landed except skip-stripe follow-up | [tracking](https://github.com/MartinHaghani/open_mower_ros/issues/4) | – | 315cf02 |
+| – | P3 | Stripe-to-stripe turn diversity (omega, Y-turn, in-place pivot; skip-stripe ordering remains) | landed except skip-stripe follow-up | [tracking](https://github.com/MartinHaghani/ALM/issues/4) | – | 315cf02 |
 | – | P12 | Robust dominant-direction stripe angle (replace F2C's `best_swath_length` with a weighted edge-angle histogram so noisy real-world outlines pick the visually-dominant axis, not the longest single segment) | landed | – | – | 9ca521f |
 | – | P13 | Per-cell stripe angle for tight cells (cells whose short axis < ~2× tool_width along the global angle should rotate stripes to align with the cell's long axis, eliminating impossible U-turns in narrow slivers like obstacle_off_center paths 10–17) | landed | – | – | 9ca521f |
 | – | P10 | Always-connected base-link path (eliminate teleports between paths) | landed | – | – | 310f63e |
-| 1 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | issue-owned | [#3](https://github.com/MartinHaghani/open_mower_ros/issues/3) | – | – |
-| 2 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | issue-owned | [#4](https://github.com/MartinHaghani/open_mower_ros/issues/4) | – | – |
-| 3 | P4 | FTC-aware execution contract | issue-owned | [#6](https://github.com/MartinHaghani/open_mower_ros/issues/6) | – | – |
-| 4 | P9 | Path smoothing and FTC-truthful preview | issue-owned | [#7](https://github.com/MartinHaghani/open_mower_ros/issues/7) | – | – |
-| 5 | P8 | Stripe-quality regression suite | issue-owned | [#5](https://github.com/MartinHaghani/open_mower_ros/issues/5) | – | – |
+| 1 | P5 | Coverage closes to ≥95% on synthetic maps (multi-headland, stripe overrun, gap-map overlay) | issue-owned | [#3](https://github.com/MartinHaghani/ALM/issues/3) | – | – |
+| 2 | P2 | Stripe aesthetics (single angle, end discipline, blade scheduling, rotation memory, perimeter loop) | issue-owned | [#4](https://github.com/MartinHaghani/ALM/issues/4) | – | – |
+| 3 | P4 | FTC-aware execution contract | issue-owned | [#6](https://github.com/MartinHaghani/ALM/issues/6) | – | – |
+| 4 | P9 | Path smoothing and FTC-truthful preview | issue-owned | [#7](https://github.com/MartinHaghani/ALM/issues/7) | – | – |
+| 5 | P8 | Stripe-quality regression suite | issue-owned | [#5](https://github.com/MartinHaghani/ALM/issues/5) | – | – |
 | – | P6 | Multi-lawn navigation and dock integration | **dropped** (multi-lawn maps are now planned as separate maps; docking is being removed from runtime) | – | – | – |
 | – | P7 | Slope and soft-zone awareness | **deferred** (re-evaluate after the coverage planner is stable; slope adds a variable that is not yet worth tracking) | – | – | – |
 

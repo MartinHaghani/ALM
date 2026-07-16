@@ -27,6 +27,9 @@ repos:
     hooks:
       - id: clang-format
         args: [--style=file,-i]
+        # JSON and JavaScript use their own validators/toolchains. Restricting this
+        # hook prevents schema or WebUI churn when a prose-only field changes.
+        types_or: [c++, c, c#, cuda, java, objective-c, proto]
   - repo: local
     hooks:
       - id: validate-commit-message

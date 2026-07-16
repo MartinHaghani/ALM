@@ -1,6 +1,6 @@
 # Project memory
 
-Purpose: concise startup guidance for Claude Code in this `open_mower_ros` fork.
+Purpose: concise startup guidance for Claude Code in ALM.
 
 Before editing, read `docs/PROJECT_STATE.md`, inspect the current branch/worktree
 and dirty state, and follow the applicable active plan under
@@ -8,7 +8,14 @@ and dirty state, and follow the applicable active plan under
 safety-sensitive work follows `PLANS.md`. GitHub Issues are the authoritative
 outstanding-work tracker; do not create new standalone TODO documents.
 
-This repository is a ROS Noetic catkin workspace fork of `open_mower_ros`. The main orchestration lives in `src/open_mower`, first-party runtime packages live in `src/`, mixed external and submodule code lives in `src/lib/`, structured config lives in `config/`, runtime images live in `docker/`, development containers live in `devenv/` and `.devcontainer/`, shared xBot service definitions live in `services/`, and `web/` is observed built output.
+ALM is a standalone ROS Noetic catkin workspace that historically descends from
+OpenMower. Compatibility-sensitive ROS package, launch, configuration, and
+deployment identifiers remain unchanged unless a separately reviewed migration
+provides a safe transition. The main orchestration lives in `src/open_mower`,
+first-party runtime packages live in `src/`, mixed external and submodule code
+lives in `src/lib/`, structured config lives in `config/`, runtime images live in
+`docker/`, development containers live in `devenv/` and `.devcontainer/`, shared
+xBot service definitions live in `services/`, and `web/` is observed built output.
 
 ## Critical commands
 

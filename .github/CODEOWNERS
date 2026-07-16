@@ -1,4 +1,4 @@
-# The fork owner is the accountable reviewer for safety-sensitive runtime code
+# The ALM maintainer is the accountable reviewer for safety-sensitive runtime code
 # and for the policy/documentation layer that governs autonomous agent work.
 
 # Safety-sensitive mower control and hardware integration.

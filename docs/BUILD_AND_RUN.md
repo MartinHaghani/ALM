@@ -52,13 +52,15 @@ For `MOWER=Mowrator`, the launch flow also starts the battery-voltage CSV logger
 
 ## Configuration note before launching
 
-The current README still points at `src/open_mower/config/mower_config.sh.example`, but that file is now only a redirect stub. The real deprecated shell example lives at:
+The root README and maintained workflows use the real deprecated shell example:
 
 ```bash
 config/mower_config.sh.example
 ```
 
-See [CONFIGURATION.md](CONFIGURATION.md) before relying on legacy shell configuration or OSv2 YAML and env loading.
+The similarly named file under `src/open_mower/config/` is only a compatibility
+redirect. See [CONFIGURATION.md](CONFIGURATION.md) before relying on legacy shell
+configuration or OSv2 YAML and env loading.
 
 ## Development container workflows
 
