@@ -26,6 +26,7 @@ Small factual corrections may be added as dated amendments.
 |---|---|---|
 | [0001](0001-agent-documentation-and-context-model.md) | Accepted | Use a layered, progressively disclosed documentation and context model |
 | [0002](0002-git-autonomy-and-safety-boundary.md) | Accepted | Automate routine Git work while preserving review gates for destructive and safety-sensitive actions |
+| [0003](0003-standalone-alm-project-identity.md) | Accepted | Establish ALM as a standalone project identity while preserving provenance and compatibility |
 
 Use [the ADR template](../templates/adr.md) for new decisions. Allocate the next
 four-digit number without renumbering existing records.

@@ -29,6 +29,7 @@ page cannot see uncommitted changes in another worktree.
 
 | Workstream | Status | Snapshot | Authoritative next-step source |
 |---|---|---|---|
+| Standalone ALM repository migration | active | ALM is the accepted product/repository name; owner and visibility, worktree preservation, GPS submodule publication, and external cutover are outstanding | [issue #23](https://github.com/MartinHaghani/open_mower_ros/issues/23), [ADR 0003](decisions/0003-standalone-alm-project-identity.md), and the [active migration ExecPlan](exec-plans/active/alm-standalone-repository-migration.md) |
 | Agent documentation, context, and Git operating system | active | Draft PR #22 has passing push and pull-request policy gates; the full candidate cohort and external rollout remain | [PR #22](https://github.com/MartinHaghani/open_mower_ros/pull/22), [issue #1](https://github.com/MartinHaghani/open_mower_ros/issues/1), and the [active migration ExecPlan](exec-plans/active/agent-operating-system-migration.md) |
 | Existing coverage planner lab | planned | P0, P1, P3, P10, P11, P12, and P13 are recorded as landed; P5 is the next sequence item | [roadmap](COVERAGE_PLANNER_ROADMAP.md) and [issue #3](https://github.com/MartinHaghani/open_mower_ros/issues/3) |
 | Coverage Planner V2 exploration | planned | M1 evidence and substantial M2.x local prototypes exist; M2 acceptance reconciliation and M3 candidate routing are outstanding | [algorithm status](COVERAGE_PLANNER_V2_ALGORITHM_PLAN.md#current-implementation-status) and [issue #8](https://github.com/MartinHaghani/open_mower_ros/issues/8) |
@@ -48,6 +49,14 @@ names and commits prove that parallel state exists; they do not prove completion
 integration. Inspect `git worktree list --porcelain`, each worktree's status, and its
 branch-local handoff before using or deleting any of them. Do not treat results on
 those branches as part of the baseline until they are reviewed and merged.
+
+The ALM repository cutover in issue #23 is blocked on preservation and dependency
+reachability, not on the name. Origin contains history reachable only through remote
+branch refs, and `src/lib/xbot_driver_gps` is pinned to local commit `bd05076`, which
+is two commits ahead of its GitHub branch and cannot be retrieved by a fresh clone.
+The current tree also retains every path present at the fork point, including 293
+byte-identical files. ALM branding is accepted, but inherited and third-party
+license notices must remain until rights or clean-room provenance prove otherwise.
 
 Tracked rollout gaps are:
 
@@ -71,14 +80,17 @@ linked issue is completed; do not add implementation checklists here.
 
 ## Next Actions
 
-1. Run and record the full pre-merge candidate cohort under
+1. Record whether ALM will live under `MartinHaghani` or an organization and whether
+   it will remain public; then follow the preservation sequence in
+   [issue #23](https://github.com/MartinHaghani/open_mower_ros/issues/23).
+2. Run and record the full pre-merge candidate cohort under
    [issue #11](https://github.com/MartinHaghani/open_mower_ros/issues/11) at an
    immutable reviewed head of [draft PR #22](https://github.com/MartinHaghani/open_mower_ros/pull/22).
-2. Review draft PR #22; preserve its isolated worktree until the PR is merged or
+3. Review draft PR #22; preserve its isolated worktree until the PR is merged or
    explicitly abandoned.
-3. Complete the external Project/required-check rollout in issue #10 after the
+4. Complete the external Project/required-check rollout in issue #10 after the
    workflow lands.
-4. Resume planner and slope work only through their linked issues and active plans;
+5. Resume planner and slope work only through their linked issues and active plans;
    preserve every unmerged worktree until issue #12 proves it is safe to clean.
 
 ## Routing
@@ -92,6 +104,7 @@ linked issue is completed; do not add implementation checklists here.
   [VESC_MAINTENANCE.md](VESC_MAINTENANCE.md).
 - Agent planning policy: [../PLANS.md](../PLANS.md).
 - Durable decisions: [decisions/README.md](decisions/README.md).
+- ALM repository migration: [active ALM ExecPlan](exec-plans/active/alm-standalone-repository-migration.md).
 - Documentation update rules: [DOCS_MAINTENANCE.md](DOCS_MAINTENANCE.md).
 
 ## Refresh Contract
