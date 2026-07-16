@@ -29,7 +29,7 @@ page cannot see uncommitted changes in another worktree.
 
 | Workstream | Status | Snapshot | Authoritative next-step source |
 |---|---|---|---|
-| Agent documentation, context, and Git operating system | active | Local implementation and repository settings are ready for draft review from `329726f`; external rollout remains | [issue #1](https://github.com/MartinHaghani/open_mower_ros/issues/1) and the [active migration ExecPlan](exec-plans/active/agent-operating-system-migration.md) |
+| Agent documentation, context, and Git operating system | active | Draft PR #22 has passing push and pull-request policy gates; the full candidate cohort and external rollout remain | [PR #22](https://github.com/MartinHaghani/open_mower_ros/pull/22), [issue #1](https://github.com/MartinHaghani/open_mower_ros/issues/1), and the [active migration ExecPlan](exec-plans/active/agent-operating-system-migration.md) |
 | Existing coverage planner lab | planned | P0, P1, P3, P10, P11, P12, and P13 are recorded as landed; P5 is the next sequence item | [roadmap](COVERAGE_PLANNER_ROADMAP.md) and [issue #3](https://github.com/MartinHaghani/open_mower_ros/issues/3) |
 | Coverage Planner V2 exploration | planned | M1 evidence and substantial M2.x local prototypes exist; M2 acceptance reconciliation and M3 candidate routing are outstanding | [algorithm status](COVERAGE_PLANNER_V2_ALGORITHM_PLAN.md#current-implementation-status) and [issue #8](https://github.com/MartinHaghani/open_mower_ros/issues/8) |
 | Passive SLAM confidence weighting | planned | No active implementation plan | [issue #2](https://github.com/MartinHaghani/open_mower_ros/issues/2) |
@@ -71,10 +71,11 @@ linked issue is completed; do not add implementation checklists here.
 
 ## Next Actions
 
-1. Publish the reviewed migration branch as a draft PR linked to
-   [issue #1](https://github.com/MartinHaghani/open_mower_ros/issues/1); preserve its
-   isolated worktree until the PR is merged or explicitly abandoned.
-2. Run and record the pre-merge candidate cohort under issue #11.
+1. Run and record the full pre-merge candidate cohort under
+   [issue #11](https://github.com/MartinHaghani/open_mower_ros/issues/11) at an
+   immutable reviewed head of [draft PR #22](https://github.com/MartinHaghani/open_mower_ros/pull/22).
+2. Review draft PR #22; preserve its isolated worktree until the PR is merged or
+   explicitly abandoned.
 3. Complete the external Project/required-check rollout in issue #10 after the
    workflow lands.
 4. Resume planner and slope work only through their linked issues and active plans;

@@ -63,11 +63,15 @@ hardware operations.
   issues #13–#20 capture the newly discovered work.
 - [ ] Run and record the required manual fresh-agent candidate cohort under issue
   #11 before merge.
-- [ ] Prepare and review the draft PR, complete the Projects v2/required-check
-  rollout in issue #10, then move this plan to `completed/` after merge.
+- [x] (2026-07-15) Published [draft PR #22](https://github.com/MartinHaghani/open_mower_ros/pull/22)
+  against the exact `329726f` feature baseline. Both branch-push and pull-request
+  policy gates pass after the single-digit issue-reference regression fix.
+- [ ] Review and merge draft PR #22 only with maintainer approval, complete the
+  Projects v2/required-check rollout in issue #10 after landing, then move this
+  plan to `completed/`.
 
-Exact next action: publish the reviewed migration branch as a draft PR linked to
-issue #1.
+Exact next action: run and record the full candidate cohort from an immutable
+reviewed head of draft PR #22 under issue #11.
 
 ## Surprises & Discoveries
 
@@ -99,6 +103,9 @@ issue #1.
   all-files run exposed inherited formatter and executable-bit debt and attempted
   broad unrelated rewrites. Those side effects were removed, CI now ratchets
   added/modified files, and issue #21 owns deliberate full-tree cleanup.
+- The first PR policy run rejected valid `Refs #1` tracking because a generic prose
+  label helper required eight characters. Commit `9da5278` validates the Issue line
+  by issue-reference syntax and adds the missing single-digit regression case.
 
 ## Decision Log
 
@@ -138,6 +145,10 @@ has landed and passed. Issue #10 owns both steps. The manual candidate cohort in
 issue #11 is also required before merge, while full-tree formatting cleanup remains
 separate in issue #21. This plan remains active through PR review and merge, then
 moves to `completed/`.
+
+Draft PR #22 is mergeable and both its branch-push and pull-request invocations of
+`Project policy / policy-gate` pass. The initial failed PR run is retained as useful
+evidence for the validator regression fixed in `9da5278`.
 
 ## Context and Orientation
 
@@ -269,7 +280,8 @@ migration as complete.
 - Deterministic checks: repository validation scripts, pre-commit, and GitHub Actions
   added by this migration.
 - Tracking/review: GitHub Issues, Project items, pull-request template, CODEOWNERS,
-  draft PR, and protected-branch settings.
+  [draft PR #22](https://github.com/MartinHaghani/open_mower_ros/pull/22), and
+  protected-branch settings.
 
 ## Plan Change Log
 
@@ -281,3 +293,5 @@ migration as complete.
 - 2026-07-15 — Replaced attempted full-tree formatting with a changed-file ratchet,
   tracked inherited debt in issue #21, added the exact legacy-marker register, and
   incorporated independent correctness and documentation review findings.
+- 2026-07-15 — Published draft PR #22, fixed its observed single-digit issue-link
+  validator failure, and verified passing policy gates for both push and PR events.
